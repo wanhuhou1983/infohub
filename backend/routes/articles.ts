@@ -70,20 +70,21 @@ export function createArticlesRoutes(sql: Sql): Hono {
     }
 
     // 合并条件：用 AND 连接所有片段
-    const whereFragment = conditions.length > 0
+    // 每次调用 buildWhere 独立生成 fragment，避免 postgres.js 片段复用问题
+    const buildWhere = () => conditions.length > 0
       ? conditions.reduce((acc, cond) => sql`${acc} AND ${cond}`)
       : sql`1=1`;
 
     const articles = await sql`
       SELECT a.*, s.name AS source_name, s.icon AS source_icon, s.type AS source_type
       FROM articles a LEFT JOIN sources s ON a.source_id = s.id
-      WHERE ${whereFragment}
+      WHERE ${buildWhere()}
       ORDER BY a.published_at DESC LIMIT ${numLimit} OFFSET ${numOffset}
     `;
 
     const countResult = await sql`
       SELECT COUNT(*)::int AS total FROM articles a
-      WHERE ${whereFragment}
+      WHERE ${buildWhere()}
     `;
 
     return c.json({ articles, total: countResult[0]?.total ?? 0 });
@@ -149,6 +150,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
   // 标记已读/未读
   router.patch('/:id/read', async (c) => {
     const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
     const { is_read } = await c.req.json();
     await sql`UPDATE articles SET is_read = ${!!is_read} WHERE id = ${id}`;
     return c.json({ ok: true });
@@ -157,6 +159,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
   // 标记星标
   router.patch('/:id/star', async (c) => {
     const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
     const { is_starred } = await c.req.json();
     await sql`UPDATE articles SET is_starred = ${!!is_starred} WHERE id = ${id}`;
     return c.json({ ok: true });
@@ -166,7 +169,9 @@ export function createArticlesRoutes(sql: Sql): Hono {
   router.post('/mark-all-read', async (c) => {
     const { source_id } = await c.req.json().catch(() => ({}));
     if (source_id) {
-      await sql`UPDATE articles SET is_read = TRUE WHERE source_id = ${Number(source_id)} AND is_read = FALSE`;
+      const sid = Number(source_id);
+      if (isNaN(sid) || sid <= 0) return c.json({ error: 'Invalid source_id' }, 400);
+      await sql`UPDATE articles SET is_read = TRUE WHERE source_id = ${sid} AND is_read = FALSE`;
     } else {
       await sql`UPDATE articles SET is_read = TRUE WHERE is_read = FALSE`;
     }
