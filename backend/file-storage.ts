@@ -7,12 +7,16 @@
  */
 
 import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
+// 兼容 Bun/Node 的 __dirname 替代方案
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ============ 配置 ============
 
-const DATA_DIR = process.env.DATA_DIR || join(import.meta.dir, '..', 'data');
+const DATA_DIR = process.env.DATA_DIR || join(__dirname, '..', 'data');
 const IMGBED_URL = process.env.IMGBED_URL || 'http://localhost:8085/api/';
 const IMGBED_BASE = process.env.IMGBED_BASE || 'http://localhost:8085';
 // 安全：强制从环境变量读取，无默认值
@@ -287,7 +291,8 @@ async function processImages(content: string): Promise<string> {
 
   const imgPattern = /__IMG__(.+?)__IMG__/g;
   const matches = [...content.matchAll(imgPattern)];
-  const mdImgPattern = /!\[.*?\]\((.+?)\)/g;
+  // 捕获组：match[1]=完整 ![alt](，match[2]=alt文本，match[3]=url
+  const mdImgPattern = /(!\[(.*?)\])\((.+?)\)/g;
   const mdMatches = [...content.matchAll(mdImgPattern)];
 
   if (matches.length === 0 && mdMatches.length === 0) return content;
@@ -321,15 +326,15 @@ async function processImages(content: string): Promise<string> {
 
   // 处理 Markdown ![alt](url) 格式（支持任意 alt 文本）
   for (const match of mdMatches) {
-    const originalUrl = match[1]!;
+    const altText = match[2] || '';  // 直接从捕获组取 alt
+    const originalUrl = match[3]!;  // 直接从捕获组取 url
 
     if (originalUrl.startsWith(IMGBED_BASE)) continue;
     if (originalUrl.startsWith('data:')) continue;
 
     const cachedUrl = imgCache.get(originalUrl);
     if (cachedUrl) {
-      // 保留原始 alt 文本
-      result = result.replace(match[0], `![${match[0].match(/!\[(.*?)\]/)?.[1] || ''}](${cachedUrl})`);
+      result = result.replace(match[0], `![${altText}](${cachedUrl})`);
       continue;
     }
 
@@ -338,7 +343,7 @@ async function processImages(content: string): Promise<string> {
       if (imgbedUrl) {
         imgCache.set(originalUrl, imgbedUrl);
         cacheChanged = true;
-        result = result.replace(match[0], `![${match[0].match(/!\[(.*?)\]/)?.[1] || ''}](${imgbedUrl})`);
+        result = result.replace(match[0], `![${altText}](${imgbedUrl})`);
       }
     } catch (e: any) {
       console.error(`图片上传失败 [${originalUrl}]:`, e.message);
@@ -405,6 +410,7 @@ async function uploadToImgbed(imageUrl: string): Promise<string | null> {
 
 /**
  * 更新索引文件 (article_id -> filepath)
+ * 使用原子写入防止并发损坏
  */
 function updateIndex(articleId: number, filePath: string): void {
   const indexPath = join(DATA_DIR, 'index.json');
@@ -420,5 +426,7 @@ function updateIndex(articleId: number, filePath: string): void {
 
   index[String(articleId)] = filePath;
   mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(indexPath, JSON.stringify(index, null, 2), 'utf-8');
+  const tempFile = `${indexPath}.tmp`;
+  writeFileSync(tempFile, JSON.stringify(index, null, 2), 'utf-8');
+  renameSync(tempFile, indexPath);
 }
