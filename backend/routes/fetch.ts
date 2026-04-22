@@ -99,8 +99,12 @@ export function createFetchRoutes(sql: Sql): Hono {
 
       const config = rssSource.config || {};
       const minifluxUrl = config.miniflux_url || process.env.MINIFLUX_URL || 'http://localhost:8084';
-      const minifluxUser = config.miniflux_user || process.env.MINIFLUX_USER || 'admin';
-      const minifluxPass = config.miniflux_pass || process.env.MINIFLUX_PASS || 'miniflux123';
+      const minifluxUser = config.miniflux_user || process.env.MINIFLUX_USER;
+      const minifluxPass = config.miniflux_pass || process.env.MINIFLUX_PASS;
+
+      if (!minifluxUser || !minifluxPass) {
+        return c.json({ error: 'Miniflux 凭证未配置，请设置 MINIFLUX_USER 和 MINIFLUX_PASS 环境变量' }, 400);
+      }
 
       const auth = Buffer.from(`${minifluxUser}:${minifluxPass}`).toString('base64');
       let entriesUrl = `${minifluxUrl}/v1/entries?limit=${Number(limit)}&order=published_at&direction=desc`;

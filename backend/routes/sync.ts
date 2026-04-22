@@ -70,11 +70,13 @@ export function createSyncRoutes(sql: Sql): Hono {
 
     let logs: any[];
     if (source_id) {
+      const sid = Number(source_id);
+      if (isNaN(sid) || sid <= 0) return c.json({ error: 'Invalid source_id' }, 400);
       logs = await sql`
         SELECT fl.*, s.name AS source_name, s.icon AS source_icon
         FROM fetch_logs fl
         LEFT JOIN sources s ON fl.source_id = s.id
-        WHERE fl.source_id = ${Number(source_id)}
+        WHERE fl.source_id = ${sid}
         ORDER BY fl.started_at DESC
         LIMIT ${numLimit}
       `;
