@@ -29,7 +29,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3001',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
-  // 可按需添加生产域名
+  // 生产环境通过反向代理同域访问时 origin 相同，自动允许
 ];
 
 app.use('/api/*', cors({

@@ -135,7 +135,10 @@ tailwind.config = {
 </div>
 
 <script>
-const API = 'http://localhost:3001/api';
+// 动态推断 API 地址：开发环境用同主机:3001，生产环境走反向代理
+const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+  ? `http://${window.location.hostname}:3001/api`
+  : '/api';
 
 let currentTab = 'all';
 let currentCategory = null;

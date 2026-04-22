@@ -6,7 +6,7 @@
  * - 图片缓存持久化到本地 JSON 文件，重启不丢失
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 
@@ -26,6 +26,9 @@ let imgCache = new Map<string, string>();
 // 延迟加载缓存（首次使用时读取）
 let cacheLoaded = false;
 
+// 防抖定时器：合并短时间内多次缓存写入
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
 function ensureCacheLoaded(): void {
   if (cacheLoaded) return;
   cacheLoaded = true;
@@ -40,14 +43,19 @@ function ensureCacheLoaded(): void {
 }
 
 function persistCache(): void {
-  try {
-    const obj: Record<string, string> = {};
-    imgCache.forEach((v, k) => { obj[k] = v; });
-    mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(CACHE_FILE, JSON.stringify(obj), 'utf-8');
-  } catch (e: any) {
-    console.error('图片缓存持久化失败:', e.message);
-  }
+  if (persistTimer) clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    try {
+      const obj = Object.fromEntries(imgCache);
+      mkdirSync(DATA_DIR, { recursive: true });
+      // 原子写入：先写临时文件，再重命名覆盖，防止并发写入损坏
+      const tempFile = `${CACHE_FILE}.tmp`;
+      writeFileSync(tempFile, JSON.stringify(obj), 'utf-8');
+      renameSync(tempFile, CACHE_FILE);
+    } catch (e: any) {
+      console.error('图片缓存持久化失败:', e.message);
+    }
+  }, 1000); // 延迟 1 秒，将这段时间内的变动合并为一次写入
 }
 
 /**
@@ -279,7 +287,7 @@ async function processImages(content: string): Promise<string> {
 
   const imgPattern = /__IMG__(.+?)__IMG__/g;
   const matches = [...content.matchAll(imgPattern)];
-  const mdImgPattern = /!\[\]\((.+?)\)/g;
+  const mdImgPattern = /!\[.*?\]\((.+?)\)/g;
   const mdMatches = [...content.matchAll(mdImgPattern)];
 
   if (matches.length === 0 && mdMatches.length === 0) return content;
@@ -311,7 +319,7 @@ async function processImages(content: string): Promise<string> {
     }
   }
 
-  // 处理 Markdown ![](url) 格式
+  // 处理 Markdown ![alt](url) 格式（支持任意 alt 文本）
   for (const match of mdMatches) {
     const originalUrl = match[1]!;
 
@@ -320,7 +328,8 @@ async function processImages(content: string): Promise<string> {
 
     const cachedUrl = imgCache.get(originalUrl);
     if (cachedUrl) {
-      result = result.replace(match[0], `![](${cachedUrl})`);
+      // 保留原始 alt 文本
+      result = result.replace(match[0], `![${match[0].match(/!\[(.*?)\]/)?.[1] || ''}](${cachedUrl})`);
       continue;
     }
 
@@ -329,7 +338,7 @@ async function processImages(content: string): Promise<string> {
       if (imgbedUrl) {
         imgCache.set(originalUrl, imgbedUrl);
         cacheChanged = true;
-        result = result.replace(match[0], `![](${imgbedUrl})`);
+        result = result.replace(match[0], `![${match[0].match(/!\[(.*?)\]/)?.[1] || ''}](${imgbedUrl})`);
       }
     } catch (e: any) {
       console.error(`图片上传失败 [${originalUrl}]:`, e.message);
