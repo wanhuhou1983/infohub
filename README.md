@@ -20,7 +20,8 @@
 | 后端 | [Hono](https://hono.dev/) + [postgres.js](https://github.com/porsager/postgres) |
 | 数据库 | PostgreSQL (Docker) |
 | 前端 | 纯 HTML + [Tailwind CSS](https://tailwindcss.com/) |
-| 运行时 | [Bun](https://bun.sh/) |
+| 运行时 | [Bun](https://bun.sh/) / Node.js |
+| HTML 解析 | [cheerio](https://cheerio.js.org/) |
 | 图床 | [EasyImages](https://github.com/icret/EasyImages2.0) |
 | RSS | [Miniflux](https://miniflux.app/) |
 
@@ -29,10 +30,17 @@
 ```
 infohub/
 ├── backend/               # Hono 后端
-│   ├── index.ts           # 主服务（API 路由 + 采集逻辑）
+│   ├── index.ts           # 入口 + 路由注册
+│   ├── routes/            # 路由模块
+│   │   ├── articles.ts    # 文章 CRUD + 正文抓取
+│   │   ├── sources.ts     # 信息源管理
+│   │   ├── fetch.ts       # 采集（新闻联播 + RSS）
+│   │   └── sync.ts        # 同步 + 统计 + 日志
+│   ├── services/          # 业务逻辑
+│   │   ├── parser.ts      # HTML 解析（cheerio）
+│   │   └── classifier.ts  # 分类 + 标签提取
 │   ├── file-storage.ts    # 本地文件存储 + 图床上传
-│   ├── db.ts              # 数据库连接 (Drizzle ORM)
-│   ├── schema.ts          # 数据库 Schema 定义
+│   ├── schema.ts          # 数据库 Schema (Drizzle ORM)
 │   ├── init.sql           # 数据库初始化 SQL
 │   └── package.json
 ├── frontend/              # 前端
@@ -41,6 +49,7 @@ infohub/
 │   ├── xwlb/              # 新闻联播文章
 │   ├── rss/               # RSS 文章
 │   ├── wechat/            # 公众号文章
+│   ├── .img_cache.json    # 图片上传缓存
 │   └── index.json         # 文章 ID → 文件路径映射
 └── adapters/              # 适配器（预留）
 ```
@@ -49,7 +58,7 @@ infohub/
 
 ### 前置依赖
 
-- [Bun](https://bun.sh/) >= 1.0
+- [Bun](https://bun.sh/) >= 1.0 或 Node.js >= 18
 - [Docker](https://www.docker.com/) (运行 PostgreSQL)
 - [Miniflux](https://miniflux.app/) (可选，用于 RSS 同步)
 - [EasyImages](https://github.com/icret/EasyImages2.0) (可选，用于图床)
@@ -77,7 +86,7 @@ psql -h localhost -p 5433 -U infohub -d infohub -f init.sql
 
 ```bash
 cp .env.example .env
-# 编辑 .env，填入实际配置
+# 编辑 .env，填入实际配置（IMGBED_TOKEN 为必填项）
 ```
 
 ### 4. 安装依赖 & 启动
@@ -85,7 +94,7 @@ cp .env.example .env
 ```bash
 cd backend
 bun install
-bun run index.ts
+bun run dev
 ```
 
 后端默认运行在 `http://localhost:3001`。
@@ -96,17 +105,17 @@ bun run index.ts
 
 ## 环境变量
 
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `DATABASE_URL` | PostgreSQL 连接串 | `postgres://infohub:infohub123@localhost:5433/infohub` |
-| `PORT` | 后端服务端口 | `3001` |
-| `DATA_DIR` | 本地文章存储目录 | `../data` |
-| `IMGBED_URL` | 图床 API 地址 | `http://localhost:8085/api/` |
-| `IMGBED_BASE` | 图床基础 URL | `http://localhost:8085` |
-| `IMGBED_TOKEN` | 图床 API Token | - |
-| `MINIFLUX_URL` | Miniflux 地址 | `http://localhost:8084` |
-| `MINIFLUX_USER` | Miniflux 用户名 | `admin` |
-| `MINIFLUX_PASS` | Miniflux 密码 | `miniflux123` |
+| 变量 | 说明 | 必填 | 默认值 |
+|------|------|------|--------|
+| `DATABASE_URL` | PostgreSQL 连接串 | ✅ | - |
+| `PORT` | 后端服务端口 | ❌ | `3001` |
+| `DATA_DIR` | 本地文章存储目录 | ❌ | `../data` |
+| `IMGBED_URL` | 图床 API 地址 | ❌ | `http://localhost:8085/api/` |
+| `IMGBED_BASE` | 图床基础 URL | ❌ | `http://localhost:8085` |
+| `IMGBED_TOKEN` | 图床 API Token | ✅ | - |
+| `MINIFLUX_URL` | Miniflux 地址 | ❌ | `http://localhost:8084` |
+| `MINIFLUX_USER` | Miniflux 用户名 | ❌ | `admin` |
+| `MINIFLUX_PASS` | Miniflux 密码 | ❌ | `miniflux123` |
 
 ## API 接口
 
@@ -134,12 +143,12 @@ bun run index.ts
 | POST | `/api/fetch/xwlb` | 采集新闻联播 |
 | POST | `/api/fetch/rss` | 同步 RSS（Miniflux） |
 
-### 其他
+### 同步 & 统计
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/stats` | 统计信息 |
-| GET | `/api/fetch-logs` | 采集日志 |
+| GET | `/api/sync/stats` | 统计信息 |
+| GET | `/api/sync/logs` | 采集日志 |
 | POST | `/api/sync/files` | 全量同步 DB → 本地文件 |
 
 ## 本地文件存储
@@ -161,6 +170,13 @@ tags: ["经济", "政策"]
 
 正文内容...
 ```
+
+## 安全注意事项
+
+- **图床 Token**：`IMGBED_TOKEN` 为必填环境变量，无默认值，不会泄露到代码仓库
+- **CORS**：仅允许指定域名访问 API，非全开放
+- **SQL 注入**：所有查询使用 `postgres.js` 参数化模板，不使用 `sql.unsafe()`
+- **.env**：已被 `.gitignore` 排除，不会进入版本控制
 
 ## License
 

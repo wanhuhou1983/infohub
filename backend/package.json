@@ -1,16 +1,19 @@
 {
-  "name": "backend",
+  "name": "infohub-backend",
   "module": "index.ts",
   "type": "module",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "scripts": {
+    "dev": "bun run index.ts",
+    "start": "bun run index.ts"
   },
-  "peerDependencies": {
+  "devDependencies": {
+    "@types/node": "^22.0.0",
     "typescript": "^5"
   },
   "dependencies": {
     "@hono/node-server": "^2.0.0",
+    "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.14",
