@@ -4,11 +4,12 @@
 CREATE TABLE IF NOT EXISTS sources (
     id          SERIAL PRIMARY KEY,
     name        VARCHAR(100) NOT NULL,
-    type        VARCHAR(20)  NOT NULL,     -- xwlb / rss / wechat / news / web / aggregation / import
+    type        VARCHAR(20)  NOT NULL,     -- xwlb / rss / wechat / magazine / news / web / aggregation / import
     icon        VARCHAR(10)  DEFAULT '',
     description TEXT,
     config      JSONB        DEFAULT '{}',
     enabled     BOOLEAN      DEFAULT TRUE,
+    parent_id   INT          REFERENCES sources(id) ON DELETE CASCADE,
     last_fetch  TIMESTAMP,
     created_at  TIMESTAMP    DEFAULT NOW(),
     updated_at  TIMESTAMP    DEFAULT NOW()
@@ -54,7 +55,17 @@ CREATE TABLE IF NOT EXISTS fetch_logs (
     duration_ms INT
 );
 
--- 初始化新闻联播信息源
+-- 初始化顶级信息源
 INSERT INTO sources (name, type, icon, description, config) VALUES
-    ('新闻联播', 'xwlb', '📺', 'CCTV 官网每日文字稿', '{"schedule": "0 20 * * *", "source_url": "https://tv.cctv.com/lm/xwlb/day/"}')
+    ('新闻联播', 'xwlb', '📺', 'CCTV 官网每日文字稿', '{"schedule": "0 20 * * *", "source_url": "https://tv.cctv.com/lm/xwlb/day/"}'),
+    ('RSS订阅', 'rss', '📡', 'Miniflux RSS 聚合', '{}'),
+    ('微信公众号', 'wechat', '💬', '微信公众号文章', '{}'),
+    ('报刊杂志', 'magazine', '📰', '报刊杂志精选', '{}')
+ON CONFLICT DO NOTHING;
+
+-- 初始化子信息源：财新周刊（报刊杂志下的子源）
+INSERT INTO sources (name, type, icon, description, config, parent_id)
+SELECT '财新周刊', 'magazine', '🗞️', '财新周刊深度报道',
+       '{"schedule": "0 8 * * 1", "source_type": "caixin"}', s.id
+FROM sources s WHERE s.type = 'magazine' AND s.parent_id IS NULL LIMIT 1
 ON CONFLICT DO NOTHING;

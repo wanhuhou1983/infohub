@@ -13,6 +13,9 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import postgres from 'postgres';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
@@ -41,6 +44,20 @@ app.use('/api/*', cors({
   allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowHeaders: ['Content-Type'],
 }));
+
+// ============ 前端静态文件 ============
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FRONTEND_DIR = join(__dirname, '..', 'frontend');
+
+app.get('/', (c) => {
+  const indexPath = join(FRONTEND_DIR, 'index.html');
+  if (existsSync(indexPath)) {
+    const html = readFileSync(indexPath, 'utf-8');
+    return c.html(html);
+  }
+  return c.text('InfoHub frontend not found', 404);
+});
 
 // ============ 注册路由 ============
 

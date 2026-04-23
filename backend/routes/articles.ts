@@ -40,7 +40,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
 
     // source_id 过滤
     if (sourceIds.length > 0) {
-      conditions.push(sql`a.source_id IN (${sql(sourceIds.map(String))})`);
+      conditions.push(sql`a.source_id = ANY(${sourceIds}::int[])`);
     }
 
     // 搜索
