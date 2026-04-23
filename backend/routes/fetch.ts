@@ -253,7 +253,7 @@ export function createFetchRoutes(sql: Sql): Hono {
     }
   });
 
-  // ============ 微信公众号同步（复用 Miniflux） ============
+  // ============ 微信公众号同步（使用 WeFlow API） ============
 
   router.post('/wechat', async (c) => {
     const startMs = Date.now();
@@ -263,103 +263,99 @@ export function createFetchRoutes(sql: Sql): Hono {
       if (!wechatSource) return c.json({ error: '微信公众号信息源未配置' }, 400);
 
       const config = wechatSource.config || {};
-      const minifluxUrl = config.miniflux_url || process.env.MINIFLUX_URL || 'http://localhost:8084';
-      const minifluxUser = config.miniflux_user || process.env.MINIFLUX_USER;
-      const minifluxPass = config.miniflux_pass || process.env.MINIFLUX_PASS;
+      // 从配置中读取公众号名称过滤列表
+      const wechatAccounts = config.wechat_accounts || [];
+      
+      const weflowUrl = config.weflow_url || 'http://localhost:5031';
+      const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN || '3ec6f66be8234004882d7eab6ff1d2c3';
 
-      if (!minifluxUser || !minifluxPass) {
-        return c.json({ error: 'Miniflux 凭证未配置，请设置 MINIFLUX_USER 和 MINIFLUX_PASS 环境变量' }, 400);
-      }
-
-      const auth = Buffer.from(`${minifluxUser}:${minifluxPass}`).toString('base64');
-
-      // 获取所有 wechat 子源的 miniflux_feed_id
-      const wechatFeeds = await sql`
-        SELECT id, name, config->>'miniflux_feed_id' AS mf_feed_id FROM sources
-        WHERE type = 'wechat' AND parent_id = ${wechatSource.id} AND config->>'miniflux_feed_id' IS NOT NULL
-      `;
-
-      if (wechatFeeds.length === 0) {
-        return c.json({ ok: true, fetched: 0, inserted: 0, message: '没有公众号子源' });
-      }
-
-      // 构建 feed_id → source_id 映射
-      const feedSourceMap = new Map<number, number>();
-      const validFeedIds = new Set<number>();
-      for (const f of wechatFeeds) {
-        if (f.mf_feed_id) {
-          const mfId = Number(f.mf_feed_id);
-          feedSourceMap.set(mfId, f.id);
-          validFeedIds.add(mfId);
-        }
-      }
-
-      // 获取全部最近条目，然后只处理 wechat feed 的
-      // 🔒 修复：limit 参数化，支持调用方传入（默认 200，上限 500）
-      // 注：config 为 null 时 Number(undefined)=NaN，NaN||200 回退到 200，行为安全
-      const wechatLimit = Math.min(Math.max(Number(wechatSource.config?.wechat_limit) || 200, 1), 500);
-      let entriesUrl = `${minifluxUrl}/v1/entries?limit=${wechatLimit}&order=published_at&direction=desc`;
-
-      const response = await fetch(entriesUrl, {
-        headers: { 'Authorization': `Basic ${auth}` },
+      // 1. 获取 WeFlow 公众号列表
+      const feedsResponse = await fetch(`${weflowUrl}/api/v1/feeds`, {
+        headers: { 'Authorization': `Bearer ${weflowToken}` },
       });
-      if (!response.ok) throw new Error(`Miniflux API 返回 ${response.status}`);
+      if (!feedsResponse.ok) throw new Error(`WeFlow API 返回 ${feedsResponse.status}`);
+      const feedsData = await feedsResponse.json() as any;
+      const allFeeds = feedsData.feeds || [];
 
-      const data = await response.json() as any;
-      const allEntries = data.entries || [];
+      // 2. 根据配置的公众号名称过滤
+      const targetFeeds = wechatAccounts.length > 0
+        ? allFeeds.filter((f: any) => wechatAccounts.includes(f.nickname))
+        : allFeeds;
 
-      // 过滤出 wechat feed 的条目
-      const entries = allEntries.filter((e: any) => e.feed?.id && validFeedIds.has(e.feed.id));
-
-      // 批量预查 source name
-      const sourceIds = [...feedSourceMap.values()];
-      const sourceRows = sourceIds.length > 0
-        ? await sql`SELECT id, name FROM sources WHERE id = ANY(${sourceIds}::int[])`
-        : [];
-      const sourceNameMap = new Map<number, string>();
-      for (const row of sourceRows) {
-        sourceNameMap.set(row.id, row.name);
+      if (targetFeeds.length === 0) {
+        return c.json({ ok: true, fetched: 0, inserted: 0, message: '没有匹配的公众号' });
       }
 
+      // 3. 获取每个公众号的最新消息
+      let totalFetched = 0;
       let inserted = 0;
-      for (const entry of entries) {
+
+      for (const feed of targetFeeds) {
         try {
-          const mfFeedId = entry.feed?.id;
-          const sourceId = mfFeedId ? feedSourceMap.get(mfFeedId) : null;
-          if (!sourceId) continue;
+          // 获取该公众号的最新消息
+          const msgsResponse = await fetch(`${weflowUrl}/api/v1/feeds/${feed.id}/messages?limit=20`, {
+            headers: { 'Authorization': `Bearer ${weflowToken}` },
+          });
+          if (!msgsResponse.ok) continue;
+          
+          const msgsData = await msgsResponse.json() as any;
+          const messages = msgsData.messages || [];
 
-          const title = entry.title || '无标题';
-          const url = entry.url || '';
-          const content = cleanHtmlToText(entry.content || entry.description || '');
-          const publishedAt = entry.published_at || new Date().toISOString();
-          const author = entry.author || '';
-          const feedTitle = sourceNameMap.get(sourceId) || '';
+          for (const msg of messages) {
+            try {
+              // 从 rawContent XML 中提取文章 URL
+              const rawContent = msg.rawContent || '';
+              const urlMatch = rawContent.match(/<url><!\[CDATA\[(.*?)\]\]><\/url>/);
+              if (!urlMatch) continue;
+              
+              const articleUrl = urlMatch[1];
+              if (!articleUrl || !articleUrl.includes('mp.weixin.qq.com')) continue;
 
-          const category = classifyByFeed(feedTitle);
-          const tags = extractTags(title + ' ' + content.slice(0, 200), feedTitle);
+              const title = msg.title || feed.nickname;
+              const publishedAt = msg.createTime ? new Date(msg.createTime * 1000).toISOString() : new Date().toISOString();
+              const author = feed.nickname;
 
-          const contentHash = hashString(url || (title + 'wechat'));
-          const insertedRows = await sql`
-            INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-            VALUES (${sourceId}, ${title}, ${content}, ${content.slice(0, 150)}, ${url}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
-            ON CONFLICT (content_hash) DO NOTHING
-            RETURNING id
-          `;
-          // 🐛 修复：只有真正插入才计数
-          if (insertedRows.length > 0) {
-            inserted++;
-            const newId = insertedRows[0]!.id;
-            const { processedContent } = await saveArticleFile(newId, content, {
-              id: newId, title, source_type: 'wechat',
-              source_name: feedTitle, url, published_at: publishedAt,
-              category, tags, author, is_read: false, is_starred: false,
-            });
-            if (processedContent !== content) {
-              await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${newId}`;
+              // 简单内容：实际内容需要用 wechat-article-spider 抓取
+              const content = `${title}\n\n来源：${feed.nickname}\n链接：${articleUrl}`;
+              const contentHash = hashString(articleUrl);
+
+              // 查找或创建公众号子源
+              let [sourceRow] = await sql`
+                SELECT id FROM sources WHERE type = 'wechat' AND parent_id = ${wechatSource.id} AND name = ${feed.nickname}
+              `;
+              
+              if (!sourceRow) {
+                const [newSource] = await sql`
+                  INSERT INTO sources (name, type, parent_id, config, created_at)
+                  VALUES (${feed.nickname}, 'wechat', ${wechatSource.id}, ${JSON.stringify({ weflow_id: feed.id })}, NOW())
+                  RETURNING id
+                `;
+                sourceRow = newSource;
+              }
+
+              const insertedRows = await sql`
+                INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
+                VALUES (${sourceRow.id}, ${title}, ${content}, ${title}, ${articleUrl}, ${publishedAt}, '科技', '', ${contentHash}, NOW(), ${author})
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING id
+              `;
+
+              if (insertedRows.length > 0) {
+                inserted++;
+                const newId = insertedRows[0]!.id;
+                await saveArticleFile(newId, content, {
+                  id: newId, title, source_type: 'wechat',
+                  source_name: feed.nickname, url: articleUrl, published_at: publishedAt,
+                  category: '科技', tags: '', author, is_read: false, is_starred: false,
+                });
+              }
+              totalFetched++;
+            } catch (e: any) {
+              if (e.code !== '23505') console.error('Wechat article error:', e.message);
             }
           }
         } catch (e: any) {
-          if (e.code !== '23505') console.error('Wechat insert error:', e.message);
+          console.error(`WeFlow feed ${feed.nickname} error:`, e.message);
         }
       }
 
@@ -367,10 +363,10 @@ export function createFetchRoutes(sql: Sql): Hono {
       const durationMs = Date.now() - startMs;
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
-        VALUES (${wechatSource.id}, '公众号同步', 'success', ${inserted}, ${`同步 ${entries.length} 条公众号文章，入库 ${inserted} 条`}, ${durationMs})
+        VALUES (${wechatSource.id}, '公众号同步', 'success', ${inserted}, ${`WeFlow 同步 ${targetFeeds.length} 个公众号，获取 ${totalFetched} 条，入库 ${inserted} 条`}, ${durationMs})
       `;
 
-      return c.json({ ok: true, fetched: entries.length, inserted });
+      return c.json({ ok: true, fetched: totalFetched, inserted, accounts: targetFeeds.length });
     } catch (e: any) {
       const durationMs = Date.now() - startMs;
       const [wechatSource] = await sql`SELECT id FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
