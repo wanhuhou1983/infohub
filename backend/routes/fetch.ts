@@ -8,9 +8,94 @@
 
 import { Hono } from 'hono';
 import type { Sql } from 'postgres';
-import { saveArticleFile, hashString } from '../file-storage.js';
+import { saveArticleFile, hashString, processImages } from '../file-storage.js';
 import { parseXWLBListHtml, cleanHtmlToText } from '../services/parser.js';
 import { classifyByTitle, classifyByFeed, extractTags, extractXWLBTags } from '../services/classifier.js';
+import { spawn } from 'child_process';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const SPIDER_DIR = path.resolve(__dirname, '../../../../wechat-article-spider');
+
+// ============ 辅助函数：调用 wechat-article-spider 抓取正文 ============
+async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
+  return new Promise((resolve) => {
+    const outputDir = path.join(SPIDER_DIR, 'docs');
+    
+    // 使用 python3
+    const pythonCmd = 'python3';
+    const args = ['main.py', articleUrl, outputDir];
+    
+    const proc = spawn(pythonCmd, args, {
+      cwd: path.join(SPIDER_DIR, 'scripts'),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    
+    let stdout = '';
+    let stderr = '';
+    
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    
+    proc.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`Wechat spider error: ${stderr}`);
+        resolve(null);
+        return;
+      }
+      
+      // 解析输出的 markdown 文件
+      // 查找最新的 .md 文件
+      try {
+        const fs = require('fs');
+        const files = fs.readdirSync(outputDir).filter(f => f.endsWith('.md'));
+        if (files.length === 0) {
+          resolve(null);
+          return;
+        }
+        
+        // 按修改时间排序，取最新的
+        files.sort((a: string, b: string) => {
+          const statA = fs.statSync(path.join(outputDir, a));
+          const statB = fs.statSync(path.join(outputDir, b));
+          return statB.mtime.getTime() - statA.mtime.getTime();
+        });
+        
+        const latestFile = files[0];
+        const content = fs.readFileSync(path.join(outputDir, latestFile), 'utf-8');
+        
+        // 去掉 frontmatter
+        let body = content;
+        if (content.startsWith('---')) {
+          const endIdx = content.indexOf('---', 3);
+          if (endIdx > 0) {
+            body = content.slice(endIdx + 3).trim();
+          }
+        }
+        
+        // 提取标题（第一行 # 开头）
+        let title = '';
+        let restContent = body;
+        const titleMatch = body.match(/^#\s+(.+)$/m);
+        if (titleMatch) {
+          title = titleMatch[1];
+          restContent = body.replace(/^#\s+.+$/m, '').trim();
+        }
+        
+        resolve({
+          title: title || '无标题',
+          content: restContent,
+          author: '',
+          publishDate: '',
+        });
+      } catch (e: any) {
+        console.error(`Parse markdown error: ${e.message}`);
+        resolve(null);
+      }
+    });
+  });
+}
 
 export function createFetchRoutes(sql: Sql): Hono {
   const router = new Hono();
@@ -311,12 +396,6 @@ export function createFetchRoutes(sql: Sql): Hono {
               const articleUrl = urlMatch[1];
               if (!articleUrl || !articleUrl.includes('mp.weixin.qq.com')) continue;
 
-              const title = msg.title || feed.nickname;
-              const publishedAt = msg.createTime ? new Date(msg.createTime * 1000).toISOString() : new Date().toISOString();
-              const author = feed.nickname;
-
-              // 简单内容：实际内容需要用 wechat-article-spider 抓取
-              const content = `${title}\n\n来源：${feed.nickname}\n链接：${articleUrl}`;
               const contentHash = hashString(articleUrl);
 
               // 查找或创建公众号子源
@@ -333,9 +412,36 @@ export function createFetchRoutes(sql: Sql): Hono {
                 sourceRow = newSource;
               }
 
+              // 检查是否已存在
+              const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+              if (existing) {
+                totalFetched++;
+                continue;
+              }
+
+              // 🔥 用 wechat-article-spider 抓取正文
+              console.log(`🤖 抓取文章: ${articleUrl}`);
+              const article = await crawlWechatArticle(articleUrl);
+              
+              const title = article?.title || msg.title || feed.nickname;
+              const publishedAt = msg.createTime ? new Date(msg.createTime * 1000).toISOString() : new Date().toISOString();
+              const author = article?.author || feed.nickname;
+              
+              // 处理图片并上传到图床
+              let content = article?.content || `${title}\n\n来源：${feed.nickname}\n链接：${articleUrl}`;
+              try {
+                content = await processImages(content, {
+                  id: 0, title, source_type: 'wechat',
+                  source_name: feed.nickname, url: articleUrl, published_at: publishedAt,
+                  category: '科技', tags: '', author, is_read: false, is_starred: false,
+                });
+              } catch (e: any) {
+                console.error(`Process images error: ${e.message}`);
+              }
+
               const insertedRows = await sql`
                 INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-                VALUES (${sourceRow.id}, ${title}, ${content}, ${title}, ${articleUrl}, ${publishedAt}, '科技', '', ${contentHash}, NOW(), ${author})
+                VALUES (${sourceRow.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${articleUrl}, ${publishedAt}, '科技', '', ${contentHash}, NOW(), ${author})
                 ON CONFLICT (content_hash) DO NOTHING
                 RETURNING id
               `;

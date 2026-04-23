@@ -318,7 +318,7 @@ function buildMarkdown(content: string, meta: ArticleMeta): string {
  * 处理内容中的图片：上传到 EasyImages 图床，替换为图床 URL
  * 🔒 修复：先收集所有唯一 URL，批量处理后用全局正则替换
  */
-async function processImages(content: string): Promise<string> {
+export async function processImages(content: string): Promise<string> {
   ensureCacheLoaded();
 
   // 收集所有需要处理的图片 URL
