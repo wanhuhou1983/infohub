@@ -70,21 +70,21 @@ export function createArticlesRoutes(sql: Sql): Hono {
     }
 
     // 合并条件：用 AND 连接所有片段
-    // 每次调用 buildWhere 独立生成 fragment，避免 postgres.js 片段复用问题
-    const buildWhere = () => conditions.length > 0
+    // 🔒 修复：缓存 buildWhere 结果，避免多次调用生成不同参数编号
+    const whereClause = conditions.length > 0
       ? conditions.reduce((acc, cond) => sql`${acc} AND ${cond}`)
       : sql`1=1`;
 
     const articles = await sql`
       SELECT a.*, s.name AS source_name, s.icon AS source_icon, s.type AS source_type
       FROM articles a LEFT JOIN sources s ON a.source_id = s.id
-      WHERE ${buildWhere()}
+      WHERE ${whereClause}
       ORDER BY a.published_at DESC LIMIT ${numLimit} OFFSET ${numOffset}
     `;
 
     const countResult = await sql`
       SELECT COUNT(*)::int AS total FROM articles a
-      WHERE ${buildWhere()}
+      WHERE ${whereClause}
     `;
 
     return c.json({ articles, total: countResult[0]?.total ?? 0 });

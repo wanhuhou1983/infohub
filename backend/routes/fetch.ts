@@ -47,9 +47,9 @@ export function createFetchRoutes(sql: Sql): Hono {
             ON CONFLICT (content_hash) DO NOTHING
             RETURNING id
           `;
-          inserted++;
-
+          // 🐛 修复：只有真正插入才计数
           if (insertedRows.length > 0) {
+            inserted++;
             const newId = insertedRows[0]!.id;
             const { processedContent } = await saveArticleFile(newId, '（完整内容请查看原文）', {
               id: newId, title: art.title, source_type: 'xwlb',
@@ -91,6 +91,8 @@ export function createFetchRoutes(sql: Sql): Hono {
 
   router.post('/rss', async (c) => {
     const { feed_id, limit = 100 } = await c.req.json().catch(() => ({}));
+    // 🔒 修复：limit 参数上限校验，防止超大查询
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
     const startMs = Date.now();
 
     try {
@@ -107,7 +109,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       }
 
       const auth = Buffer.from(`${minifluxUser}:${minifluxPass}`).toString('base64');
-      let entriesUrl = `${minifluxUrl}/v1/entries?limit=${Number(limit)}&order=published_at&direction=desc`;
+      let entriesUrl = `${minifluxUrl}/v1/entries?limit=${safeLimit}&order=published_at&direction=desc`;
       if (feed_id) entriesUrl += `&feed_id=${Number(feed_id)}`;
 
       const response = await fetch(entriesUrl, {
@@ -211,9 +213,9 @@ export function createFetchRoutes(sql: Sql): Hono {
             ON CONFLICT (content_hash) DO NOTHING
             RETURNING id
           `;
-          inserted++;
-
+          // 🐛 修复：只有真正插入才计数
           if (insertedRows.length > 0) {
+            inserted++;
             const newId = insertedRows[0]!.id;
             const { processedContent } = await saveArticleFile(newId, content, {
               id: newId, title, source_type: feedType2,
@@ -293,7 +295,9 @@ export function createFetchRoutes(sql: Sql): Hono {
       }
 
       // 获取全部最近条目，然后只处理 wechat feed 的
-      let entriesUrl = `${minifluxUrl}/v1/entries?limit=200&order=published_at&direction=desc`;
+      // 🔒 修复：limit 参数化，支持调用方传入（默认 200，上限 500）
+      const wechatLimit = Math.min(Math.max(Number(wechatSource.config?.wechat_limit) || 200, 1), 500);
+      let entriesUrl = `${minifluxUrl}/v1/entries?limit=${wechatLimit}&order=published_at&direction=desc`;
 
       const response = await fetch(entriesUrl, {
         headers: { 'Authorization': `Basic ${auth}` },
@@ -340,9 +344,9 @@ export function createFetchRoutes(sql: Sql): Hono {
             ON CONFLICT (content_hash) DO NOTHING
             RETURNING id
           `;
-          inserted++;
-
+          // 🐛 修复：只有真正插入才计数
           if (insertedRows.length > 0) {
+            inserted++;
             const newId = insertedRows[0]!.id;
             const { processedContent } = await saveArticleFile(newId, content, {
               id: newId, title, source_type: 'wechat',

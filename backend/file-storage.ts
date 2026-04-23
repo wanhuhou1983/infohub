@@ -33,6 +33,41 @@ let cacheLoaded = false;
 // 防抖定时器：合并短时间内多次缓存写入
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
+// 🔒 index.json 并发保护：使用内存 Map + 防抖持久化
+let indexMap = new Map<string, string>();
+let indexLoaded = false;
+let indexPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+function ensureIndexLoaded(): void {
+  if (indexLoaded) return;
+  indexLoaded = true;
+  const indexPath = join(DATA_DIR, 'index.json');
+  try {
+    if (existsSync(indexPath)) {
+      const data = JSON.parse(readFileSync(indexPath, 'utf-8'));
+      indexMap = new Map(Object.entries(data));
+    }
+  } catch {
+    indexMap = new Map();
+  }
+}
+
+function persistIndex(): void {
+  if (indexPersistTimer) clearTimeout(indexPersistTimer);
+  indexPersistTimer = setTimeout(() => {
+    try {
+      const obj = Object.fromEntries(indexMap);
+      mkdirSync(DATA_DIR, { recursive: true });
+      const indexPath = join(DATA_DIR, 'index.json');
+      const tempFile = `${indexPath}.tmp`;
+      writeFileSync(tempFile, JSON.stringify(obj, null, 2), 'utf-8');
+      renameSync(tempFile, indexPath);
+    } catch (e: any) {
+      console.error('索引持久化失败:', e.message);
+    }
+  }, 1000);
+}
+
 function ensureCacheLoaded(): void {
   if (cacheLoaded) return;
   cacheLoaded = true;
@@ -135,22 +170,16 @@ export async function saveArticleFile(
  * 获取文章的本地文件路径
  */
 export function getArticleFilePath(articleId: number): string | null {
-  const indexPath = join(DATA_DIR, 'index.json');
-  if (!existsSync(indexPath)) return null;
-  try {
-    const index = JSON.parse(readFileSync(indexPath, 'utf-8'));
-    return index[String(articleId)] || null;
-  } catch {
-    return null;
-  }
+  ensureIndexLoaded();
+  const path = indexMap.get(String(articleId));
+  return path && existsSync(path) ? path : null;
 }
 
 /**
  * 检查文章是否已有本地文件
  */
 export function hasArticleFile(articleId: number): boolean {
-  const path = getArticleFilePath(articleId);
-  return path !== null && existsSync(path);
+  return getArticleFilePath(articleId) !== null;
 }
 
 /**
@@ -249,7 +278,9 @@ function sanitizeFilename(meta: ArticleMeta): string {
     ? meta.source_name.replace(/[\/\\:*?"<>|\n\r]/g, '').slice(0, 15)
     : '';
 
-  const parts = sourcePart ? [dateStr, sourcePart, titlePart] : [dateStr, titlePart];
+  // 🔒 修复：加入文章 ID 避免同名文件冲突
+  const idPart = String(meta.id);
+  const parts = sourcePart ? [dateStr, sourcePart, idPart, titlePart] : [dateStr, idPart, titlePart];
   return parts.join('_') + '.md';
 }
 
@@ -285,65 +316,71 @@ function buildMarkdown(content: string, meta: ArticleMeta): string {
 
 /**
  * 处理内容中的图片：上传到 EasyImages 图床，替换为图床 URL
+ * 🔒 修复：先收集所有唯一 URL，批量处理后用全局正则替换
  */
 async function processImages(content: string): Promise<string> {
   ensureCacheLoaded();
 
+  // 收集所有需要处理的图片 URL
   const imgPattern = /__IMG__(.+?)__IMG__/g;
-  const matches = [...content.matchAll(imgPattern)];
-  // 捕获组：match[1]=完整 ![alt](，match[2]=alt文本，match[3]=url
   const mdImgPattern = /(!\[(.*?)\])\((.+?)\)/g;
-  const mdMatches = [...content.matchAll(mdImgPattern)];
 
-  if (matches.length === 0 && mdMatches.length === 0) return content;
-
-  let result = content;
-  let cacheChanged = false;
-
-  // 处理 __IMG__ 格式
-  for (const match of matches) {
+  // 收集 __IMG__ 格式的 URL
+  const imgUrls = new Map<string, string>(); // originalUrl -> replacement
+  for (const match of content.matchAll(imgPattern)) {
     const originalUrl = match[1]!;
-    const cachedUrl = imgCache.get(originalUrl);
-
-    if (cachedUrl) {
-      result = result.replace(match[0], `__IMG__${cachedUrl}__IMG__`);
-      continue;
-    }
-
     if (originalUrl.startsWith(IMGBED_BASE)) continue;
 
+    const cachedUrl = imgCache.get(originalUrl);
+    if (cachedUrl) {
+      imgUrls.set(originalUrl, `__IMG__${cachedUrl}__IMG__`);
+    } else {
+      imgUrls.set(originalUrl, ''); // 标记需要上传
+    }
+  }
+
+  // 收集 Markdown 格式的 URL
+  const mdImgUrls = new Map<string, { alt: string; replacement: string }>();
+  for (const match of content.matchAll(mdImgPattern)) {
+    const altText = match[2] || '';
+    const originalUrl = match[3]!;
+    if (originalUrl.startsWith(IMGBED_BASE) || originalUrl.startsWith('data:')) continue;
+
+    const cachedUrl = imgCache.get(originalUrl);
+    if (cachedUrl) {
+      mdImgUrls.set(originalUrl, { alt: altText, replacement: `![${altText}](${cachedUrl})` });
+    } else {
+      mdImgUrls.set(originalUrl, { alt: altText, replacement: '' }); // 标记需要上传
+    }
+  }
+
+  if (imgUrls.size === 0 && mdImgUrls.size === 0) return content;
+
+  let cacheChanged = false;
+
+  // 上传未缓存的图片
+  for (const [originalUrl, replacement] of imgUrls) {
+    if (replacement) continue; // 已有缓存
     try {
       const imgbedUrl = await uploadToImgbed(originalUrl);
       if (imgbedUrl) {
         imgCache.set(originalUrl, imgbedUrl);
         cacheChanged = true;
-        result = result.replace(match[0], `__IMG__${imgbedUrl}__IMG__`);
+        imgUrls.set(originalUrl, `__IMG__${imgbedUrl}__IMG__`);
       }
     } catch (e: any) {
       console.error(`图片上传失败 [${originalUrl}]:`, e.message);
     }
   }
 
-  // 处理 Markdown ![alt](url) 格式（支持任意 alt 文本）
-  for (const match of mdMatches) {
-    const altText = match[2] || '';  // 直接从捕获组取 alt
-    const originalUrl = match[3]!;  // 直接从捕获组取 url
-
-    if (originalUrl.startsWith(IMGBED_BASE)) continue;
-    if (originalUrl.startsWith('data:')) continue;
-
-    const cachedUrl = imgCache.get(originalUrl);
-    if (cachedUrl) {
-      result = result.replace(match[0], `![${altText}](${cachedUrl})`);
-      continue;
-    }
-
+  for (const [originalUrl, data] of mdImgUrls) {
+    if (data.replacement) continue; // 已有缓存
     try {
       const imgbedUrl = await uploadToImgbed(originalUrl);
       if (imgbedUrl) {
         imgCache.set(originalUrl, imgbedUrl);
         cacheChanged = true;
-        result = result.replace(match[0], `![${altText}](${imgbedUrl})`);
+        mdImgUrls.set(originalUrl, { alt: data.alt, replacement: `![${data.alt}](${imgbedUrl})` });
       }
     } catch (e: any) {
       console.error(`图片上传失败 [${originalUrl}]:`, e.message);
@@ -353,7 +390,27 @@ async function processImages(content: string): Promise<string> {
   // 持久化缓存
   if (cacheChanged) persistCache();
 
+  // 全局替换
+  let result = content;
+  for (const [originalUrl, replacement] of imgUrls) {
+    if (replacement) {
+      const regex = new RegExp(`__IMG__${escapeRegex(originalUrl)}__IMG__`, 'g');
+      result = result.replace(regex, replacement);
+    }
+  }
+  for (const [originalUrl, data] of mdImgUrls) {
+    if (data.replacement) {
+      const regex = new RegExp(`!\\[${escapeRegex(data.alt)}\\]\\(${escapeRegex(originalUrl)}\\)`, 'g');
+      result = result.replace(regex, data.replacement);
+    }
+  }
+
   return result;
+}
+
+// 辅助：转义正则特殊字符
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
@@ -410,23 +467,10 @@ async function uploadToImgbed(imageUrl: string): Promise<string | null> {
 
 /**
  * 更新索引文件 (article_id -> filepath)
- * 使用原子写入防止并发损坏
+ * 🔒 修复：使用内存 Map + 防抖持久化，避免并发竞态
  */
 function updateIndex(articleId: number, filePath: string): void {
-  const indexPath = join(DATA_DIR, 'index.json');
-  let index: Record<string, string> = {};
-
-  if (existsSync(indexPath)) {
-    try {
-      index = JSON.parse(readFileSync(indexPath, 'utf-8'));
-    } catch {
-      index = {};
-    }
-  }
-
-  index[String(articleId)] = filePath;
-  mkdirSync(DATA_DIR, { recursive: true });
-  const tempFile = `${indexPath}.tmp`;
-  writeFileSync(tempFile, JSON.stringify(index, null, 2), 'utf-8');
-  renameSync(tempFile, indexPath);
+  ensureIndexLoaded();
+  indexMap.set(String(articleId), filePath);
+  persistIndex();
 }
