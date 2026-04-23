@@ -296,6 +296,7 @@ export function createFetchRoutes(sql: Sql): Hono {
 
       // 获取全部最近条目，然后只处理 wechat feed 的
       // 🔒 修复：limit 参数化，支持调用方传入（默认 200，上限 500）
+      // 注：config 为 null 时 Number(undefined)=NaN，NaN||200 回退到 200，行为安全
       const wechatLimit = Math.min(Math.max(Number(wechatSource.config?.wechat_limit) || 200, 1), 500);
       let entriesUrl = `${minifluxUrl}/v1/entries?limit=${wechatLimit}&order=published_at&direction=desc`;
 
