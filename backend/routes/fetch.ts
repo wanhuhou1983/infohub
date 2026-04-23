@@ -355,7 +355,8 @@ export function createFetchRoutes(sql: Sql): Hono {
       const wechatAccounts: string[] = config.wechat_accounts || [];
       
       const weflowUrl = (config.weflow_url || process.env.WEFLOW_URL || 'http://127.0.0.1:5031').replace(/\/+$/, '');
-      const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN || '3ec6f66be8234004882d7eab6ff1d2c3';
+      const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN;
+      if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置，请在设置页面或环境变量中填写' }, 400);
       const wechatLimit = Math.min(Math.max(Number(config.wechat_limit) || 5, 1), 50);
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
 
