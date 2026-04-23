@@ -14,6 +14,7 @@ import { classifyByTitle, classifyByFeed, extractTags, extractXWLBTags } from '.
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { readdirSync, statSync, readFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPIDER_DIR = path.resolve(__dirname, '../../../wechat-article-spider');
@@ -46,8 +47,7 @@ async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; 
       // 解析输出的 markdown 文件
       // 查找最新的 .md 文件
       try {
-        const fs = require('fs');
-        const files = fs.readdirSync(outputDir).filter(f => f.endsWith('.md'));
+        const files = readdirSync(outputDir).filter(f => f.endsWith('.md'));
         if (files.length === 0) {
           resolve(null);
           return;
@@ -55,13 +55,13 @@ async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; 
         
         // 按修改时间排序，取最新的
         files.sort((a: string, b: string) => {
-          const statA = fs.statSync(path.join(outputDir, a));
-          const statB = fs.statSync(path.join(outputDir, b));
+          const statA = statSync(path.join(outputDir, a));
+          const statB = statSync(path.join(outputDir, b));
           return statB.mtime.getTime() - statA.mtime.getTime();
         });
         
         const latestFile = files[0];
-        const content = fs.readFileSync(path.join(outputDir, latestFile), 'utf-8');
+        const content = readFileSync(path.join(outputDir, latestFile), 'utf-8');
         
         // 去掉 frontmatter
         let body = content;
@@ -193,7 +193,12 @@ export function createFetchRoutes(sql: Sql): Hono {
 
       const auth = Buffer.from(`${minifluxUser}:${minifluxPass}`).toString('base64');
       let entriesUrl = `${minifluxUrl}/v1/entries?limit=${safeLimit}&order=published_at&direction=desc`;
-      if (feed_id) entriesUrl += `&feed_id=${Number(feed_id)}`;
+      // 🔒 修复：feed_id 参数校验，防止 NaN 注入
+      if (feed_id) {
+        const fid = Number(feed_id);
+        if (isNaN(fid) || fid <= 0) return c.json({ error: 'Invalid feed_id: must be a positive number' }, 400);
+        entriesUrl += `&feed_id=${fid}`;
+      }
 
       const response = await fetch(entriesUrl, {
         headers: { 'Authorization': `Basic ${auth}` },
@@ -442,10 +447,14 @@ export function createFetchRoutes(sql: Sql): Hono {
                 console.error(`图片处理失败: ${e.message}`);
               }
 
+              // 🔒 修复：调用分类器和标签提取器，而非硬编码
+              const category = classifyByFeed(displayName);
+              const tags = extractTags(title + ' ' + content.slice(0, 200), displayName);
+
               // Step 5: 写入数据库
               const insertedRows = await sql`
                 INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-                VALUES (${sourceRow.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${articleUrl}, ${publishedAt}, '科技', ${[] as string[]}, ${contentHash}, NOW(), ${author})
+                VALUES (${sourceRow.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${articleUrl}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
                 ON CONFLICT (content_hash) DO NOTHING
                 RETURNING id
               `;
@@ -456,7 +465,7 @@ export function createFetchRoutes(sql: Sql): Hono {
                 await saveArticleFile(newId, content, {
                   id: newId, title, source_type: 'wechat',
                   source_name: displayName, url: articleUrl, published_at: publishedAt,
-                  category: '科技', tags: '', author, is_read: false, is_starred: false,
+                  category, tags, author, is_read: false, is_starred: false,
                 });
               }
               totalFetched++;

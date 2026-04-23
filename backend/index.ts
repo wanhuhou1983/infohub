@@ -38,8 +38,8 @@ const ALLOWED_ORIGINS = [
 app.use('/api/*', cors({
   origin: (origin) => {
     // 允许无 origin 的请求（如同源、curl）
-    if (!origin) return '';
-    return ALLOWED_ORIGINS.includes(origin) ? origin : '';
+    if (!origin) return null;
+    return ALLOWED_ORIGINS.includes(origin) ? origin : null;
   },
   allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   allowHeaders: ['Content-Type'],
