@@ -17,10 +17,32 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ============ 配置 ============
 
 const DATA_DIR = process.env.DATA_DIR || join(__dirname, '..', 'data');
-const IMGBED_URL = process.env.IMGBED_URL || 'http://localhost:8085/api/';
-const IMGBED_BASE = process.env.IMGBED_BASE || 'http://localhost:8085';
+
+// 运行时配置：优先从 .env.json 读取，其次 process.env
+let _envConfig: Record<string, string> | null = null;
+
+function getEnvConfig(): Record<string, string> {
+  if (!_envConfig) {
+    try {
+      const envFile = join(__dirname, '..', '.env.json');
+      if (existsSync(envFile)) {
+        _envConfig = JSON.parse(readFileSync(envFile, 'utf-8'));
+      }
+    } catch { /* ignore */ }
+    _envConfig = _envConfig || {};
+  }
+  return _envConfig;
+}
+
+function envOrFile(key: string, fallback: string): string {
+  const fileVal = getEnvConfig()[key];
+  return fileVal || process.env[key] || fallback;
+}
+
+const IMGBED_URL = envOrFile('IMGBED_URL', 'http://localhost:8085/api/');
+const IMGBED_BASE = envOrFile('IMGBED_BASE', 'http://localhost:8085');
 // 安全：强制从环境变量读取，无默认值
-const IMGBED_TOKEN = process.env.IMGBED_TOKEN ?? '';
+const IMGBED_TOKEN = envOrFile('IMGBED_TOKEN', '');
 const CACHE_FILE = join(DATA_DIR, '.img_cache.json');
 
 // 图片 URL 缓存：远程 URL -> 图床 URL

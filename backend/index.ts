@@ -13,7 +13,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import postgres from 'postgres';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -57,6 +57,67 @@ app.get('/', (c) => {
     return c.html(html);
   }
   return c.text('InfoHub frontend not found', 404);
+});
+
+// ============ 运行时环境配置（.env.json） ============
+
+const ENV_FILE = join(__dirname, '..', '.env.json');
+
+function loadEnvConfig(): Record<string, string> {
+  try {
+    if (existsSync(ENV_FILE)) return JSON.parse(readFileSync(ENV_FILE, 'utf-8'));
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveEnvConfig(config: Record<string, string>): void {
+  writeFileSync(ENV_FILE, JSON.stringify(config, null, 2), 'utf-8');
+}
+
+// 获取环境配置（合并 .env.json + process.env，.env.json 优先用于非敏感项）
+app.get('/api/sources/config/env', (c) => {
+  const fileConfig = loadEnvConfig();
+  return c.json({
+    imgbed_url: fileConfig.IMGBED_URL || process.env.IMGBED_URL || '',
+    imgbed_base: fileConfig.IMGBED_BASE || process.env.IMGBED_BASE || '',
+    imgbed_token: fileConfig.IMGBED_TOKEN ? '******' : '',  // 不暴露已有 token
+    weflow_url: fileConfig.WEFLOW_URL || process.env.WEFLOW_URL || '',
+    weflow_token: fileConfig.WEFLOW_TOKEN ? '******' : '',
+    miniflux_url: fileConfig.MINIFLUX_URL || process.env.MINIFLUX_URL || '',
+    miniflux_user: fileConfig.MINIFLUX_USER || process.env.MINIFLUX_USER || '',
+  });
+});
+
+// 更新环境配置（写入 .env.json，同时更新 process.env 使其立即生效）
+app.patch('/api/sources/config/env', (c) => {
+  return c.req.json().then(async (body: any) => {
+    if (!body || typeof body !== 'object') return c.json({ error: 'Invalid body' }, 400);
+
+    const fileConfig = loadEnvConfig();
+
+    // 映射前端字段名到环境变量名
+    const mapping: Record<string, string> = {
+      imgbed_url: 'IMGBED_URL',
+      imgbed_base: 'IMGBED_BASE',
+      imgbed_token: 'IMGBED_TOKEN',
+      weflow_url: 'WEFLOW_URL',
+      weflow_token: 'WEFLOW_TOKEN',
+      miniflux_url: 'MINIFLUX_URL',
+      miniflux_user: 'MINIFLUX_USER',
+      miniflux_pass: 'MINIFLUX_PASS',
+    };
+
+    for (const [key, envKey] of Object.entries(mapping)) {
+      if (body[key] !== undefined && body[key] !== '******') {
+        const val = String(body[key]);
+        fileConfig[envKey] = val;
+        process.env[envKey] = val;  // 立即生效
+      }
+    }
+
+    saveEnvConfig(fileConfig);
+    return c.json({ ok: true });
+  }).catch(() => c.json({ error: 'Invalid JSON' }, 400));
 });
 
 // ============ 注册路由 ============

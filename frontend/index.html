@@ -52,6 +52,98 @@ tailwind.config = {
 </head>
 <body class="bg-bg text-fg min-h-screen">
 
+<!-- 设置模态框 -->
+<div id="settingsModal" class="fixed inset-0 z-[200] hidden">
+  <div class="absolute inset-0 bg-black/60" onclick="hideSettings()"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-2xl shadow-2xl w-[520px] max-h-[80vh] overflow-y-auto">
+    <div class="p-6">
+      <div class="flex items-center justify-between mb-6">
+        <h2 class="text-lg font-semibold">⚙️ 设置</h2>
+        <button class="text-muted hover:text-fg transition" onclick="hideSettings()">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- WeFlow 配置 -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <span>💬</span> WeFlow 公众号配置
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">WeFlow 服务地址</label>
+            <input id="cfgWeflowUrl" type="text" placeholder="http://127.0.0.1:5031"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">WeFlow Token</label>
+            <input id="cfgWeflowToken" type="password" placeholder="输入 WeFlow API Token"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">每个公众号拉取条数</label>
+            <input id="cfgWechatLimit" type="number" min="1" max="50" placeholder="5"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">公众号名称过滤（逗号分隔，留空=全部）</label>
+            <textarea id="cfgWechatAccounts" rows="3" placeholder="例如：老陈侃财,聪明投机者"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted resize-y"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Miniflux 配置 -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <span>📡</span> Miniflux RSS 配置
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">Miniflux 服务地址</label>
+            <input id="cfgMinifluxUrl" type="text" placeholder="http://localhost:8084"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">用户名</label>
+            <input id="cfgMinifluxUser" type="text" placeholder="admin"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">密码</label>
+            <input id="cfgMinifluxPass" type="password" placeholder="输入密码"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+        </div>
+      </div>
+
+      <!-- 图床配置 -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <span>🖼️</span> 图床配置
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">图床 API 地址</label>
+            <input id="cfgImgbedUrl" type="text" placeholder="http://localhost:8085/api/"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">图床 Token</label>
+            <input id="cfgImgbedToken" type="password" placeholder="输入图床 Token"
+              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+        <button class="text-sm text-muted hover:text-fg px-4 py-2 transition" onclick="hideSettings()">取消</button>
+        <button class="bg-accent hover:bg-accent2 text-white text-sm px-6 py-2 rounded-lg transition font-medium" onclick="saveSettings()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <header class="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-border">
   <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
     <div class="flex items-center gap-3">
@@ -72,6 +164,9 @@ tailwind.config = {
       <button id="fetchBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition font-medium relative" onclick="showFetchMenu()">
         采集
         <svg class="w-3 h-3 inline ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <button class="text-muted hover:text-fg transition" title="设置" onclick="showSettings()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
       <div id="fetchMenu" class="hidden absolute right-4 top-12 bg-surface2 border border-border rounded-lg shadow-xl py-2 min-w-[180px] z-50">
         <div class="px-3 py-1.5 text-xs text-muted font-medium">选择信息源</div>
@@ -543,6 +638,82 @@ document.getElementById('searchInput').addEventListener('input', () => {
   clearTimeout(searchTimer);
   searchTimer = setTimeout(() => loadArticles(), 300);
 });
+
+// ===== 设置面板 =====
+let settingsLoaded = false;
+
+async function showSettings() {
+  document.getElementById('settingsModal').classList.remove('hidden');
+  if (!settingsLoaded) await loadSettings();
+}
+
+function hideSettings() {
+  document.getElementById('settingsModal').classList.add('hidden');
+}
+
+async function loadSettings() {
+  try {
+    // 从环境配置 API 读取
+    const envConfig = await api('/sources/config/env');
+    document.getElementById('cfgWeflowUrl').value = envConfig.weflow_url || '';
+    document.getElementById('cfgWeflowToken').value = '';  // 安全：不回显 token
+    document.getElementById('cfgMinifluxUrl').value = envConfig.miniflux_url || '';
+    document.getElementById('cfgMinifluxUser').value = envConfig.miniflux_user || '';
+    document.getElementById('cfgMinifluxPass').value = '';
+    document.getElementById('cfgImgbedUrl').value = envConfig.imgbed_url || '';
+    document.getElementById('cfgImgbedToken').value = '';
+
+    // 公众号过滤列表和条数从数据库源 config 读取
+    const sources = await api('/sources');
+    const wechat = sources.find(s => s.type === 'wechat' && !s.parent_id);
+    if (wechat?.config) {
+      document.getElementById('cfgWechatLimit').value = wechat.config.wechat_limit || '';
+      document.getElementById('cfgWechatAccounts').value = (wechat.config.wechat_accounts || []).join(', ');
+    }
+
+    settingsLoaded = true;
+  } catch (e) {
+    console.error('加载设置失败:', e);
+  }
+}
+
+async function saveSettings() {
+  try {
+    // 1. 保存环境变量配置（WeFlow/Miniflux/图床地址和 Token）
+    await api('/sources/config/env', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        weflow_url: document.getElementById('cfgWeflowUrl').value.trim(),
+        weflow_token: document.getElementById('cfgWeflowToken').value.trim(),
+        miniflux_url: document.getElementById('cfgMinifluxUrl').value.trim(),
+        miniflux_user: document.getElementById('cfgMinifluxUser').value.trim(),
+        miniflux_pass: document.getElementById('cfgMinifluxPass').value.trim(),
+        imgbed_url: document.getElementById('cfgImgbedUrl').value.trim(),
+        imgbed_token: document.getElementById('cfgImgbedToken').value.trim(),
+      }),
+    });
+
+    // 2. 保存公众号过滤列表到数据库源 config
+    const sources = await api('/sources');
+    const wechat = sources.find(s => s.type === 'wechat' && !s.parent_id);
+    if (wechat) {
+      const accountsStr = document.getElementById('cfgWechatAccounts').value.trim();
+      const accounts = accountsStr ? accountsStr.split(/[,，]/).map(s => s.trim()).filter(Boolean) : [];
+      const limitVal = parseInt(document.getElementById('cfgWechatLimit').value) || 5;
+      await api(`/sources/${wechat.id}/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ wechat_accounts: accounts, wechat_limit: limitVal }),
+      });
+    }
+
+    showToast('设置已保存', 'success');
+    hideSettings();
+  } catch (e) {
+    showToast(`保存失败：${e}`, 'error');
+  }
+}
 
 // ===== 初始化 =====
 loadSources();
