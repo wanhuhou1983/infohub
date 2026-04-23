@@ -400,7 +400,8 @@ async function processImages(content: string): Promise<string> {
   }
   for (const [originalUrl, data] of mdImgUrls) {
     if (data.replacement) {
-      const regex = new RegExp(`!\\[${escapeRegex(data.alt)}\\]\\(${escapeRegex(originalUrl)}\\)`, 'g');
+      // 🔒 修复：按 URL 匹配，忽略 alt 文本差异（同一 URL 多次出现但 alt 不同时会全部替换）
+      const regex = new RegExp(`!\\[.*?\\]\\(${escapeRegex(originalUrl)}\\)`, 'g');
       result = result.replace(regex, data.replacement);
     }
   }
