@@ -497,18 +497,124 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- ====== RSS 配置弹窗 ====== -->
+<div id="rssSettingsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-semibold">RSS 配置</h2>
+        <p class="text-xs text-muted mt-0.5">配置 Miniflux 连接，管理订阅源</p>
+      </div>
+      <button class="text-muted hover:text-fg" onclick="closeRssSettingsModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    
+    <div class="flex-1 overflow-y-auto p-6 space-y-6">
+      <!-- Miniflux 连接配置 -->
+      <div>
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
+          Miniflux 连接
+        </h3>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted mb-1 block">URL 地址</label>
+            <input type="text" id="rss-miniflux-url" placeholder="http://localhost:8084" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-xs text-muted mb-1 block">用户名</label>
+            <input type="text" id="rss-miniflux-user" placeholder="Miniflux 用户名" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-xs text-muted mb-1 block">API Token</label>
+            <input type="password" id="rss-miniflux-token" placeholder="Miniflux API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+        </div>
+      </div>
+      
+      <!-- 订阅源列表 -->
+      <div>
+        <div class="flex items-center justify-between mb-3">
+          <h3 class="text-sm font-medium text-accent2 flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+            订阅源列表
+          </h3>
+          <button onclick="refreshRssFeeds()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1 transition">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+            刷新
+          </button>
+        </div>
+        <div id="rssFeedsList" class="space-y-2">
+          <div class="text-center text-muted py-4">加载中...</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
+      <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeRssSettingsModal()">取消</button>
+      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="saveRssSettings()">保存配置</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 公众号配置弹窗 ====== -->
+<div id="wechatAccountsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-semibold">公众号配置</h2>
+        <p class="text-xs text-muted mt-0.5">勾选要显示的公众号，按最新文章时间排序</p>
+      </div>
+      <button class="text-muted hover:text-fg" onclick="closeWechatAccountsModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    
+    <!-- 工具栏 -->
+    <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
+      <button onclick="refreshWechatAccounts()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        刷新列表
+      </button>
+      <div class="flex-1"></div>
+      <!-- 搜索框 -->
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="wechat-search-input" placeholder="搜索公众号..." 
+          class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
+          oninput="renderWechatAccounts()">
+      </div>
+      <label class="flex items-center gap-2 text-xs text-muted">
+        <input type="checkbox" id="wechat-show-enabled-only" class="accent-accent" onchange="renderWechatAccounts()">
+        只显示已启用
+      </label>
+    </div>
+    
+    <!-- 公众号列表 -->
+    <div class="flex-1 overflow-y-auto p-4">
+      <div id="wechatAccountsList" class="space-y-2">
+        <div class="text-center text-muted py-8">加载中...</div>
+      </div>
+    </div>
+    
+    <!-- 底部操作 -->
+    <div class="px-6 py-4 border-t border-border flex items-center justify-between shrink-0">
+      <div class="text-xs text-muted">
+        已选择 <span id="wechatSelectedCount" class="text-fg font-medium">0</span> 个公众号
+      </div>
+      <div class="flex gap-3">
+        <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeWechatAccountsModal()">取消</button>
+        <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeWechatAccountsModal()">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== 模拟数据 =====
 const SOURCE_CONFIGS = [
-  {
-    id: 'xwlb', name: '新闻联播', icon: '📺', type: 'builtin',
-    color: 'bg-red-500/20 text-red-400',
-    description: 'CCTV 官网每日文字稿',
-    config: { source: 'tv.cctv.com', schedule: '每日 20:00' },
-    enabled: true, articleCount: 342, todayCount: 12,
-    lastFetch: '2026-04-22 20:01', status: 'success',
-    feeds: [],
-  },
+
   {
     id: 'rss', name: 'RSS 订阅', icon: '📡', type: 'miniflux',
     color: 'bg-orange-500/20 text-orange-400',
@@ -516,12 +622,7 @@ const SOURCE_CONFIGS = [
     config: { minifluxUrl: 'http://localhost:8084', totalFeeds: 28 },
     enabled: true, articleCount: 523, todayCount: 18,
     lastFetch: '2026-04-22 17:00', status: 'success',
-    feeds: [
-      { name: '阮一峰的网络日志', url: 'https://www.ruanyifeng.com/blog/atom.xml', category: '技术', status: 'active' },
-      { name: 'Hacker News', url: 'https://news.ycombinator.com/rss', category: '技术', status: 'active' },
-      { name: '36氪', url: 'https://36kr.com/feed', category: '科技', status: 'active' },
-      { name: '极客公园', url: 'https://www.geekpark.net/rss', category: '科技', status: 'active' },
-    ],
+    feeds: [],
   },
   {
     id: 'wechat', name: '公众号', icon: '💬', type: 'spider',
@@ -530,30 +631,9 @@ const SOURCE_CONFIGS = [
     config: { method: 'URL 输入 + 爬虫' },
     enabled: true, articleCount: 86, todayCount: 3,
     lastFetch: '2026-04-22 15:30', status: 'success',
-    feeds: [
-      { name: '机器之心', url: 'mp.weixin.qq.com', category: 'AI', status: 'manual' },
-      { name: '量子位', url: 'mp.weixin.qq.com', category: 'AI', status: 'manual' },
-      { name: '晚点LatePost', url: 'mp.weixin.qq.com', category: '财经', status: 'manual' },
-    ],
-  },
-  {
-    id: 'tencent', name: '腾讯新闻', icon: '📰', type: 'api',
-    color: 'bg-blue-500/20 text-blue-400',
-    description: '腾讯新闻 CLI 接口',
-    config: { apiKey: '已配置', categories: ['热点', '科技', '财经'] },
-    enabled: true, articleCount: 215, todayCount: 7,
-    lastFetch: '2026-04-22 16:45', status: 'success',
     feeds: [],
   },
-  {
-    id: 'ai', name: 'AI 资讯', icon: '🤖', type: 'aggregation',
-    color: 'bg-cyan-500/20 text-cyan-400',
-    description: '多源 AI 新闻聚合',
-    config: { sources: 'VentureBeat, TechCrunch, The Verge', schedule: '每日 9:00' },
-    enabled: true, articleCount: 28, todayCount: 5,
-    lastFetch: '2026-04-22 09:15', status: 'success',
-    feeds: [],
-  },
+  
   {
     id: 'magazine', name: '报刊杂志', icon: '📰', type: 'magazine',
     color: 'bg-amber-500/20 text-amber-400',
@@ -562,6 +642,9 @@ const SOURCE_CONFIGS = [
     enabled: true, articleCount: 8, todayCount: 0,
     lastFetch: '2026-04-20 10:00', status: 'success',
     feeds: [
+      { id: 'xwlb', name: '新闻联播', icon: '📺', type: 'builtin', articleCount: 342, todayCount: 12, enabled: true },
+      { id: 'tencent', name: '腾讯新闻', icon: '📰', type: 'api', articleCount: 215, todayCount: 7, enabled: true },
+      { id: 'ai', name: 'AI 资讯', icon: '🤖', type: 'aggregation', articleCount: 5, todayCount: 5, enabled: true },
       { id: 'caixin', name: '财新周刊', icon: '🗞️', type: 'magazine', articleCount: 8, todayCount: 0, enabled: true },
     ],
   },
@@ -725,12 +808,18 @@ function renderSourceCards() {
           <button class="text-muted hover:text-accent2 transition p-1" title="立即采集" onclick="runSourceFetch('${s.id}')">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
           </button>
+          ${s.id === 'wechat' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置公众号" onclick="showWechatAccountsModal()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+          </button>
+          ` : `
           <button class="text-muted hover:text-fg transition p-1" title="设置" onclick="showSourceSettings('${s.id}')">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
           <button class="text-muted hover:text-danger transition p-1" title="删除" onclick="removeSource('${s.id}')">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
+          `}
         </div>
       </div>
     </div>`;
@@ -908,7 +997,330 @@ function removeFeed(sourceId, feedName) {
 }
 
 function showSourceSettings(id) {
-  alert('打开 ' + id + ' 设置（样稿演示）');
+  if (id === 'rss') {
+    showRssSettingsModal();
+  } else if (id === 'wechat') {
+    showWechatAccountsModal();
+  } else {
+    alert('打开 ' + id + ' 设置（开发中）');
+  }
+}
+
+// ===== RSS 配置弹窗 =====
+let rssFeedsData = [];
+
+function showRssSettingsModal() {
+  document.getElementById('rssSettingsModal').classList.remove('hidden');
+  document.getElementById('rssSettingsModal').classList.add('flex');
+  loadRssSettings();
+}
+
+function closeRssSettingsModal() {
+  document.getElementById('rssSettingsModal').classList.add('hidden');
+  document.getElementById('rssSettingsModal').classList.remove('flex');
+}
+
+async function loadRssSettings() {
+  try {
+    // 加载环境配置
+    const res = await fetch('/api/sources/config/env');
+    const data = await res.json();
+    
+    document.getElementById('rss-miniflux-url').value = data.miniflux_url || '';
+    document.getElementById('rss-miniflux-user').value = data.miniflux_user || '';
+    document.getElementById('rss-miniflux-token').value = data.miniflux_token || '';
+    
+    // 加载订阅源列表
+    await loadRssFeeds();
+  } catch (e) {
+    console.error('加载 RSS 配置失败:', e);
+  }
+}
+
+async function loadRssFeeds() {
+  const listEl = document.getElementById('rssFeedsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-4">加载中...</div>';
+  
+  try {
+    const res = await fetch('/api/sources');
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-4">${data.error}</div>`;
+      return;
+    }
+    
+    const sources = (Array.isArray(data) ? data : data.sources || []).filter(s => s.type === 'rss');
+    if (sources.length === 0) {
+      listEl.innerHTML = '<div class="text-center text-muted py-4">暂无订阅源</div>';
+      return;
+    }
+    
+    rssFeedsData = sources;
+    renderRssFeeds();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-4">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderRssFeeds() {
+  const listEl = document.getElementById('rssFeedsList');
+  
+  if (rssFeedsData.length === 0) {
+    listEl.innerHTML = '<div class="text-center text-muted py-4">暂无订阅源</div>';
+    return;
+  }
+  
+  listEl.innerHTML = rssFeedsData.map(s => `
+    <div class="flex items-center gap-3 p-3 bg-surface2 rounded-lg hover:bg-border/50 transition">
+      <label class="switch switch-sm">
+        <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleRssFeed('${s.id}', this.checked)">
+        <span class="slider"></span>
+      </label>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium truncate">${s.name}</div>
+        <div class="text-xs text-muted truncate">${s.url || '无 URL'}</div>
+      </div>
+      <span class="text-xs ${s.enabled ? 'text-success' : 'text-muted'}">
+        ${s.enabled ? '已启用' : '已禁用'}
+      </span>
+    </div>
+  `).join('');
+}
+
+async function toggleRssFeed(feedId, enabled) {
+  try {
+    const res = await fetch(`/api/sources/${feedId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      alert('操作失败: ' + (data.error || '未知错误'));
+      loadRssFeeds();
+      return;
+    }
+    
+    // 更新本地数据
+    const feed = rssFeedsData.find(f => f.id === feedId);
+    if (feed) feed.enabled = enabled;
+    
+    renderRssFeeds();
+  } catch (e) {
+    alert('操作失败: ' + e.message);
+    loadRssFeeds();
+  }
+}
+
+async function refreshRssFeeds() {
+  const listEl = document.getElementById('rssFeedsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-4">刷新中，请稍候...</div>';
+  
+  try {
+    const res = await fetch('/api/sync/rss', { method: 'POST' });
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-4">${data.error}</div>`;
+      return;
+    }
+    
+    // 重新加载
+    await loadRssFeeds();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-4">刷新失败: ${e.message}</div>`;
+  }
+}
+
+async function saveRssSettings() {
+  const config = {
+    miniflux_url: document.getElementById('rss-miniflux-url').value,
+    miniflux_user: document.getElementById('rss-miniflux-user').value,
+    miniflux_token: document.getElementById('rss-miniflux-token').value,
+  };
+  
+  try {
+    const res = await fetch('/api/sources/config/env', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      alert('保存失败: ' + (data.error || '未知错误'));
+      return;
+    }
+    
+    alert('保存成功！');
+    closeRssSettingsModal();
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
+}
+
+// ===== 公众号配置弹窗 =====
+let wechatAccountsData = [];
+
+function showWechatAccountsModal() {
+  document.getElementById('wechatAccountsModal').classList.remove('hidden');
+  document.getElementById('wechatAccountsModal').classList.add('flex');
+  loadWechatAccounts();
+}
+
+function closeWechatAccountsModal() {
+  document.getElementById('wechatAccountsModal').classList.add('hidden');
+  document.getElementById('wechatAccountsModal').classList.remove('flex');
+}
+
+async function loadWechatAccounts() {
+  const listEl = document.getElementById('wechatAccountsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
+  
+  try {
+    const res = await fetch('/api/wechat-admin/accounts');
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      return;
+    }
+    
+    wechatAccountsData = data.accounts || [];
+    renderWechatAccounts();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderWechatAccounts() {
+  const listEl = document.getElementById('wechatAccountsList');
+  const showEnabledOnly = document.getElementById('wechat-show-enabled-only').checked;
+  const searchText = (document.getElementById('wechat-search-input')?.value || '').trim().toLowerCase();
+  
+  let accounts = wechatAccountsData;
+  
+  // 搜索过滤
+  if (searchText) {
+    accounts = accounts.filter(a => 
+      (a.displayName || '').toLowerCase().includes(searchText) ||
+      (a.gh_id || '').toLowerCase().includes(searchText)
+    );
+  }
+  
+  // 只显示已启用过滤
+  if (showEnabledOnly) {
+    accounts = accounts.filter(a => a.enabled);
+  }
+  
+  if (accounts.length === 0) {
+    listEl.innerHTML = '<div class="text-center text-muted py-8">暂无匹配的公众号</div>';
+    return;
+  }
+  
+  const enabledCount = wechatAccountsData.filter(a => a.enabled).length;
+  document.getElementById('wechatSelectedCount').textContent = enabledCount;
+  
+  listEl.innerHTML = accounts.map(a => {
+    const latestTime = a.latest_article_at ? new Date(a.latest_article_at).toLocaleString('zh-CN', { 
+      month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+    }) : '暂无文章';
+    
+    // 如果 db_id 为 null，显示"添加"按钮；否则显示复选框
+    const actionHtml = a.db_id 
+      ? `<input type="checkbox" class="accent-accent w-4 h-4" ${a.enabled ? 'checked' : ''} onchange="toggleWechatAccount(${a.db_id}, this.checked)">`
+      : `<button class="text-xs px-2 py-1 bg-accent/20 text-accent rounded hover:bg-accent/30 transition" onclick="addWechatAccount('${a.gh_id}', '${encodeURIComponent(a.displayName)}')">添加</button>`;
+    
+    const statusHtml = a.db_id
+      ? `<span class="text-xs ${a.enabled ? 'text-success' : 'text-muted'}">${a.enabled ? '已启用' : '已禁用'}</span>`
+      : `<span class="text-xs text-muted">未添加</span>`;
+    
+    return `
+    <div class="flex items-center gap-3 p-3 bg-surface2 rounded-lg hover:bg-border/50 transition">
+      ${actionHtml}
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium truncate">${a.displayName}</div>
+        <div class="text-xs text-muted">最新文章: ${latestTime}</div>
+      </div>
+      ${statusHtml}
+    </div>
+    `;
+  }).join('');
+}
+
+async function toggleWechatAccount(dbId, enabled) {
+  if (!dbId) return;
+  
+  try {
+    const res = await fetch(`/api/wechat-admin/accounts/${dbId}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      alert('操作失败: ' + (data.error || '未知错误'));
+      // 恢复原状态
+      loadWechatAccounts();
+      return;
+    }
+    
+    // 更新本地数据
+    const account = wechatAccountsData.find(a => a.db_id === dbId);
+    if (account) account.enabled = enabled;
+    
+    renderWechatAccounts();
+  } catch (e) {
+    alert('操作失败: ' + e.message);
+    loadWechatAccounts();
+  }
+}
+
+async function addWechatAccount(ghId, displayName) {
+  displayName = decodeURIComponent(displayName);
+  
+  try {
+    const res = await fetch('/api/wechat-admin/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ gh_id: ghId, name: displayName, enabled: true })
+    });
+    
+    const data = await res.json();
+    
+    if (data.error) {
+      alert('添加失败: ' + data.error);
+      return;
+    }
+    
+    // 重新加载列表
+    await loadWechatAccounts();
+  } catch (e) {
+    alert('添加失败: ' + e.message);
+  }
+}
+
+async function refreshWechatAccounts() {
+  const listEl = document.getElementById('wechatAccountsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">刷新中，请稍候...</div>';
+  
+  try {
+    const res = await fetch('/api/wechat-admin/refresh', { method: 'POST' });
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      return;
+    }
+    
+    // 刷新列表
+    await loadWechatAccounts();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">刷新失败: ${e.message}</div>`;
+  }
 }
 
 // ===== 初始化 =====

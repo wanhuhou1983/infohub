@@ -66,26 +66,35 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         }
       }
 
-      // 重新读取（包含新创建的）
+      // 重新读取（包含新创建的），并获取每个公众号的最新文章时间
       const updatedSources = await sql`
-        SELECT id, name, enabled, config->>'gh_id' AS gh_id
-        FROM sources
-        WHERE type = 'wechat' AND parent_id = ${wechatSource.id}
+        SELECT s.id, s.name, s.enabled, s.config->>'gh_id' AS gh_id,
+               (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_article_at
+        FROM sources s
+        WHERE s.type = 'wechat' AND s.parent_id = ${wechatSource.id}
       `;
       const updatedByGhId = new Map<string, any>();
       for (const s of updatedSources) {
         if (s.gh_id) updatedByGhId.set(s.gh_id, s);
       }
 
-      // 组装响应（只按 gh_id 匹配）
-      const accounts = allSessions.map((s: any) => {
+      // 组装响应（只按 gh_id 匹配），按最新文章时间排序
+      let accounts = allSessions.map((s: any) => {
         const db = updatedByGhId.get(s.username);
         return {
           gh_id: s.username,
           displayName: s.displayName,
           enabled: !!db?.enabled,
           db_id: db?.id || null,
+          latest_article_at: db?.latest_article_at || null,
         };
+      });
+
+      // 按最新文章时间降序排序（最新的在前）
+      accounts.sort((a, b) => {
+        if (!a.latest_article_at) return 1;
+        if (!b.latest_article_at) return -1;
+        return new Date(b.latest_article_at).getTime() - new Date(a.latest_article_at).getTime();
       });
 
       return c.json({ accounts, total: accounts.length, newlyCreated });

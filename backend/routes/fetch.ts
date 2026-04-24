@@ -19,6 +19,37 @@ import { readdirSync, statSync, readFileSync } from 'node:fs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPIDER_DIR = path.resolve(__dirname, '../../../wechat-article-spider');
 const PYTHON_CMD = path.join(SPIDER_DIR, '.venv/bin/python3');
+const MINERU_SCRIPT = '/Users/wuhuahui/.workbuddy/skills/mineru-extract/scripts/mineru_extract.py';
+
+// ============ 辅助函数：调用 MinerU 抓取正文 ============
+export async function crawlArticleContent(articleUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const args = [MINERU_SCRIPT, articleUrl, '--model', 'MinerU-HTML', '--print'];
+    const proc = spawn('python3', args, {
+      cwd: path.dirname(MINERU_SCRIPT),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+
+    proc.on('close', (code) => {
+      if (code !== 0 || !stdout.trim()) {
+        console.error(`MinerU error: ${stderr}`);
+        resolve(null);
+        return;
+      }
+      // 清理 MinerU 输出的图片格式，转换为 __IMG__ 标记
+      const content = stdout
+        .replace(/!\[.*?\]\((https?:\/\/[^)]+)\)/g, '__IMG__$1__IMG__')
+        .replace(/<img.*?src=["'](https?:\/\/[^"']+)["'].*?>/g, '__IMG__$1__IMG__');
+      resolve(content);
+    });
+  });
+}
 
 // ============ 辅助函数：调用 wechat-article-spider 抓取正文 ============
 export async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
@@ -179,7 +210,7 @@ export function createFetchRoutes(sql: Sql): Hono {
     const startMs = Date.now();
 
     try {
-      const [rssSource] = await sql`SELECT id, config FROM sources WHERE type = 'rss' LIMIT 1`;
+      const [rssSource] = await sql`SELECT id, config FROM sources WHERE type = 'rss' AND parent_id IS NULL LIMIT 1`;
       if (!rssSource) return c.json({ error: 'RSS 信息源未配置' }, 400);
 
       const config = rssSource.config || {};
@@ -335,6 +366,170 @@ export function createFetchRoutes(sql: Sql): Hono {
         await sql`
           INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
           VALUES (${rssSource.id}, 'RSS同步', 'error', 0, ${e.message}, ${durationMs})
+        `;
+      }
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ RSS 刷新 + 同步（先触发 Miniflux 刷新，再同步到 InfoHub） ============
+
+  router.post('/rss/refresh-sync', async (c) => {
+    const { feed_id, limit = 100 } = await c.req.json().catch(() => ({}));
+    const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+    const startMs = Date.now();
+
+    try {
+      const [rssSource] = await sql`SELECT id, config FROM sources WHERE type = 'rss' AND parent_id IS NULL LIMIT 1`;
+      if (!rssSource) return c.json({ error: 'RSS 信息源未配置' }, 400);
+
+      const config = rssSource.config || {};
+      const minifluxUrl = config.miniflux_url || process.env.MINIFLUX_URL || 'http://localhost:8084';
+      const minifluxUser = config.miniflux_user || process.env.MINIFLUX_USER;
+      const minifluxPass = config.miniflux_pass || process.env.MINIFLUX_PASS;
+
+      if (!minifluxUser || !minifluxPass) {
+        return c.json({ error: 'Miniflux 凭证未配置' }, 400);
+      }
+
+      const auth = Buffer.from(`${minifluxUser}:${minifluxPass}`).toString('base64');
+
+      // Step 1: 触发 Miniflux 刷新（Miniflux 使用 PUT 而不是 POST）
+      console.log('[RSS] 正在触发 Miniflux 刷新...');
+      let refreshUrl = `${minifluxUrl}/v1/feeds/refresh`;
+      if (feed_id) {
+        const fid = Number(feed_id);
+        if (isNaN(fid) || fid <= 0) return c.json({ error: 'Invalid feed_id' }, 400);
+        refreshUrl = `${minifluxUrl}/v1/feeds/${fid}/refresh`;
+      }
+
+      const refreshResp = await fetch(refreshUrl, {
+        method: 'PUT',
+        headers: { 'Authorization': `Basic ${auth}` },
+      });
+
+      if (!refreshResp.ok && refreshResp.status !== 204) {
+        const errText = await refreshResp.text();
+        throw new Error(`Miniflux 刷新失败: ${refreshResp.status} - ${errText}`);
+      }
+      console.log('[RSS] Miniflux 刷新完成');
+
+      // 等待一小段时间让 Miniflux 抓取完成
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Step 2: 从 Miniflux 同步数据（复用 /rss 的逻辑）
+      let entriesUrl = `${minifluxUrl}/v1/entries?limit=${safeLimit}&order=published_at&direction=desc`;
+      if (feed_id) {
+        entriesUrl += `&feed_id=${Number(feed_id)}`;
+      }
+
+      const response = await fetch(entriesUrl, {
+        headers: { 'Authorization': `Basic ${auth}` },
+      });
+      if (!response.ok) throw new Error(`Miniflux API 返回 ${response.status}`);
+
+      const data = await response.json() as any;
+      const entries = data.entries || [];
+
+      // 获取 feeds 列表
+      const feedsResp = await fetch(`${minifluxUrl}/v1/feeds`, {
+        headers: { 'Authorization': `Basic ${auth}` },
+      });
+      const feeds = feedsResp.ok ? await feedsResp.json() as any[] : [];
+      const feedMap = new Map<number, { title: string; feed_url: string }>();
+      for (const f of feeds) {
+        feedMap.set(f.id, { title: f.title, feed_url: f.feed_url });
+      }
+
+      // 为每个 Miniflux feed 创建子信息源
+      const feedSourceMap = new Map<number, number>();
+      const seenFeedIds = new Set<number>();
+      for (const entry of entries) {
+        const mfFeedId = entry.feed?.id;
+        if (!mfFeedId || seenFeedIds.has(mfFeedId)) continue;
+        seenFeedIds.add(mfFeedId);
+
+        const feedInfo = feedMap.get(mfFeedId);
+        const feedName = feedInfo?.title || `RSS Feed ${mfFeedId}`;
+        const feedUrl = feedInfo?.feed_url || '';
+
+        // 判断类型
+        let feedType = 'rss';
+        let parentId = rssSource.id;
+        if (feedUrl.includes('caixin') || feedName.includes('财新')) {
+          feedType = 'magazine';
+          parentId = (await sql`SELECT id FROM sources WHERE type = 'magazine' AND parent_id IS NULL LIMIT 1`)[0]?.id;
+        }
+
+        const [existing] = await sql`
+          SELECT id FROM sources WHERE type = ${feedType} AND config->>'miniflux_feed_id' = ${String(mfFeedId)}
+        `;
+        if (existing) {
+          feedSourceMap.set(mfFeedId, existing.id);
+        } else {
+          const [created] = await sql`
+            INSERT INTO sources (name, type, icon, config, enabled, parent_id)
+            VALUES (${feedName}, ${feedType}, ${feedType === 'wechat' ? '💬' : (feedType === 'magazine' ? '🗞️' : '📡')}, ${sql.json({ miniflux_feed_id: String(mfFeedId), feed_url: feedUrl })}, true, ${parentId})
+            RETURNING id
+          `;
+          feedSourceMap.set(mfFeedId, created!.id);
+        }
+      }
+
+      // 入库文章
+      let inserted = 0;
+      for (const entry of entries) {
+        try {
+          const mfFeedId = entry.feed?.id;
+          if (!mfFeedId) continue;
+
+          const sourceId = feedSourceMap.get(mfFeedId);
+          if (!sourceId) continue;
+
+          const title = entry.title || '无标题';
+          const summary = entry.content?.slice(0, 500) || entry.summary?.slice(0, 500) || '';
+          const url = entry.url || entry.comments_url || '';
+          const publishedAt = entry.published_at ? entry.published_at.slice(0, 10) : null;
+
+          if (!url) continue;
+
+          const contentHash = hashString(url);
+          const insertedRows = await sql`
+            INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at)
+            VALUES (${sourceId}, ${title}, '（完整内容请查看原文）', ${summary}, ${url}, ${publishedAt}, 'RSS', ${['RSS']}, ${contentHash}, NOW())
+            ON CONFLICT (content_hash) DO NOTHING
+            RETURNING id
+          `;
+
+          if (insertedRows.length > 0) {
+            inserted++;
+            const newId = insertedRows[0]!.id;
+            await saveArticleFile(newId, '（完整内容请查看原文）', {
+              id: newId, title, source_type: 'rss',
+              source_name: feedMap.get(mfFeedId)?.title || 'RSS', url, published_at: publishedAt,
+              category: 'RSS', tags: 'RSS', is_read: false, is_starred: false,
+            });
+          }
+        } catch (e: any) {
+          if (e.code !== '23505') console.error('RSS insert error:', e.message);
+        }
+      }
+
+      await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${rssSource.id}`;
+      const durationMs = Date.now() - startMs;
+      await sql`
+        INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+        VALUES (${rssSource.id}, 'RSS刷新同步', 'success', ${inserted}, ${`刷新Miniflux并同步 ${entries.length} 条，入库 ${inserted} 条`}, ${durationMs})
+      `;
+
+      return c.json({ ok: true, refreshed: true, fetched: entries.length, inserted });
+    } catch (e: any) {
+      const durationMs = Date.now() - startMs;
+      const [rssSource] = await sql`SELECT id FROM sources WHERE type = 'rss' LIMIT 1`;
+      if (rssSource) {
+        await sql`
+          INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+          VALUES (${rssSource.id}, 'RSS刷新同步', 'error', 0, ${e.message}, ${durationMs})
         `;
       }
       return c.json({ error: e.message }, 500);
@@ -575,6 +770,189 @@ export function createFetchRoutes(sql: Sql): Hono {
         await sql`
           INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
           VALUES (${rmrbSource.id}, '每日采集', 'error', 0, ${e.message}, ${durationMs})
+        `;
+      }
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ 腾讯新闻采集 ============
+
+  router.post('/tencent', async (c) => {
+    const { limit = 10 } = await c.req.json().catch(() => ({}));
+    const startMs = Date.now();
+
+    try {
+      const [tencentSource] = await sql`SELECT id FROM sources WHERE type = 'tencent' LIMIT 1`;
+      if (!tencentSource) return c.json({ error: '腾讯新闻信息源未配置' }, 400);
+
+      const cliPath = '/Users/wuhuahui/.workbuddy/skills/tencent-news/tencent-news-cli';
+      const apiKey = process.env.TENCENT_NEWS_APIKEY;
+
+      if (!apiKey) return c.json({ error: 'TENCENT_NEWS_APIKEY 未配置' }, 400);
+
+      // 调用 CLI 获取热点新闻
+      const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+        const proc = spawn('bash', ['-c', `export TENCENT_NEWS_APIKEY='${apiKey}' && ${cliPath} hot --limit ${limit}`]);
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', (data) => { stdout += data.toString(); });
+        proc.stderr.on('data', (data) => { stderr += data.toString(); });
+        proc.on('close', (code) => resolve({ stdout, stderr, code: code || 0 }));
+      });
+
+      if (result.code !== 0) {
+        throw new Error(`CLI 执行失败: ${result.stderr}`);
+      }
+
+      // 解析输出
+      const articles: Array<{title: string; summary: string; source: string; publishedAt: string; url: string}> = [];
+      const lines = result.stdout.split('\n');
+      let current: any = {};
+
+      for (const line of lines) {
+        const titleMatch = line.match(/^\s*(\d+)\.\s*标题：(.+)$/);
+        const summaryMatch = line.match(/^\s*摘要[:：]\s*(.+)$/);
+        const sourceMatch = line.match(/^\s*来源[:：]\s*(.+)$/);
+        const timeMatch = line.match(/^\s*发布时间[:：]\s*(.+)$/);
+        const urlMatch = line.match(/^\s*链接[:：]\s*(.+)$/);
+
+        if (titleMatch) {
+          if (current.title) articles.push(current);
+          current = { title: titleMatch[2], summary: '', source: '', publishedAt: '', url: '' };
+        } else if (summaryMatch) {
+          current.summary = summaryMatch[1];
+        } else if (sourceMatch) {
+          current.source = sourceMatch[1];
+        } else if (timeMatch) {
+          current.publishedAt = timeMatch[1];
+        } else if (urlMatch) {
+          current.url = urlMatch[1];
+        }
+      }
+      if (current.title) articles.push(current);
+
+      // 过滤无效文章
+      const validArticles = articles.filter(a => a.title && a.url && !a.title.includes('共 ') && !a.publishedAt.includes('1970'));
+
+      let inserted = 0;
+      for (const art of validArticles) {
+        try {
+          // 先尝试抓取正文
+          let fullContent = '（完整内容请查看原文）';
+          try {
+            const fetchedContent = await crawlArticleContent(art.url);
+            if (fetchedContent && fetchedContent.length > 100) {
+              fullContent = fetchedContent;
+              console.log(`[Tencent] 抓到正文: ${art.title.slice(0, 20)}... (${fetchedContent.length} chars)`);
+            }
+          } catch (e: any) {
+            console.error(`[Tencent] 抓取正文失败: ${art.url}`, e.message);
+          }
+
+          const contentHash = hashString(art.url);
+          const insertedRows = await sql`
+            INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at)
+            VALUES (${tencentSource.id}, ${art.title}, ${fullContent}, ${art.summary}, ${art.url}, ${art.publishedAt || null}, '热点', ${['腾讯新闻']}, ${contentHash}, NOW())
+            ON CONFLICT (content_hash) DO NOTHING
+            RETURNING id
+          `;
+          if (insertedRows.length > 0) {
+            inserted++;
+            const newId = insertedRows[0]!.id;
+            await saveArticleFile(newId, fullContent, {
+              id: newId, title: art.title, source_type: 'tencent',
+              source_name: '腾讯新闻', url: art.url, published_at: art.publishedAt,
+              category: '热点', tags: '腾讯新闻', author: art.source, is_read: false, is_starred: false,
+            });
+          }
+        } catch (e: any) {
+          if (e.code !== '23505') console.error('Tencent insert error:', e.message);
+        }
+      }
+
+      await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${tencentSource.id}`;
+      const durationMs = Date.now() - startMs;
+      await sql`
+        INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+        VALUES (${tencentSource.id}, '热点采集', 'success', ${inserted}, ${`获取 ${validArticles.length} 条热点新闻，入库 ${inserted} 条`}, ${durationMs})
+      `;
+
+      return c.json({ ok: true, fetched: validArticles.length, inserted });
+    } catch (e: any) {
+      const durationMs = Date.now() - startMs;
+      const [tencentSource] = await sql`SELECT id FROM sources WHERE type = 'tencent' LIMIT 1`;
+      if (tencentSource) {
+        await sql`
+          INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+          VALUES (${tencentSource.id}, '热点采集', 'error', 0, ${e.message}, ${durationMs})
+        `;
+      }
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ AI 资讯采集 ============
+
+  router.post('/ai', async (c) => {
+    const { articles = [] } = await c.req.json().catch(() => ({ articles: [] }));
+    const startMs = Date.now();
+
+    try {
+      const [aiSource] = await sql`SELECT id FROM sources WHERE type = 'ai' LIMIT 1`;
+      if (!aiSource) return c.json({ error: 'AI 资讯信息源未配置' }, 400);
+
+      let inserted = 0;
+      for (const art of articles) {
+        try {
+          // 先尝试抓取正文
+          let fullContent = '（完整内容请查看原文）';
+          try {
+            const fetchedContent = await crawlArticleContent(art.url);
+            if (fetchedContent && fetchedContent.length > 100) {
+              fullContent = fetchedContent;
+              console.log(`[AI] 抓到正文: ${art.title.slice(0, 20)}... (${fetchedContent.length} chars)`);
+            }
+          } catch (e: any) {
+            console.error(`[AI] 抓取正文失败: ${art.url}`, e.message);
+          }
+
+          const contentHash = hashString(art.url);
+          const insertedRows = await sql`
+            INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at)
+            VALUES (${aiSource.id}, ${art.title}, ${fullContent}, ${art.summary}, ${art.url}, ${art.published_at || null}, 'AI', ${['AI资讯']}, ${contentHash}, NOW())
+            ON CONFLICT (content_hash) DO NOTHING
+            RETURNING id
+          `;
+          if (insertedRows.length > 0) {
+            inserted++;
+            const newId = insertedRows[0]!.id;
+            await saveArticleFile(newId, fullContent, {
+              id: newId, title: art.title, source_type: 'ai',
+              source_name: 'AI 资讯', url: art.url, published_at: art.published_at,
+              category: 'AI', tags: 'AI资讯', author: art.author, is_read: false, is_starred: false,
+            });
+          }
+        } catch (e: any) {
+          if (e.code !== '23505') console.error('AI insert error:', e.message);
+        }
+      }
+
+      await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${aiSource.id}`;
+      const durationMs = Date.now() - startMs;
+      await sql`
+        INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+        VALUES (${aiSource.id}, 'AI资讯采集', 'success', ${inserted}, ${`获取 ${articles.length} 条 AI 资讯，入库 ${inserted} 条`}, ${durationMs})
+      `;
+
+      return c.json({ ok: true, fetched: articles.length, inserted });
+    } catch (e: any) {
+      const durationMs = Date.now() - startMs;
+      const [aiSource] = await sql`SELECT id FROM sources WHERE type = 'ai' LIMIT 1`;
+      if (aiSource) {
+        await sql`
+          INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+          VALUES (${aiSource.id}, 'AI资讯采集', 'error', 0, ${e.message}, ${durationMs})
         `;
       }
       return c.json({ error: e.message }, 500);
