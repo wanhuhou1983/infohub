@@ -83,6 +83,16 @@ app.get('/', (c) => {
   return c.text('InfoHub frontend not found', 404);
 });
 
+// 管理后台页面
+app.get('/admin', (c) => {
+  const adminPath = join(FRONTEND_DIR, 'infohub-admin.html');
+  if (existsSync(adminPath)) {
+    const html = readFileSync(adminPath, 'utf-8');
+    return c.html(html);
+  }
+  return c.text('Admin page not found', 404);
+});
+
 // ============ 运行时环境配置（.env.json） ============
 
 const ENV_FILE = join(__dirname, '..', '.env.json');

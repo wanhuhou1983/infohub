@@ -1,0 +1,921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InfoHub - 管理后台</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      colors: {
+        bg: '#0f1117',
+        surface: '#1a1d27',
+        surface2: '#242734',
+        border: '#2e3244',
+        accent: '#6366f1',
+        accent2: '#818cf8',
+        muted: '#8b8fa3',
+        fg: '#e2e4eb',
+        success: '#22c55e',
+        warn: '#eab308',
+        danger: '#ef4444',
+      }
+    }
+  }
+}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
+  body { font-family: 'Noto Sans SC', sans-serif; }
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #1a1d27; }
+  ::-webkit-scrollbar-thumb { background: #2e3244; border-radius: 3px; }
+  .nav-item { transition: all 0.15s; }
+  .nav-item:hover { background: #242734; }
+  .nav-item.active { background: #6366f1/20; color: #818cf8; border-right: 2px solid #6366f1; }
+  .switch { position: relative; width: 36px; height: 20px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .slider { position: absolute; inset: 0; background: #2e3244; border-radius: 10px; cursor: pointer; transition: 0.2s; }
+  .switch .slider:before { content: ''; position: absolute; height: 16px; width: 16px; left: 2px; bottom: 2px; background: #8b8fa3; border-radius: 50%; transition: 0.2s; }
+  .switch input:checked + .slider { background: #6366f1; }
+  .switch input:checked + .slider:before { transform: translateX(16px); background: white; }
+  .badge { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: 500; }
+  .log-success { border-left: 3px solid #22c55e; }
+  .log-error { border-left: 3px solid #ef4444; }
+  .log-running { border-left: 3px solid #6366f1; }
+  .fade-in { animation: fadeIn 0.2s ease-in; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal-overlay { backdrop-filter: blur(4px); }
+</style>
+</head>
+<body class="bg-bg text-fg min-h-screen flex">
+
+<!-- 左侧导航 -->
+<aside class="w-52 shrink-0 bg-surface border-r border-border flex flex-col">
+  <!-- Logo -->
+  <div class="px-4 h-14 flex items-center gap-2 border-b border-border">
+    <div class="w-7 h-7 bg-accent rounded-lg flex items-center justify-center text-white font-bold text-xs">I</div>
+    <span class="font-semibold">InfoHub</span>
+    <span class="badge bg-accent/20 text-accent2 ml-1">管理</span>
+  </div>
+
+  <!-- 导航菜单 -->
+  <nav class="flex-1 py-4 px-2 space-y-1">
+    <div class="nav-item active flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer" data-page="sources" onclick="switchPage('sources', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+      <span class="text-sm">信息源管理</span>
+    </div>
+    <div class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-muted" data-page="schedule" onclick="switchPage('schedule', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <span class="text-sm">定时任务</span>
+    </div>
+    <div class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-muted" data-page="logs" onclick="switchPage('logs', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <span class="text-sm">采集日志</span>
+    </div>
+    <div class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-muted" data-page="stats" onclick="switchPage('stats', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      </div>
+    <div class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-muted" data-page="settings" onclick="switchPage('settings', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span class="text-sm">系统设置</span>
+    </div>
+    <div class="nav-item flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer text-muted" data-page="stats" onclick="switchPage('stats', this)">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+      <span class="text-sm">数据统计</span>
+    </div>
+  </nav>
+
+  <!-- 底部返回 -->
+  <div class="px-4 py-3 border-t border-border">
+    <a href="infohub-mockup.html" class="flex items-center gap-2 text-xs text-muted hover:text-accent2 transition">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+      返回阅读视图
+    </a>
+  </div>
+</aside>
+
+<!-- 右侧主区域 -->
+<div class="flex-1 overflow-y-auto">
+
+  <!-- ====== 页面1: 信息源管理 ====== -->
+  <div id="page-sources" class="page p-6">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-xl font-semibold">信息源管理</h1>
+        <p class="text-sm text-muted mt-1">管理所有信息采集源，配置采集参数</p>
+      </div>
+      <button class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showAddSourceModal()">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        添加信息源
+      </button>
+    </div>
+
+    <!-- 信息源卡片列表 -->
+    <div id="sourceCards" class="space-y-3"></div>
+  </div>
+
+  <!-- ====== 页面2: 定时任务 ====== -->
+  <div id="page-schedule" class="page p-6 hidden">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-xl font-semibold">定时任务</h1>
+        <p class="text-sm text-muted mt-1">配置自动采集的时间和频率</p>
+      </div>
+      <button class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showAddScheduleModal()">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        新建任务
+      </button>
+    </div>
+
+    <div id="scheduleList" class="space-y-3"></div>
+  </div>
+
+  <!-- ====== 页面3: 采集日志 ====== -->
+  <div id="page-logs" class="page p-6 hidden">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-xl font-semibold">采集日志</h1>
+        <p class="text-sm text-muted mt-1">查看历史采集记录和执行状态</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <select class="bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm text-fg focus:outline-none">
+          <option>全部来源</option>
+          <option>新闻联播</option>
+          <option>RSS</option>
+          <option>公众号</option>
+        </select>
+        <select class="bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm text-fg focus:outline-none">
+          <option>全部状态</option>
+          <option>成功</option>
+          <option>失败</option>
+          <option>运行中</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="logList" class="space-y-2"></div>
+  </div>
+
+  <!-- ====== 页面5: 系统设置 ====== -->
+  <div id="page-settings" class="page p-6 hidden">
+    <div class="mb-6">
+      <h1 class="text-xl font-semibold">系统设置</h1>
+      <p class="text-sm text-muted mt-1">配置 API 密钥和管理员权限</p>
+    </div>
+
+    <!-- 管理员 Token -->
+    <div class="bg-surface border border-border rounded-xl p-5 mb-4">
+      <h2 class="text-base font-medium mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+        管理员认证
+      </h2>
+      <div class="space-y-4">
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Admin Token</label>
+          <div class="flex gap-2">
+            <input type="password" id="admin-token" placeholder="输入管理员 Token" class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            <button onclick="saveAdminToken()" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
+              保存
+            </button>
+          </div>
+          <p class="text-xs text-muted mt-1.5">用于保护配置接口，调用 PATCH /api/sources/config/env 时需在 Header 中携带</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- API 配置 -->
+    <div class="bg-surface border border-border rounded-xl p-5">
+      <h2 class="text-base font-medium mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+        API 配置
+      </h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">图床 URL</label>
+          <input type="text" id="imgbed-url" placeholder="http://localhost:8085/api/" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">图床 Token</label>
+          <input type="password" id="imgbed-token" placeholder="图床 API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">WeFlow URL</label>
+          <input type="text" id="weflow-url" placeholder="http://127.0.0.1:5031" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">WeFlow Token</label>
+          <input type="password" id="weflow-token" placeholder="WeFlow API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Miniflux URL</label>
+          <input type="text" id="miniflux-url" placeholder="http://localhost:8080" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Miniflux 用户名</label>
+          <input type="text" id="miniflux-user" placeholder="Miniflux 用户名" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <button onclick="saveApiConfig()" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
+          保存配置
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 页面4: 数据统计 ====== -->
+  <div id="page-stats" class="page p-6 hidden">
+    <div class="mb-6">
+      <h1 class="text-xl font-semibold">数据统计</h1>
+      <p class="text-sm text-muted mt-1">信息汇总系统的整体运行数据</p>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-4 gap-4 mb-6">
+      <div class="bg-surface rounded-xl p-4 border border-border">
+        <div class="text-xs text-muted mb-1">总文章数</div>
+        <div class="text-3xl font-bold">1,247</div>
+        <div class="text-xs text-success mt-1">↑ 12% 较上周</div>
+      </div>
+      <div class="bg-surface rounded-xl p-4 border border-border">
+        <div class="text-xs text-muted mb-1">信息源</div>
+        <div class="text-3xl font-bold">7</div>
+        <div class="text-xs text-muted mt-1">5 个活跃</div>
+      </div>
+      <div class="bg-surface rounded-xl p-4 border border-border">
+        <div class="text-xs text-muted mb-1">今日采集</div>
+        <div class="text-3xl font-bold text-accent">42</div>
+        <div class="text-xs text-success mt-1">全部成功</div>
+      </div>
+      <div class="bg-surface rounded-xl p-4 border border-border">
+        <div class="text-xs text-muted mb-1">存储占用</div>
+        <div class="text-3xl font-bold">2.3<span class="text-lg text-muted ml-0.5">GB</span></div>
+        <div class="text-xs text-muted mt-1">PostgreSQL</div>
+      </div>
+    </div>
+
+    <!-- 各源统计 -->
+    <div class="bg-surface rounded-xl border border-border overflow-hidden">
+      <div class="px-4 py-3 border-b border-border">
+        <span class="text-sm font-medium">各信息源统计</span>
+      </div>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-border text-muted text-xs">
+            <th class="text-left px-4 py-2.5 font-medium">信息源</th>
+            <th class="text-right px-4 py-2.5 font-medium">总文章</th>
+            <th class="text-right px-4 py-2.5 font-medium">今日新增</th>
+            <th class="text-right px-4 py-2.5 font-medium">未读</th>
+            <th class="text-right px-4 py-2.5 font-medium">最近采集</th>
+            <th class="text-center px-4 py-2.5 font-medium">状态</th>
+          </tr>
+        </thead>
+        <tbody id="statsTable"></tbody>
+      </table>
+    </div>
+
+    <!-- 采集趋势图占位 -->
+    <div class="bg-surface rounded-xl border border-border mt-4 p-6">
+      <span class="text-sm font-medium">近7日采集趋势</span>
+      <div class="mt-4 flex items-end gap-2 h-32">
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/60 rounded-t" style="height: 60%"></div>
+          <span class="text-xs text-muted">周一</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/60 rounded-t" style="height: 45%"></div>
+          <span class="text-xs text-muted">周二</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/60 rounded-t" style="height: 80%"></div>
+          <span class="text-xs text-muted">周三</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/60 rounded-t" style="height: 55%"></div>
+          <span class="text-xs text-muted">周四</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/60 rounded-t" style="height: 70%"></div>
+          <span class="text-xs text-muted">周五</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/40 rounded-t" style="height: 30%"></div>
+          <span class="text-xs text-muted">周六</span>
+        </div>
+        <div class="flex-1 flex flex-col items-center gap-1">
+          <div class="w-full bg-accent/40 rounded-t" style="height: 25%"></div>
+          <span class="text-xs text-muted">周日</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 添加信息源弹窗 ====== -->
+<div id="addSourceModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-lg fade-in">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+      <h2 class="font-semibold">添加信息源</h2>
+      <button class="text-muted hover:text-fg" onclick="closeAddSourceModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="p-6">
+      <!-- 选择类型 -->
+      <div class="mb-5">
+        <label class="text-sm text-muted mb-2 block">信息源类型</label>
+        <div class="grid grid-cols-3 gap-2" id="sourceTypeGrid">
+          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="rss" onclick="selectSourceType('rss', this)">
+            <div class="text-xl mb-1">📡</div>
+            <div class="text-xs">RSS</div>
+          </button>
+          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="wechat" onclick="selectSourceType('wechat', this)">
+            <div class="text-xl mb-1">💬</div>
+            <div class="text-xs">公众号</div>
+          </button>
+          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="web" onclick="selectSourceType('web', this)">
+            <div class="text-xl mb-1">🌐</div>
+            <div class="text-xs">网页</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- 动态表单区 -->
+      <div id="sourceFormArea">
+        <!-- RSS 表单 -->
+        <div id="form-rss" class="space-y-4 hidden">
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">Feed URL *</label>
+            <input type="text" placeholder="https://example.com/feed.xml" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">名称</label>
+            <input type="text" placeholder="自动从 Feed 获取" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">分类</label>
+            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option>科技</option><option>财经</option><option>综合</option><option>自定义...</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">Miniflux 分类</label>
+            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option>默认分类</option><option>技术</option><option>新闻</option><option>AI</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 公众号表单 -->
+        <div id="form-wechat" class="space-y-4 hidden">
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">公众号过滤器（多个用逗号分隔）</label>
+            <input type="text" id="wechat-accounts" placeholder="如：老陈侃财,腾讯文档,机器之心" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            <p class="text-xs text-muted mt-1">留空表示同步 WeFlow 中的所有公众号</p>
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">WeFlow API 地址</label>
+            <input type="text" id="weflow-url" placeholder="http://100.77.50.100:8001" value="http://100.77.50.100:8001" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">WeFlow Token</label>
+            <input type="password" id="weflow-token" placeholder="WeFlow API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div class="bg-accent/10 border border-accent/20 rounded-lg p-3">
+            <p class="text-xs text-accent">ℹ️ 使用 WeFlow API 自动抓取公众号文章，配置公众号名称进行过滤</p>
+          </div>
+        </div>
+
+        <!-- 网页表单 -->
+        <div id="form-web" class="space-y-4 hidden">
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">网站 URL *</label>
+            <input type="text" placeholder="https://example.com" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">名称</label>
+            <input type="text" placeholder="网站名称" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">解析方式</label>
+            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option>Smart Web Fetch（自动清洗）</option>
+              <option>MinerU（高保真解析）</option>
+              <option>原生 RSS 发现</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-sm text-muted mb-1.5 block">分类</label>
+            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option>综合</option><option>科技</option><option>财经</option><option>自定义...</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 通用配置 -->
+      <div id="commonConfig" class="hidden mt-4 pt-4 border-t border-border space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-sm">启用 AI 自动摘要</span>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm">启用自动标签提取</span>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        </div>
+        <div class="flex items-center justify-between">
+          <span class="text-sm">去重检测</span>
+          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
+      <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeAddSourceModal()">取消</button>
+      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="addSource()">添加</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 新建定时任务弹窗 ====== -->
+<div id="addScheduleModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-lg fade-in">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between">
+      <h2 class="font-semibold">新建定时任务</h2>
+      <button class="text-muted hover:text-fg" onclick="closeAddScheduleModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="text-sm text-muted mb-1.5 block">任务名称</label>
+        <input type="text" placeholder="如：每日新闻联播采集" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+      </div>
+      <div>
+        <label class="text-sm text-muted mb-1.5 block">选择信息源</label>
+        <div class="grid grid-cols-2 gap-2">
+          <label class="flex items-center gap-2 p-2.5 bg-surface2 rounded-lg cursor-pointer hover:bg-border transition">
+            <input type="checkbox" class="accent-accent"> <span class="text-sm">📺 新闻联播</span>
+          </label>
+          <label class="flex items-center gap-2 p-2.5 bg-surface2 rounded-lg cursor-pointer hover:bg-border transition">
+            <input type="checkbox" class="accent-accent"> <span class="text-sm">📡 RSS</span>
+          </label>
+          <label class="flex items-center gap-2 p-2.5 bg-surface2 rounded-lg cursor-pointer hover:bg-border transition">
+            <input type="checkbox" class="accent-accent"> <span class="text-sm">💬 公众号</span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <label class="text-sm text-muted mb-1.5 block">执行频率</label>
+        <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          <option>每天一次</option>
+          <option>每12小时</option>
+          <option>每6小时</option>
+          <option>每小时</option>
+          <option>自定义 Cron</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">执行时间</label>
+          <input type="time" value="20:00" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">时区</label>
+          <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+            <option>Asia/Shanghai (UTC+8)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
+      <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeAddScheduleModal()">取消</button>
+      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="addSchedule()">创建</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== 模拟数据 =====
+const SOURCE_CONFIGS = [
+  {
+    id: 'xwlb', name: '新闻联播', icon: '📺', type: 'builtin',
+    color: 'bg-red-500/20 text-red-400',
+    description: 'CCTV 官网每日文字稿',
+    config: { source: 'tv.cctv.com', schedule: '每日 20:00' },
+    enabled: true, articleCount: 342, todayCount: 12,
+    lastFetch: '2026-04-22 20:01', status: 'success',
+    feeds: [],
+  },
+  {
+    id: 'rss', name: 'RSS 订阅', icon: '📡', type: 'miniflux',
+    color: 'bg-orange-500/20 text-orange-400',
+    description: 'Miniflux 管理的 RSS 订阅源',
+    config: { minifluxUrl: 'http://localhost:8084', totalFeeds: 28 },
+    enabled: true, articleCount: 523, todayCount: 18,
+    lastFetch: '2026-04-22 17:00', status: 'success',
+    feeds: [
+      { name: '阮一峰的网络日志', url: 'https://www.ruanyifeng.com/blog/atom.xml', category: '技术', status: 'active' },
+      { name: 'Hacker News', url: 'https://news.ycombinator.com/rss', category: '技术', status: 'active' },
+      { name: '36氪', url: 'https://36kr.com/feed', category: '科技', status: 'active' },
+      { name: '极客公园', url: 'https://www.geekpark.net/rss', category: '科技', status: 'active' },
+    ],
+  },
+  {
+    id: 'wechat', name: '公众号', icon: '💬', type: 'spider',
+    color: 'bg-green-500/20 text-green-400',
+    description: '微信公众号文章抓取',
+    config: { method: 'URL 输入 + 爬虫' },
+    enabled: true, articleCount: 86, todayCount: 3,
+    lastFetch: '2026-04-22 15:30', status: 'success',
+    feeds: [
+      { name: '机器之心', url: 'mp.weixin.qq.com', category: 'AI', status: 'manual' },
+      { name: '量子位', url: 'mp.weixin.qq.com', category: 'AI', status: 'manual' },
+      { name: '晚点LatePost', url: 'mp.weixin.qq.com', category: '财经', status: 'manual' },
+    ],
+  },
+  {
+    id: 'tencent', name: '腾讯新闻', icon: '📰', type: 'api',
+    color: 'bg-blue-500/20 text-blue-400',
+    description: '腾讯新闻 CLI 接口',
+    config: { apiKey: '已配置', categories: ['热点', '科技', '财经'] },
+    enabled: true, articleCount: 215, todayCount: 7,
+    lastFetch: '2026-04-22 16:45', status: 'success',
+    feeds: [],
+  },
+  {
+    id: 'ai', name: 'AI 资讯', icon: '🤖', type: 'aggregation',
+    color: 'bg-cyan-500/20 text-cyan-400',
+    description: '多源 AI 新闻聚合',
+    config: { sources: 'VentureBeat, TechCrunch, The Verge', schedule: '每日 9:00' },
+    enabled: true, articleCount: 28, todayCount: 5,
+    lastFetch: '2026-04-22 09:15', status: 'success',
+    feeds: [],
+  },
+  {
+    id: 'magazine', name: '报刊杂志', icon: '📰', type: 'magazine',
+    color: 'bg-amber-500/20 text-amber-400',
+    description: '报刊杂志精选',
+    config: { schedule: '每周一 8:00' },
+    enabled: true, articleCount: 8, todayCount: 0,
+    lastFetch: '2026-04-20 10:00', status: 'success',
+    feeds: [
+      { id: 'caixin', name: '财新周刊', icon: '🗞️', type: 'magazine', articleCount: 8, todayCount: 0, enabled: true },
+    ],
+  },
+];
+
+const SCHEDULES = [
+  { id: 1, name: '新闻联播每日采集', sources: ['📺 新闻联播'], cron: '0 20 * * *', lastRun: '2026-04-22 20:01', nextRun: '2026-04-23 20:00', status: 'active', lastResult: 'success' },
+  { id: 2, name: 'RSS 定时同步', sources: ['📡 RSS'], cron: '0 */6 * * *', lastRun: '2026-04-22 18:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
+  { id: 3, name: '公众号同步', sources: ['💬 公众号'], cron: '0 */4 * * *', lastRun: '2026-04-22 16:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
+  { id: 4, name: 'AI 新闻早报', sources: ['🤖 AI资讯'], cron: '0 9 * * *', lastRun: '2026-04-22 09:15', nextRun: '2026-04-23 09:00', status: 'active', lastResult: 'success' },
+  { id: 5, name: '腾讯新闻同步', sources: ['📰 腾讯新闻'], cron: '0 8,14,20 * * *', lastRun: '2026-04-22 20:00', nextRun: '2026-04-23 08:00', status: 'active', lastResult: 'success' },
+  { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'paused', lastResult: 'success' },
+];
+
+const LOGS = [
+  { id: 1, source: '📺 新闻联播', action: '每日采集', status: 'success', articles: 12, time: '2026-04-22 20:01', duration: '8s', detail: '获取 20260422 文字稿成功，共 12 条新闻' },
+  { id: 2, source: '📡 RSS', action: '定时同步', status: 'success', articles: 18, time: '2026-04-22 18:00', duration: '23s', detail: 'Miniflux 同步完成，28个源全部刷新' },
+  { id: 3, source: '💬 公众号', action: 'WeFlow同步', status: 'success', articles: 5, time: '2026-04-22 16:00', duration: '18s', detail: 'WeFlow 同步 9 个公众号，获取 20 条，入库 5 条' },
+  { id: 4, source: '📰 腾讯新闻', action: '定时同步', status: 'success', articles: 7, time: '2026-04-22 14:00', duration: '3s', detail: 'CLI 获取热点新闻 7 条' },
+  { id: 5, source: '🤖 AI资讯', action: '每日聚合', status: 'success', articles: 5, time: '2026-04-22 09:15', duration: '45s', detail: '从 3 个源获取 AI 新闻 5 条' },
+  { id: 6, source: '📡 RSS', action: '定时同步', status: 'error', articles: 0, time: '2026-04-22 06:00', duration: '12s', detail: 'Miniflux 连接超时，重试后成功' },
+  { id: 7, source: '📺 新闻联播', action: '每日采集', status: 'success', articles: 11, time: '2026-04-21 20:01', duration: '7s', detail: '获取 20260421 文字稿成功，共 11 条新闻' },
+  { id: 8, source: '📡 RSS', action: '定时同步', status: 'success', articles: 15, time: '2026-04-21 18:00', duration: '19s', detail: 'Miniflux 同步完成' },
+  { id: 9, source: '📰 报刊杂志', action: '自动采集', status: 'success', articles: 3, time: '2026-04-20 10:00', duration: '30s', detail: '财新周刊采集 3 篇文章' },
+];
+
+// ===== 页面切换 =====
+function switchPage(page, navEl) {
+  document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+  document.getElementById('page-' + page).classList.remove('hidden');
+  document.querySelectorAll('.nav-item').forEach(n => { n.classList.remove('active'); n.classList.add('text-muted'); });
+  navEl.classList.add('active');
+  navEl.classList.remove('text-muted');
+  
+  // 加载系统设置时获取当前配置
+  if (page === 'settings') {
+    loadApiConfig();
+  }
+}
+
+// ===== 系统设置 =====
+let currentAdminToken = '';
+
+async function loadApiConfig() {
+  try {
+    const res = await fetch('/api/sources/config/env');
+    const data = await res.json();
+    document.getElementById('imgbed-url').value = data.imgbed_url || '';
+    document.getElementById('weflow-url').value = data.weflow_url || '';
+    document.getElementById('miniflux-url').value = data.miniflux_url || '';
+    document.getElementById('miniflux-user').value = data.miniflux_user || '';
+  } catch (e) {
+    console.error('加载配置失败:', e);
+  }
+}
+
+async function saveAdminToken() {
+  const token = document.getElementById('admin-token').value.trim();
+  if (!token) return alert('请输入 Admin Token');
+  
+  currentAdminToken = token;
+  alert('Admin Token 已保存（仅本地存储，刷新后需重新输入）\n\n调用接口时将自动携带此 Token');
+}
+
+async function saveApiConfig() {
+  const token = currentAdminToken || document.getElementById('admin-token').value.trim();
+  if (!token) {
+    alert('请先输入 Admin Token');
+    return;
+  }
+  
+  const config = {
+    imgbed_url: document.getElementById('imgbed-url').value,
+    imgbed_token: document.getElementById('imgbed-token').value,
+    weflow_url: document.getElementById('weflow-url').value,
+    weflow_token: document.getElementById('weflow-token').value,
+    miniflux_url: document.getElementById('miniflux-url').value,
+    miniflux_user: document.getElementById('miniflux-user').value,
+  };
+  
+  try {
+    const res = await fetch('/api/sources/config/env', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + token
+      },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert('配置保存成功');
+    } else {
+      alert('保存失败: ' + (data.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('保存失败: ' + e.message);
+  }
+}
+
+// ===== 信息源管理 =====
+function renderSourceCards() {
+  const el = document.getElementById('sourceCards');
+  el.innerHTML = SOURCE_CONFIGS.map(s => {
+    const statusDot = s.status === 'success' ? 'bg-success' : s.status === 'paused' ? 'bg-muted' : 'bg-danger';
+    const statusText = s.status === 'success' ? '运行中' : s.status === 'paused' ? '已暂停' : '异常';
+    const typeLabel = { builtin: '内置', miniflux: 'Miniflux', spider: '爬虫', api: 'API', aggregation: '聚合', import: '导入' }[s.type];
+
+    return `
+    <div class="bg-surface rounded-xl border border-border p-4 hover:border-accent/30 transition">
+      <div class="flex items-start gap-4">
+        <!-- 图标 -->
+        <div class="w-10 h-10 ${s.color.split(' ')[0]} rounded-lg flex items-center justify-center text-lg shrink-0">${s.icon}</div>
+        
+        <!-- 信息 -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-medium text-sm">${s.name}</span>
+            <span class="badge bg-surface2 text-muted">${typeLabel}</span>
+            <span class="flex items-center gap-1 ml-auto">
+              <span class="w-1.5 h-1.5 ${statusDot} rounded-full"></span>
+              <span class="text-xs text-muted">${statusText}</span>
+            </span>
+          </div>
+          <p class="text-xs text-muted mb-2">${s.description}</p>
+          
+          <!-- 子源列表 -->
+          ${s.feeds.length > 0 ? `
+          <div class="space-y-1 mb-2">
+            ${s.feeds.map(f => `
+              <div class="flex items-center gap-2 text-xs bg-surface2 rounded px-2.5 py-1.5">
+                <span class="w-1.5 h-1.5 ${f.status === 'active' ? 'bg-success' : 'bg-warn'} rounded-full"></span>
+                <span class="flex-1 truncate">${f.name}</span>
+                <span class="text-muted">${f.category}</span>
+                <button class="text-muted hover:text-danger transition" title="删除" onclick="event.stopPropagation(); removeFeed('${s.id}', '${f.name}')">
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+              </div>
+            `).join('')}
+            <button class="text-xs text-accent2 hover:text-accent transition flex items-center gap-1 px-2.5 py-1" onclick="showAddFeedModal('${s.id}')">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+              添加子源
+            </button>
+          </div>
+          ` : ''}
+          
+          <!-- 统计 -->
+          <div class="flex items-center gap-4 text-xs text-muted">
+            <span>共 <span class="text-fg font-medium">${s.articleCount}</span> 篇</span>
+            <span>今日 +<span class="text-success font-medium">${s.todayCount}</span></span>
+            <span>最近采集 ${s.lastFetch}</span>
+          </div>
+        </div>
+
+        <!-- 操作 -->
+        <div class="flex items-center gap-3 shrink-0">
+          <label class="switch">
+            <input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleSource('${s.id}', this.checked)">
+            <span class="slider"></span>
+          </label>
+          <button class="text-muted hover:text-accent2 transition p-1" title="立即采集" onclick="runSourceFetch('${s.id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+          <button class="text-muted hover:text-fg transition p-1" title="设置" onclick="showSourceSettings('${s.id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </button>
+          <button class="text-muted hover:text-danger transition p-1" title="删除" onclick="removeSource('${s.id}')">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderSchedules() {
+  const el = document.getElementById('scheduleList');
+  el.innerHTML = SCHEDULES.map(s => {
+    const resultBadge = s.lastResult === 'success' 
+      ? '<span class="badge bg-success/20 text-success">成功</span>' 
+      : '<span class="badge bg-danger/20 text-danger">失败</span>';
+    return `
+    <div class="bg-surface rounded-xl border border-border p-4 hover:border-accent/30 transition">
+      <div class="flex items-center gap-4">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="font-medium text-sm">${s.name}</span>
+            ${resultBadge}
+            ${s.status === 'paused' ? '<span class="badge bg-warn/20 text-warn">已暂停</span>' : ''}
+          </div>
+          <div class="flex items-center gap-3 text-xs text-muted">
+            <span>来源: ${s.sources.join(', ')}</span>
+            <span>Cron: <code class="bg-surface2 px-1.5 py-0.5 rounded text-accent2">${s.cron}</code></span>
+          </div>
+          <div class="flex items-center gap-3 text-xs text-muted mt-1">
+            <span>上次执行: ${s.lastRun}</span>
+            <span>下次执行: ${s.nextRun}</span>
+          </div>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <button class="text-xs text-accent2 hover:text-accent transition flex items-center gap-1" onclick="runScheduleNow(${s.id})">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>
+            立即执行
+          </button>
+          <label class="switch">
+            <input type="checkbox" ${s.status === 'active' ? 'checked' : ''} onchange="toggleSchedule(${s.id}, this.checked)">
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderLogs() {
+  const el = document.getElementById('logList');
+  el.innerHTML = LOGS.map(l => {
+    const statusClass = l.status === 'success' ? 'log-success' : l.status === 'error' ? 'log-error' : 'log-running';
+    const statusBadge = l.status === 'success' 
+      ? '<span class="badge bg-success/20 text-success">成功</span>' 
+      : l.status === 'error' 
+      ? '<span class="badge bg-danger/20 text-danger">失败</span>'
+      : '<span class="badge bg-accent/20 text-accent2">运行中</span>';
+    return `
+    <div class="bg-surface rounded-lg border border-border p-3 ${statusClass} hover:bg-surface2 transition">
+      <div class="flex items-center gap-3">
+        <div class="flex-1">
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-sm font-medium">${l.source}</span>
+            ${statusBadge}
+            <span class="text-xs text-muted ml-auto">${l.time}</span>
+          </div>
+          <p class="text-xs text-muted">${l.detail}</p>
+          <div class="flex items-center gap-3 text-xs text-muted mt-1">
+            <span>文章数: <span class="text-fg">${l.articles}</span></span>
+            <span>耗时: ${l.duration}</span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderStats() {
+  const el = document.getElementById('statsTable');
+  el.innerHTML = SOURCE_CONFIGS.map(s => {
+    const statusDot = s.status === 'success' ? '<span class="w-2 h-2 bg-success rounded-full inline-block"></span>' : s.status === 'paused' ? '<span class="w-2 h-2 bg-muted rounded-full inline-block"></span>' : '<span class="w-2 h-2 bg-danger rounded-full inline-block"></span>';
+    return `
+    <tr class="border-b border-border/50 hover:bg-surface2 transition">
+      <td class="px-4 py-3"><span class="mr-1.5">${s.icon}</span>${s.name}</td>
+      <td class="px-4 py-3 text-right">${s.articleCount}</td>
+      <td class="px-4 py-3 text-right text-success">+${s.todayCount}</td>
+      <td class="px-4 py-3 text-right text-warn">${Math.floor(s.articleCount * 0.3)}</td>
+      <td class="px-4 py-3 text-right text-muted">${s.lastFetch}</td>
+      <td class="px-4 py-3 text-center">${statusDot}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ===== 弹窗交互 =====
+let selectedSourceType = null;
+
+function showAddSourceModal() {
+  document.getElementById('addSourceModal').classList.remove('hidden');
+  document.getElementById('addSourceModal').classList.add('flex');
+  selectedSourceType = null;
+  document.querySelectorAll('.source-type-btn').forEach(b => b.classList.remove('border-accent', 'bg-accent/10'));
+  document.querySelectorAll('[id^="form-"]').forEach(f => f.classList.add('hidden'));
+  document.getElementById('commonConfig').classList.add('hidden');
+}
+
+function closeAddSourceModal() {
+  document.getElementById('addSourceModal').classList.add('hidden');
+  document.getElementById('addSourceModal').classList.remove('flex');
+}
+
+function selectSourceType(type, btn) {
+  selectedSourceType = type;
+  document.querySelectorAll('.source-type-btn').forEach(b => b.classList.remove('border-accent', 'bg-accent/10'));
+  btn.classList.add('border-accent', 'bg-accent/10');
+  document.querySelectorAll('[id^="form-"]').forEach(f => f.classList.add('hidden'));
+  document.getElementById('form-' + type).classList.remove('hidden');
+  document.getElementById('commonConfig').classList.remove('hidden');
+}
+
+function addSource() {
+  if (!selectedSourceType) { alert('请选择信息源类型'); return; }
+  closeAddSourceModal();
+  alert('信息源添加成功（样稿演示）');
+}
+
+function showAddScheduleModal() {
+  document.getElementById('addScheduleModal').classList.remove('hidden');
+  document.getElementById('addScheduleModal').classList.add('flex');
+}
+
+function closeAddScheduleModal() {
+  document.getElementById('addScheduleModal').classList.add('hidden');
+  document.getElementById('addScheduleModal').classList.remove('flex');
+}
+
+function addSchedule() {
+  closeAddScheduleModal();
+  alert('定时任务创建成功（样稿演示）');
+}
+
+function showAddFeedModal(sourceId) {
+  alert('为 ' + sourceId + ' 添加子源（样稿演示）');
+}
+
+function toggleSource(id, enabled) {
+  const s = SOURCE_CONFIGS.find(s => s.id === id);
+  s.enabled = enabled;
+  s.status = enabled ? 'success' : 'paused';
+  renderSourceCards();
+}
+
+function toggleSchedule(id, enabled) {
+  const s = SCHEDULES.find(s => s.id === id);
+  s.status = enabled ? 'active' : 'paused';
+  renderSchedules();
+}
+
+function runSourceFetch(id) {
+  alert('立即采集 ' + id + '（样稿演示）');
+}
+
+function runScheduleNow(id) {
+  alert('立即执行任务 ' + id + '（样稿演示）');
+}
+
+function removeSource(id) {
+  if (confirm('确认删除此信息源？相关文章不会被删除。')) {
+    const idx = SOURCE_CONFIGS.findIndex(s => s.id === id);
+    if (idx >= 0) { SOURCE_CONFIGS.splice(idx, 1); renderSourceCards(); }
+  }
+}
+
+function removeFeed(sourceId, feedName) {
+  if (confirm('确认删除子源「' + feedName + '」？')) {
+    const s = SOURCE_CONFIGS.find(s => s.id === sourceId);
+    if (s) { s.feeds = s.feeds.filter(f => f.name !== feedName); renderSourceCards(); }
+  }
+}
+
+function showSourceSettings(id) {
+  alert('打开 ' + id + ' 设置（样稿演示）');
+}
+
+// ===== 初始化 =====
+renderSourceCards();
+renderSchedules();
+renderLogs();
+renderStats();
+</script>
+</body>
+</html>
