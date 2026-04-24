@@ -22,6 +22,8 @@ import { createArticlesRoutes } from './routes/articles.js';
 import { createFetchRoutes } from './routes/fetch.js';
 import { createSyncRoutes } from './routes/sync.js';
 import { createWechatAdminRoutes } from './routes/wechat-admin.js';
+import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';
+import { createBilibiliAdminUppersRoutes } from './routes/bilibili-admin-uppers.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -78,6 +80,9 @@ app.get('/', (c) => {
   const indexPath = join(FRONTEND_DIR, 'index.html');
   if (existsSync(indexPath)) {
     const html = readFileSync(indexPath, 'utf-8');
+    c.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    c.header('Pragma', 'no-cache');
+    c.header('Expires', '0');
     return c.html(html);
   }
   return c.text('InfoHub frontend not found', 404);
@@ -88,6 +93,9 @@ app.get('/admin', (c) => {
   const adminPath = join(FRONTEND_DIR, 'infohub-admin.html');
   if (existsSync(adminPath)) {
     const html = readFileSync(adminPath, 'utf-8');
+    c.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    c.header('Pragma', 'no-cache');
+    c.header('Expires', '0');
     return c.html(html);
   }
   return c.text('Admin page not found', 404);
@@ -165,6 +173,8 @@ app.route('/api/articles', createArticlesRoutes(sql));
 app.route('/api/fetch', createFetchRoutes(sql));
 app.route('/api/sync', createSyncRoutes(sql));
 app.route('/api/wechat-admin', createWechatAdminRoutes(sql));
+app.route('/api/bilibili-admin', createBilibiliAdminRoutes(sql));
+app.route('/api/bilibili-admin', createBilibiliAdminUppersRoutes(sql));
 
 // ============ 启动 ============
 

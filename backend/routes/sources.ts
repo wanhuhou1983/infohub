@@ -18,27 +18,35 @@ export function createSourcesRoutes(sql: Sql): Hono {
     return c.json(sources);
   });
 
-  // 获取信息源树（父源+子源分组）
+  // 获取信息源树（支持多层嵌套）
   // 注意：微信公众号的子源如果 enabled=false 则不显示
   router.get('/tree', async (c) => {
     const sources = await sql`SELECT * FROM sources ORDER BY id`;
     
-    const parents = sources.filter(s => !s.parent_id);
-    const children = sources.filter(s => s.parent_id);
+    // 构建节点映射
+    const nodeMap = new Map();
+    sources.forEach(s => nodeMap.set(s.id, { ...s, children: [] }));
     
-    const tree = parents.map(p => {
-      // 微信公众号（type=wechat）的子源：只显示 enabled=true 的
-      let filteredChildren = children.filter(ch => ch.parent_id === p.id);
-      if (p.type === 'wechat') {
-        filteredChildren = filteredChildren.filter(ch => ch.enabled === true);
+    const roots: any[] = [];
+    
+    // 构建树结构
+    sources.forEach(s => {
+      const node = nodeMap.get(s.id);
+      if (s.parent_id === null) {
+        roots.push(node);
+      } else {
+        const parent = nodeMap.get(s.parent_id);
+        if (parent) {
+          // 微信公众号：只显示 enabled=true 的子源
+          if (parent.type === 'wechat' && node.enabled === false) {
+            return; // 跳过
+          }
+          parent.children.push(node);
+        }
       }
-      return {
-        ...p,
-        children: filteredChildren,
-      };
     });
     
-    return c.json(tree);
+    return c.json(roots);
   });
 
   // 更新信息源配置（合并式更新，不覆盖未传字段）

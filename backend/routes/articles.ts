@@ -68,6 +68,9 @@ export function createArticlesRoutes(sql: Sql): Hono {
     if (is_starred !== undefined) {
       conditions.push(sql`a.is_starred = ${is_starred === 'true'}`);
     }
+    if (c.req.query('is_watch_later') !== undefined) {
+      conditions.push(sql`a.is_watch_later = ${c.req.query('is_watch_later') === 'true'}`);
+    }
 
     // 合并条件：用 AND 连接所有片段
     // 🔒 修复：缓存 buildWhere 结果，避免多次调用生成不同参数编号
