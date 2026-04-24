@@ -21,7 +21,7 @@ const SPIDER_DIR = path.resolve(__dirname, '../../../wechat-article-spider');
 const PYTHON_CMD = path.join(SPIDER_DIR, '.venv/bin/python3');
 
 // ============ 辅助函数：调用 wechat-article-spider 抓取正文 ============
-async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
+export async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
   return new Promise((resolve) => {
     const outputDir = path.join(SPIDER_DIR, 'docs');
     const args = ['main.py', articleUrl, outputDir];
@@ -251,7 +251,7 @@ export function createFetchRoutes(sql: Sql): Hono {
         } else {
           const [created] = await sql`
             INSERT INTO sources (name, type, icon, config, enabled, parent_id)
-            VALUES (${feedName}, ${feedType}, ${feedType === 'wechat' ? '💬' : (feedType === 'magazine' ? '🗞️' : '📡')}, ${JSON.stringify({ miniflux_feed_id: String(mfFeedId), feed_url: feedUrl })}, true, ${parentId})
+            VALUES (${feedName}, ${feedType}, ${feedType === 'wechat' ? '💬' : (feedType === 'magazine' ? '🗞️' : '📡')}, ${sql.json({ miniflux_feed_id: String(mfFeedId), feed_url: feedUrl })}, true, ${parentId})
             RETURNING id
           `;
           feedSourceMap.set(mfFeedId, created!.id);
@@ -341,7 +341,7 @@ export function createFetchRoutes(sql: Sql): Hono {
     }
   });
 
-  // ============ 微信公众号同步（WeFlow API → wechat-article-spider → 入库） ============
+  // ============ 微信公众号同步（从已启用的 WeFlow 子源采集 → wechat-article-spider → 入库） ============
 
   router.post('/wechat', async (c) => {
     const startMs = Date.now();
@@ -351,41 +351,34 @@ export function createFetchRoutes(sql: Sql): Hono {
       if (!wechatSource) return c.json({ error: '微信公众号信息源未配置' }, 400);
 
       const config = wechatSource.config || {};
-      // 从配置中读取公众号名称过滤列表
-      const wechatAccounts: string[] = config.wechat_accounts || [];
-      
       const weflowUrl = (config.weflow_url || process.env.WEFLOW_URL || 'http://127.0.0.1:5031').replace(/\/+$/, '');
       const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN;
       if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置，请在设置页面或环境变量中填写' }, 400);
       const wechatLimit = Math.min(Math.max(Number(config.wechat_limit) || 5, 1), 50);
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
 
-      // Step 1: 获取 WeFlow 会话列表，筛选 gh_ 开头的公众号
-      const sessionsResp = await fetch(`${weflowUrl}/api/v1/sessions?limit=500`, { headers });
-      if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
-      const sessionsData = await sessionsResp.json() as any;
-      const allSessions = (sessionsData.sessions || []).filter((s: any) => s.username?.startsWith('gh_'));
+      // Step 1: 从数据库读取已启用的 WeFlow 公众号子源（enabled = true 且有 gh_id）
+      const childSources = await sql`
+        SELECT id, name, enabled, config->>'gh_id' AS gh_id
+        FROM sources
+        WHERE type = 'wechat' AND parent_id = ${wechatSource.id} AND enabled = true AND config->>'gh_id' IS NOT NULL
+        ORDER BY name
+      `;
 
-      // Step 2: 根据配置的公众号名称过滤（displayName 匹配）
-      const targetSessions = wechatAccounts.length > 0
-        ? allSessions.filter((s: any) => wechatAccounts.includes(s.displayName))
-        : allSessions;
-
-      if (targetSessions.length === 0) {
-        return c.json({ ok: true, fetched: 0, inserted: 0, message: '没有匹配的公众号' });
+      if (childSources.length === 0) {
+        return c.json({ ok: true, fetched: 0, inserted: 0, message: '未启用任何公众号，请在公众号管理中开启' });
       }
 
-      // Step 3: 逐个公众号获取最新消息 → 提取文章 URL → spider 抓取正文 → 入库
+      // Step 2: 逐个已启用的公众号获取最新消息 → 提取文章 URL → spider 抓取正文 → 入库
       let totalFetched = 0;
       let inserted = 0;
       const errors: string[] = [];
 
-      for (const session of targetSessions) {
-        const ghId = session.username;   // e.g. gh_64fcc3570158
-        const displayName = session.displayName;  // e.g. 老陈侃财
+      for (const source of childSources) {
+        const ghId = source.gh_id;
+        const displayName = source.name;
 
         try {
-          // 获取该公众号的最新消息
           const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}`, { headers });
           if (!msgsResp.ok) {
             errors.push(`${displayName}: messages API ${msgsResp.status}`);
@@ -396,51 +389,31 @@ export function createFetchRoutes(sql: Sql): Hono {
 
           for (const msg of messages) {
             try {
-              // 从 rawContent XML 中提取公众号文章 URL
               const rawContent = msg.rawContent || '';
               const urlMatches = [...rawContent.matchAll(/<url><!\[CDATA\[(.*?)\]\]><\/url>/g)];
-              // 取第一个包含 mp.weixin.qq.com 的 URL
               const articleUrl = urlMatches
                 .map(m => m[1])
                 .find(u => u && u.includes('mp.weixin.qq.com'));
               if (!articleUrl) continue;
 
-              // 从 rawContent 提取标题
               const titleMatch = rawContent.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/);
               const rawTitle = titleMatch?.[1] || '';
 
               const contentHash = hashString(articleUrl);
 
-              // 检查是否已存在（content_hash 唯一键）
               const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
               if (existing) {
                 totalFetched++;
                 continue;
               }
 
-              // 查找或创建公众号子源
-              let [sourceRow] = await sql`
-                SELECT id FROM sources WHERE type = 'wechat' AND parent_id = ${wechatSource.id} AND name = ${displayName}
-              `;
-              if (!sourceRow) {
-                const [newSource] = await sql`
-                  INSERT INTO sources (name, type, parent_id, config, created_at)
-                  VALUES (${displayName}, 'wechat', ${wechatSource.id}, ${JSON.stringify({ gh_id: ghId })}, NOW())
-                  RETURNING id
-                `;
-                sourceRow = newSource;
-              }
-
-              // Step 4: 用 wechat-article-spider 抓取正文
               console.log(`🕷️ 抓取: [${displayName}] ${rawTitle || articleUrl}`);
               const article = await crawlWechatArticle(articleUrl);
 
-              // 优先用 WeFlow rawContent 里的标题，spider 的标题可能解析失败
               const title = rawTitle || (article?.title && article.title !== '无标题' ? article.title : '') || displayName;
               const publishedAt = msg.createTime ? new Date(msg.createTime * 1000).toISOString() : new Date().toISOString();
               const author = displayName;
 
-              // 处理图片并上传到图床
               let content = article?.content || `${title}\n\n来源：${displayName}\n链接：${articleUrl}`;
               try {
                 content = await processImages(content);
@@ -448,14 +421,12 @@ export function createFetchRoutes(sql: Sql): Hono {
                 console.error(`图片处理失败: ${e.message}`);
               }
 
-              // 🔒 修复：调用分类器和标签提取器，而非硬编码
               const category = classifyByFeed(displayName);
               const tags = extractTags(title + ' ' + content.slice(0, 200), displayName);
 
-              // Step 5: 写入数据库
               const insertedRows = await sql`
                 INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-                VALUES (${sourceRow.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${articleUrl}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
+                VALUES (${source.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${articleUrl}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
                 ON CONFLICT (content_hash) DO NOTHING
                 RETURNING id
               `;
@@ -487,10 +458,10 @@ export function createFetchRoutes(sql: Sql): Hono {
       const durationMs = Date.now() - startMs;
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
-        VALUES (${wechatSource.id}, '公众号同步', 'success', ${inserted}, ${`WeFlow 同步 ${targetSessions.length} 个公众号，获取 ${totalFetched} 条，入库 ${inserted} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`}, ${durationMs})
+        VALUES (${wechatSource.id}, '公众号同步', 'success', ${inserted}, ${`采集 ${childSources.length} 个已启用的公众号，获取 ${totalFetched} 条，入库 ${inserted} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`}, ${durationMs})
       `;
 
-      return c.json({ ok: true, fetched: totalFetched, inserted, accounts: targetSessions.length, errors: errors.length ? errors : undefined });
+      return c.json({ ok: true, fetched: totalFetched, inserted, accounts: childSources.length, errors: errors.length ? errors : undefined });
     } catch (e: any) {
       const durationMs = Date.now() - startMs;
       const [wechatSource] = await sql`SELECT id FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
@@ -498,6 +469,112 @@ export function createFetchRoutes(sql: Sql): Hono {
         await sql`
           INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
           VALUES (${wechatSource.id}, '公众号同步', 'error', 0, ${e.message}, ${durationMs})
+        `;
+      }
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ 人民日报采集 ============
+
+  router.post('/rmrb', async (c) => {
+    const { date, full } = await c.req.json().catch(() => ({}));
+    const startMs = Date.now();
+
+    try {
+      const [rmrbSource] = await sql`SELECT id FROM sources WHERE type = 'rmrb' LIMIT 1`;
+      if (!rmrbSource) return c.json({ error: '人民日报信息源未配置' }, 400);
+
+      const targetDate = date || new Date().toISOString().slice(0, 10);
+      const rmrbDir = path.resolve(__dirname, '../../skills/rmrb-daily');
+      const outputFile = path.join(rmrbDir, `rmrb_${targetDate}.md`);
+
+      // 构建命令参数
+      const args = ['rmrb_daily.py', targetDate];
+      if (full) args.push('--full');
+
+      console.log(`📰 执行人民日报采集: ${args.join(' ')}`);
+
+      // 调用 Python 脚本
+      const result = await new Promise<{ stdout: string; stderr: string; code: number }>((resolve) => {
+        const proc = spawn('python3', args, { cwd: rmrbDir });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', (data) => { stdout += data.toString(); });
+        proc.stderr.on('data', (data) => { stderr += data.toString(); });
+        proc.on('close', (code) => resolve({ stdout, stderr, code: code || 0 }));
+      });
+
+      if (result.code !== 0) {
+        throw new Error(`采集失败: ${result.stderr || '未知错误'}`);
+      }
+
+      // 读取生成的 Markdown 文件
+      let mdContent = '';
+      try {
+        mdContent = readFileSync(outputFile, 'utf-8');
+      } catch (e: any) {
+        throw new Error(`无法读取输出文件: ${e.message}`);
+      }
+
+      // 解析 Markdown 提取文章
+      // 格式: ## 第01版：要闻\n\n### 1. 标题\n- [查看原文](url)
+      const articlePattern = /###\s+\d+\.\s+(.+?)\n- \[查看原文\]\((.+?)\)/g;
+      const articles: { title: string; url: string }[] = [];
+      let match;
+      while ((match = articlePattern.exec(mdContent)) !== null) {
+        articles.push({ title: match[1].trim(), url: match[2].trim() });
+      }
+
+      console.log(`📰 解析到 ${articles.length} 篇文章`);
+
+      let inserted = 0;
+      for (const art of articles) {
+        console.log(`  → 处理: ${art.title.slice(0, 20)}... URL: ${art.url.slice(-30)}`);
+        try {
+          const contentHash = hashString(art.url);
+          const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+          if (existing) {
+            totalFetched++;
+            continue;
+          }
+
+          const insertedRows = await sql`
+            INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at)
+            VALUES (${rmrbSource.id}, ${art.title}, ${`来源：人民日报\n链接：${art.url}`}, ${art.title.slice(0, 150)}, ${art.url}, ${targetDate}, '国内', ARRAY['人民日报要闻'], ${contentHash}, NOW())
+            ON CONFLICT (content_hash) DO NOTHING
+            RETURNING id
+          `;
+
+          if (insertedRows.length > 0) {
+            inserted++;
+            const newId = insertedRows[0]!.id;
+            await saveArticleFile(newId, `来源：人民日报\n链接：${art.url}`, {
+              id: newId, title: art.title, source_type: 'rmrb',
+              source_name: '人民日报', url: art.url, published_at: targetDate,
+              category: '国内', tags: '人民日报要闻', author: '人民日报', is_read: false, is_starred: false,
+            });
+          }
+        } catch (e: any) {
+          if (e.code !== '23505') console.error('RMRB insert error:', e.message);
+        }
+      }
+
+      await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${rmrbSource.id}`;
+      const durationMs = Date.now() - startMs;
+      await sql`
+        INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+        VALUES (${rmrbSource.id}, '每日采集', 'success', ${inserted}, ${`人民日报 ${targetDate}，获取 ${articles.length} 条，入库 ${inserted} 条`}, ${durationMs})
+      `;
+
+      return c.json({ ok: true, fetched: articles.length, inserted, date: targetDate });
+    } catch (e: any) {
+      const durationMs = Date.now() - startMs;
+      const [rmrbSource] = await sql`SELECT id FROM sources WHERE type = 'rmrb' LIMIT 1`;
+      if (rmrbSource) {
+        await sql`
+          INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
+          VALUES (${rmrbSource.id}, '每日采集', 'error', 0, ${e.message}, ${durationMs})
         `;
       }
       return c.json({ error: e.message }, 500);

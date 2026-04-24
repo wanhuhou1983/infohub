@@ -19,16 +19,24 @@ export function createSourcesRoutes(sql: Sql): Hono {
   });
 
   // 获取信息源树（父源+子源分组）
+  // 注意：微信公众号的子源如果 enabled=false 则不显示
   router.get('/tree', async (c) => {
     const sources = await sql`SELECT * FROM sources ORDER BY id`;
     
     const parents = sources.filter(s => !s.parent_id);
     const children = sources.filter(s => s.parent_id);
     
-    const tree = parents.map(p => ({
-      ...p,
-      children: children.filter(ch => ch.parent_id === p.id),
-    }));
+    const tree = parents.map(p => {
+      // 微信公众号（id=24）的子源：只显示 enabled=true 的
+      let filteredChildren = children.filter(ch => ch.parent_id === p.id);
+      if (p.id === 24) {
+        filteredChildren = filteredChildren.filter(ch => ch.enabled === true);
+      }
+      return {
+        ...p,
+        children: filteredChildren,
+      };
+    });
     
     return c.json(tree);
   });
@@ -49,7 +57,7 @@ export function createSourcesRoutes(sql: Sql): Hono {
     const newConfig = { ...currentConfig, ...body };
 
     const [updated] = await sql`
-      UPDATE sources SET config = ${JSON.stringify(newConfig)}, updated_at = NOW() WHERE id = ${id}
+      UPDATE sources SET config = ${sql.json(newConfig)}, updated_at = NOW() WHERE id = ${id}
       RETURNING id, name, type, config
     `;
 

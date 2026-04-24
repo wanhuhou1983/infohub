@@ -64,6 +64,67 @@ export function parseXWLBContentHtml(html: string): string | null {
   return cleanHtmlToText($.html(contentEl) || contentEl.html() || '');
 }
 
+// ============ 人民日报 ============
+
+/**
+ * 解析人民日报页面正文
+ */
+export function parseRMRBContentHtml(html: string): string | null {
+  const $ = cheerio.load(html);
+
+  // 人民日报 PC 版文章内容区域 - 正确的选择器
+  let contentEl = $('#articleContent');
+  if (contentEl.length === 0) {
+    contentEl = $('#articleText');
+  }
+  if (contentEl.length === 0) {
+    contentEl = $('.article_text');
+  }
+  if (contentEl.length === 0) {
+    contentEl = $('.text_con');
+  }
+  if (contentEl.length === 0) {
+    // 兜底：查找正文区域
+    contentEl = $('article').first();
+  }
+  if (contentEl.length === 0) return null;
+
+  // 获取元素内的 HTML 并手动清理
+  const contentHtml = contentEl.html() || '';
+  console.log('[RMRB] contentHtml 长度:', contentHtml.length);
+  if (!contentHtml.trim()) return null;
+
+  // 处理图片
+  const $$ = cheerio.load(contentHtml);
+  $$('img').each((_, el) => {
+    const img = $$(el);
+    const src = img.attr('src') || img.attr('data-src') || '';
+    if (src && !src.startsWith('data:')) {
+      img.replaceWith(`\n\n__IMG__${src}__IMG__\n\n`);
+    } else {
+      img.remove();
+    }
+  });
+
+  // 获取纯文本
+  let text = $$.root().text();
+
+  // HTML 实体清理
+  text = text
+    .replace(/“/g, '\u201C').replace(/”/g, '\u201D')
+    .replace(/‘/g, '\u2018').replace(/’/g, '\u2019')
+    .replace(/—/g, '\u2014').replace(/–/g, '\u2013')
+    .replace(/…/g, '\u2026')
+    .replace(/ /g, ' ')
+    .replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>')
+    .replace(/"/g, '"');
+
+  // 清理多余空行
+  text = text.replace(/\n{3,}/g, '\n\n').trim();
+
+  return text || null;
+}
+
 // ============ 微信公众号 ============
 
 /**

@@ -10,7 +10,7 @@
 import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { saveArticleFile } from '../file-storage.js';
-import { parseXWLBContentHtml, parseWechatContentHtml } from '../services/parser.js';
+import { parseXWLBContentHtml, parseWechatContentHtml, parseRMRBContentHtml } from '../services/parser.js';
 
 export function createArticlesRoutes(sql: Sql): Hono {
   const router = new Hono();
@@ -106,7 +106,9 @@ export function createArticlesRoutes(sql: Sql): Hono {
     const art = article[0]!;
 
     // 如果正文是占位符或太短，尝试从原始 URL 抓取正文
+    console.log(`[文章 ${id}] source_type=${art.source_type}, url=${art.url?.slice(-30)}, content_len=${art.content?.length}`);
     if (art.url && art.content && art.content.length < 100) {
+      console.log(`[文章 ${id}] 尝试抓取正文, source_type=${art.source_type}, url包含people=${art.url.includes('paper.people.com.cn')}`);
       if (art.source_type === 'xwlb') {
         try {
           const fullContent = await fetchAndParseXWLBContent(art.url);
@@ -140,6 +142,25 @@ export function createArticlesRoutes(sql: Sql): Hono {
           }
         } catch (e: any) {
           console.error(`抓取公众号正文失败 [${art.url}]:`, e.message);
+        }
+      } else if (art.source_type === 'rmrb' && art.url && art.url.includes('paper.people.com.cn')) {
+        console.log(`[文章 ${id}] 开始抓取人民日报正文`);
+        try {
+          const fullContent = await fetchAndParseRMRBContent(art.url);
+          console.log(`[文章 ${id}] 抓取完成, length=${fullContent?.length}`);
+          if (fullContent) {
+            const { processedContent } = await saveArticleFile(id, fullContent, {
+              id, title: art.title, source_type: 'rmrb',
+              source_name: art.source_name || '人民日报', url: art.url,
+              published_at: art.published_at, category: art.category,
+              tags: art.tags || [], author: art.author,
+              is_read: art.is_read, is_starred: art.is_starred,
+            });
+            await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${id}`;
+            art.content = processedContent;
+          }
+        } catch (e: any) {
+          console.error(`抓取人民日报正文失败 [${art.url}]:`, e.message);
         }
       }
     }
@@ -215,6 +236,24 @@ async function fetchAndParseWechatContent(url: string): Promise<string | null> {
     return parseWechatContentHtml(html);
   } catch (e: any) {
     console.error('fetchAndParseWechatContent error:', e.message);
+    return null;
+  }
+}
+
+async function fetchAndParseRMRBContent(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'zh-CN,zh;q=0.9',
+      },
+    });
+    if (!response.ok) return null;
+    const html = await response.text();
+    return parseRMRBContentHtml(html);
+  } catch (e: any) {
+    console.error('fetchAndParseRMRBContent error:', e.message);
     return null;
   }
 }

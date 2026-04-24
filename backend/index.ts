@@ -21,6 +21,7 @@ import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
 import { createFetchRoutes } from './routes/fetch.js';
 import { createSyncRoutes } from './routes/sync.js';
+import { createWechatAdminRoutes } from './routes/wechat-admin.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -126,6 +127,7 @@ app.route('/api/sources', createSourcesRoutes(sql));
 app.route('/api/articles', createArticlesRoutes(sql));
 app.route('/api/fetch', createFetchRoutes(sql));
 app.route('/api/sync', createSyncRoutes(sql));
+app.route('/api/wechat-admin', createWechatAdminRoutes(sql));
 
 // ============ 启动 ============
 
