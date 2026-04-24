@@ -326,9 +326,24 @@ export function createFetchRoutes(sql: Sql): Hono {
           const feedName = sourceNameMap.get(sourceId) || feedTitle;
 
           const contentHash = hashString(url || (title + 'rss'));
+          
+          // 对于新文章，先尝试抓取正文
+          let fullContent = content;
+          if (url && content.length < 200) {
+            try {
+              const fetchedContent = await crawlArticleContent(url);
+              if (fetchedContent && fetchedContent.length > 100) {
+                fullContent = fetchedContent;
+                console.log(`[RSS] 抓到正文: ${title.slice(0, 20)}... (${fetchedContent.length} chars)`);
+              }
+            } catch (e: any) {
+              console.error(`[RSS] 抓取正文失败: ${url}`, e.message);
+            }
+          }
+
           const insertedRows = await sql`
             INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-            VALUES (${sourceId}, ${title}, ${content}, ${content.slice(0, 150)}, ${url}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
+            VALUES (${sourceId}, ${title}, ${fullContent}, ${fullContent.slice(0, 150)}, ${url}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
             ON CONFLICT (content_hash) DO NOTHING
             RETURNING id
           `;
@@ -336,12 +351,12 @@ export function createFetchRoutes(sql: Sql): Hono {
           if (insertedRows.length > 0) {
             inserted++;
             const newId = insertedRows[0]!.id;
-            const { processedContent } = await saveArticleFile(newId, content, {
+            const { processedContent } = await saveArticleFile(newId, fullContent, {
               id: newId, title, source_type: feedType2,
               source_name: feedName, url, published_at: publishedAt,
               category, tags, author, is_read: false, is_starred: false,
             });
-            if (processedContent !== content) {
+            if (processedContent !== fullContent) {
               await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${newId}`;
             }
           }
@@ -493,10 +508,22 @@ export function createFetchRoutes(sql: Sql): Hono {
 
           if (!url) continue;
 
+          // 抓取正文
+          let fullContent = '（完整内容请查看原文）';
+          try {
+            const fetchedContent = await crawlArticleContent(url);
+            if (fetchedContent && fetchedContent.length > 100) {
+              fullContent = fetchedContent;
+              console.log(`[RSS-refresh] 抓到正文: ${title.slice(0, 20)}... (${fetchedContent.length} chars)`);
+            }
+          } catch (e: any) {
+            console.error(`[RSS-refresh] 抓取正文失败: ${url}`, e.message);
+          }
+
           const contentHash = hashString(url);
           const insertedRows = await sql`
             INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at)
-            VALUES (${sourceId}, ${title}, '（完整内容请查看原文）', ${summary}, ${url}, ${publishedAt}, 'RSS', ${['RSS']}, ${contentHash}, NOW())
+            VALUES (${sourceId}, ${title}, ${fullContent}, ${summary.slice(0, 150)}, ${url}, ${publishedAt}, 'RSS', ${['RSS']}, ${contentHash}, NOW())
             ON CONFLICT (content_hash) DO NOTHING
             RETURNING id
           `;
@@ -504,7 +531,7 @@ export function createFetchRoutes(sql: Sql): Hono {
           if (insertedRows.length > 0) {
             inserted++;
             const newId = insertedRows[0]!.id;
-            await saveArticleFile(newId, '（完整内容请查看原文）', {
+            await saveArticleFile(newId, fullContent, {
               id: newId, title, source_type: 'rss',
               source_name: feedMap.get(mfFeedId)?.title || 'RSS', url, published_at: publishedAt,
               category: 'RSS', tags: 'RSS', is_read: false, is_starred: false,
