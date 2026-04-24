@@ -46,6 +46,29 @@ app.use('/api/*', cors({
   allowHeaders: ['Content-Type'],
 }));
 
+// ============ 管理员认证中间件 ============
+
+function requireAdminAuth(c: any): { valid: boolean; error?: string } {
+  const authHeader = c.req.header('Authorization');
+  const adminToken = process.env.ADMIN_TOKEN || loadEnvConfig().ADMIN_TOKEN;
+  
+  // 未配置管理员 Token 时，拒绝所有写操作
+  if (!adminToken) {
+    return { valid: false, error: '管理员认证未配置' };
+  }
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return { valid: false, error: '缺少 Authorization 头' };
+  }
+  
+  const token = authHeader.slice(7);
+  if (token !== adminToken) {
+    return { valid: false, error: '管理员 Token 无效' };
+  }
+  
+  return { valid: true };
+}
+
 // ============ 前端静态文件 ============
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -89,9 +112,13 @@ app.get('/api/sources/config/env', (c) => {
   });
 });
 
-// 更新环境配置（写入 .env.json，同时更新 process.env 使其立即生效）
+// 更新环境配置（写入 .env.json，同时更新 process.env 使其立即生效）- 需管理员认证
 app.patch('/api/sources/config/env', (c) => {
   return c.req.json().then(async (body: any) => {
+    // 管理员认证检查
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+    
     if (!body || typeof body !== 'object') return c.json({ error: 'Invalid body' }, 400);
 
     const fileConfig = loadEnvConfig();

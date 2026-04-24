@@ -27,9 +27,9 @@ export function createSourcesRoutes(sql: Sql): Hono {
     const children = sources.filter(s => s.parent_id);
     
     const tree = parents.map(p => {
-      // 微信公众号（id=24）的子源：只显示 enabled=true 的
+      // 微信公众号（type=wechat）的子源：只显示 enabled=true 的
       let filteredChildren = children.filter(ch => ch.parent_id === p.id);
-      if (p.id === 24) {
+      if (p.type === 'wechat') {
         filteredChildren = filteredChildren.filter(ch => ch.enabled === true);
       }
       return {
