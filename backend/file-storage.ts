@@ -42,10 +42,11 @@ function envOrFile(key: string, fallback: string): string {
   return fileVal || process.env[key] || fallback;
 }
 
-const IMGBED_URL = envOrFile('IMGBED_URL', 'http://localhost:8085/api/');
-const IMGBED_BASE = envOrFile('IMGBED_BASE', 'http://localhost:8085');
+// 🔒 Bug fix：改为 getter 函数，env 热更新后立即生效（不再用 const 固化）
+function getImgbedUrl() { return envOrFile('IMGBED_URL', 'http://localhost:8085/api/'); }
+function getImgbedBase() { return envOrFile('IMGBED_BASE', 'http://localhost:8085'); }
 // 安全：强制从环境变量读取，无默认值
-const IMGBED_TOKEN = envOrFile('IMGBED_TOKEN', '');
+function getImgbedToken() { return envOrFile('IMGBED_TOKEN', ''); }
 const CACHE_FILE = join(DATA_DIR, '.img_cache.json');
 
 // 图片 URL 缓存：远程 URL -> 图床 URL
@@ -365,7 +366,7 @@ export async function processImages(content: string): Promise<string> {
   const imgUrls = new Map<string, string>(); // originalUrl -> replacement
   for (const match of content.matchAll(imgPattern)) {
     const originalUrl = match[1]!;
-    if (originalUrl.startsWith(IMGBED_BASE)) continue;
+    if (originalUrl.startsWith(getImgbedBase())) continue;
 
     const cachedUrl = imgCache.get(originalUrl);
     if (cachedUrl) {
@@ -380,7 +381,7 @@ export async function processImages(content: string): Promise<string> {
   for (const match of content.matchAll(mdImgPattern)) {
     const altText = match[2] || '';
     const originalUrl = match[3]!;
-    if (originalUrl.startsWith(IMGBED_BASE) || originalUrl.startsWith('data:')) continue;
+    if (originalUrl.startsWith(getImgbedBase()) || originalUrl.startsWith('data:')) continue;
 
     const cachedUrl = imgCache.get(originalUrl);
     if (cachedUrl) {
@@ -455,7 +456,11 @@ function escapeRegex(str: string): string {
  * 上传图片到 EasyImages 图床
  */
 async function uploadToImgbed(imageUrl: string): Promise<string | null> {
-  if (!IMGBED_TOKEN) {
+  const imgbedToken = getImgbedToken();
+  const imgbedUrl = getImgbedUrl();
+  const imgbedBase = getImgbedBase();
+
+  if (!imgbedToken) {
     console.error('图床 Token 未配置，跳过图片上传');
     return null;
   }
@@ -481,9 +486,9 @@ async function uploadToImgbed(imageUrl: string): Promise<string | null> {
 
     const formData = new FormData();
     formData.append('image', blob, filename);
-    formData.append('token', IMGBED_TOKEN);
+    formData.append('token', imgbedToken);
 
-    const uploadResp = await fetch(IMGBED_URL, {
+    const uploadResp = await fetch(imgbedUrl, {
       method: 'POST',
       body: formData,
     });
@@ -492,7 +497,7 @@ async function uploadToImgbed(imageUrl: string): Promise<string | null> {
 
     const result = await uploadResp.json() as any;
     if (result && result.result === 'success' && result.url) {
-      const fullUrl = result.url.startsWith('http') ? result.url : `${IMGBED_BASE}${result.url}`;
+      const fullUrl = result.url.startsWith('http') ? result.url : `${imgbedBase}${result.url}`;
       return fullUrl;
     }
 

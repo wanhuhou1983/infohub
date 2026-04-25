@@ -93,10 +93,10 @@ export function createArticlesRoutes(sql: Sql): Hono {
       ORDER BY a.published_at DESC LIMIT ${numLimit} OFFSET ${numOffset}
     `;
 
-    const countResult = await sql`
-      SELECT COUNT(*)::int AS total FROM articles a
-      WHERE ${buildWhere()}
-    `;
+    // 🔒 优化：无条件时跳过 WHERE，避免全表扫描中 1=1 的冗余过滤
+    const countResult = conditions.length > 0
+      ? await sql`SELECT COUNT(*)::int AS total FROM articles a WHERE ${buildWhere()}`
+      : await sql`SELECT COUNT(*)::int AS total FROM articles`;
 
     return c.json({ articles, total: countResult[0]?.total ?? 0 });
   });
