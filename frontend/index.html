@@ -223,24 +223,11 @@ tailwind.config = {
       <!-- Miniflux 配置 -->
       <div class="mb-6">
         <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
-          <span>📡</span> Miniflux RSS 配置
+          <span>📡</span> RSS 子源管理
         </h3>
-        <div class="space-y-3">
-          <div>
-            <label class="text-xs text-muted block mb-1">Miniflux 服务地址</label>
-            <input id="cfgMinifluxUrl" type="text" placeholder="http://localhost:8084"
-              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
-          </div>
-          <div>
-            <label class="text-xs text-muted block mb-1">用户名</label>
-            <input id="cfgMinifluxUser" type="text" placeholder="admin"
-              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
-          </div>
-          <div>
-            <label class="text-xs text-muted block mb-1">密码</label>
-            <input id="cfgMinifluxPass" type="password" placeholder="输入密码"
-              class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted">
-          </div>
+        <p class="text-xs text-muted mb-3">RSS feed 直接解析，无需 Miniflux 中间层。在信息源树中点击 RSS 子源可查看配置。</p>
+        <div id="rssFeedList" class="space-y-2">
+          <!-- 动态加载 -->
         </div>
       </div>
 
@@ -295,7 +282,7 @@ tailwind.config = {
       <button class="text-muted hover:text-fg transition" title="公众号管理" onclick="showWechatAdmin()">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
       </button>
-      <button class="text-muted hover:text-fg transition" title="设置" onclick="showSettings()">
+      <button class="text-muted hover:text-fg transition" title="设置" onclick="window.open('/admin','_blank')">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
       <div id="fetchMenu" class="hidden absolute right-4 top-12 bg-surface2 border border-border rounded-lg shadow-xl py-2 min-w-[180px] z-50">
@@ -950,20 +937,20 @@ async function fetchRSS() {
   hideFetchMenu();
   const btn = document.getElementById('fetchBtn');
   btn.disabled = true;
-  btn.innerHTML = '同步中...';
+  btn.innerHTML = '采集中...';
   try {
     const result = await api('/fetch/rss', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ limit: 100 }),
+      body: JSON.stringify({}),
     });
     if (result.ok) {
-      showToast(`RSS同步成功：获取 ${result.fetched} 条，入库 ${result.inserted} 条`, 'success');
+      showToast(`RSS采集成功：${result.sources} 个源，获取 ${result.fetched} 条，入库 ${result.inserted} 条，翻译 ${result.translated || 0} 条`, 'success');
     } else {
-      showToast(`RSS同步失败：${result.error}`, 'error');
+      showToast(`RSS采集失败：${result.error}`, 'error');
     }
   } catch (e) {
-    showToast(`RSS同步异常：${e}`, 'error');
+    showToast(`RSS采集异常：${e}`, 'error');
   }
   btn.disabled = false;
   btn.innerHTML = '采集 <svg class="w-3 h-3 inline ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>';
@@ -999,7 +986,7 @@ async function fetchAll() {
   try {
     const r1 = await api('/fetch/xwlb', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
     if (r1.ok) { totalFetched += r1.fetched; totalInserted += r1.inserted; }
-    const r2 = await api('/fetch/rss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100 }) });
+    const r2 = await api('/fetch/rss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
     if (r2.ok) { totalFetched += r2.fetched; totalInserted += r2.inserted; }
     const r3 = await api('/api/bilibili-admin/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     if (r3.ok) { totalFetched += r3.fetched; totalInserted += r3.inserted; }
@@ -1070,17 +1057,92 @@ function hideSettings() {
   document.getElementById('settingsModal').classList.add('hidden');
 }
 
+// 加载 RSS 子源列表到设置面板
+async function loadRssFeedList() {
+  const el = document.getElementById('rssFeedList');
+  if (!el) return;
+  try {
+    const tree = await api('/sources/tree');
+    const rssRoot = tree.find((t) => t.type === 'rss');
+    if (!rssRoot || !rssRoot.children || rssRoot.children.length === 0) {
+      el.innerHTML = '<div class="text-xs text-muted">暂无 RSS 子源</div>';
+      return;
+    }
+    el.innerHTML = rssRoot.children.map((c) => {
+      const feedUrl = c.config?.feed_url || '';
+      const enabled = c.enabled ? 'checked' : '';
+      return `
+        <div class="flex items-center gap-2 text-xs">
+          <input type="checkbox" ${enabled} onchange="toggleRssFeed(${c.id}, this.checked)" class="rounded">
+          <span class="flex-1 truncate" title="${feedUrl}">${c.name}</span>
+          <button class="text-muted hover:text-red-400 transition" onclick="deleteRssFeed(${c.id}, '${c.name}')" title="删除">✕</button>
+        </div>`;
+    }).join('');
+    
+    // 添加新 RSS 源的表单
+    el.innerHTML += `
+      <div class="flex items-center gap-2 mt-2 pt-2 border-t border-border">
+        <input id="newRssName" type="text" placeholder="名称" class="flex-1 bg-surface2 border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-accent placeholder-muted min-w-0">
+        <input id="newRssUrl" type="text" placeholder="RSS Feed URL" class="flex-[2] bg-surface2 border border-border rounded px-2 py-1 text-xs focus:outline-none focus:border-accent placeholder-muted min-w-0">
+        <button class="bg-accent hover:bg-accent2 text-white text-xs px-2 py-1 rounded transition" onclick="addRssFeed()">添加</button>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<div class="text-xs text-muted">加载失败</div>';
+  }
+}
+
+async function toggleRssFeed(id, enabled) {
+  await api(`/sources/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+async function deleteRssFeed(id, name) {
+  if (!confirm(`确定删除 RSS 源「${name}」？`)) return;
+  await api(`/sources/${id}`, { method: 'DELETE' });
+  loadRssFeedList();
+}
+
+async function addRssFeed() {
+  const name = document.getElementById('newRssName').value.trim();
+  const url = document.getElementById('newRssUrl').value.trim();
+  if (!url) return showToast('请输入 RSS Feed URL', 'error');
+  
+  const tree = await api('/sources/tree');
+  const rssRoot = tree.find((t) => t.type === 'rss');
+  if (!rssRoot) return showToast('RSS 根源未配置', 'error');
+  
+  await api('/sources', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: name || url,
+      type: 'rss',
+      icon: '📡',
+      enabled: true,
+      parent_id: rssRoot.id,
+      config: { feed_url: url },
+    }),
+  });
+  
+  showToast(`已添加 RSS 源：${name || url}`, 'success');
+  loadRssFeedList();
+  loadSources();
+}
+
 async function loadSettings() {
   try {
     // 从环境配置 API 读取
     const envConfig = await api('/sources/config/env');
     document.getElementById('cfgWeflowUrl').value = envConfig.weflow_url || '';
     document.getElementById('cfgWeflowToken').value = '';  // 安全：不回显 token
-    document.getElementById('cfgMinifluxUrl').value = envConfig.miniflux_url || '';
-    document.getElementById('cfgMinifluxUser').value = envConfig.miniflux_user || '';
-    document.getElementById('cfgMinifluxPass').value = '';
     document.getElementById('cfgImgbedUrl').value = envConfig.imgbed_url || '';
     document.getElementById('cfgImgbedToken').value = '';
+
+    // 加载 RSS 子源列表
+    await loadRssFeedList();
 
     // 公众号过滤列表和条数从数据库源 config 读取
     const sources = await api('/sources');
@@ -1105,9 +1167,6 @@ async function saveSettings() {
       body: JSON.stringify({
         weflow_url: document.getElementById('cfgWeflowUrl').value.trim(),
         weflow_token: document.getElementById('cfgWeflowToken').value.trim(),
-        miniflux_url: document.getElementById('cfgMinifluxUrl').value.trim(),
-        miniflux_user: document.getElementById('cfgMinifluxUser').value.trim(),
-        miniflux_pass: document.getElementById('cfgMinifluxPass').value.trim(),
         imgbed_url: document.getElementById('cfgImgbedUrl').value.trim(),
         imgbed_token: document.getElementById('cfgImgbedToken').value.trim(),
       }),

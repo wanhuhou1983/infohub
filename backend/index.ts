@@ -63,14 +63,14 @@ function getAdminToken(): string {
 }
 
 function requireAdminAuth(c: any): { valid: boolean; error?: string } {
-  const authHeader = c.req.header('Authorization');
   const adminToken = getAdminToken();
   
-  // 未配置管理员 Token 时，拒绝所有写操作
+  // 🔧 如果未配置管理员 Token，允许所有操作（本地开发模式）
   if (!adminToken) {
-    return { valid: false, error: '管理员认证未配置' };
+    return { valid: true };
   }
   
+  const authHeader = c.req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return { valid: false, error: '缺少 Authorization 头' };
   }

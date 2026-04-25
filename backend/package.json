@@ -16,6 +16,7 @@
     "cheerio": "^1.2.0",
     "dotenv": "^17.4.2",
     "hono": "^4.12.14",
-    "postgres": "^3.4.9"
+    "postgres": "^3.4.9",
+    "rss-parser": "^3.13.0"
   }
 }

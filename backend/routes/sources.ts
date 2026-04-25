@@ -49,6 +49,58 @@ export function createSourcesRoutes(sql: Sql): Hono {
     return c.json(roots);
   });
 
+  // 创建新信息源
+  router.post('/', async (c) => {
+    const { name, type, icon, enabled, parent_id, config } = await c.req.json();
+    if (!name || !type) return c.json({ error: 'name and type are required' }, 400);
+
+    const [created] = await sql`
+      INSERT INTO sources (name, type, icon, enabled, parent_id, config)
+      VALUES (${name}, ${type}, ${icon || null}, ${enabled !== false}, ${parent_id || null}, ${sql.json(config || {})})
+      RETURNING *
+    `;
+    return c.json(created, 201);
+  });
+
+  // 更新信息源（PATCH 部分更新）
+  router.patch('/:id', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
+
+    const body = await c.req.json().catch(() => ({}));
+    if (!body || typeof body !== 'object') return c.json({ error: 'Invalid body' }, 400);
+
+    // 读取当前记录
+    const [row] = await sql`SELECT * FROM sources WHERE id = ${id}`;
+    if (!row) return c.json({ error: 'Source not found' }, 404);
+
+    // 合并更新字段
+    const newName = body.name !== undefined ? body.name : row.name;
+    const newEnabled = body.enabled !== undefined ? body.enabled : row.enabled;
+    const newIcon = body.icon !== undefined ? body.icon : row.icon;
+    const newConfig = body.config !== undefined ? { ...row.config, ...body.config } : row.config;
+
+    const [updated] = await sql`
+      UPDATE sources SET name = ${newName}, enabled = ${newEnabled}, icon = ${newIcon}, config = ${sql.json(newConfig)}, updated_at = NOW()
+      WHERE id = ${id}
+      RETURNING *
+    `;
+    return c.json(updated);
+  });
+
+  // 删除信息源（及其下所有文章）
+  router.delete('/:id', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
+
+    // 先删除关联文章
+    await sql`DELETE FROM articles WHERE source_id = ${id}`;
+    // 再删除源
+    const [deleted] = await sql`DELETE FROM sources WHERE id = ${id} RETURNING id`;
+    if (!deleted) return c.json({ error: 'Source not found' }, 404);
+    return c.json({ ok: true });
+  });
+
   // 更新信息源配置（合并式更新，不覆盖未传字段）
   router.patch('/:id/config', async (c) => {
     const id = Number(c.req.param('id'));
