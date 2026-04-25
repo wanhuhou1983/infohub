@@ -25,13 +25,21 @@ export function createArticlesRoutes(sql: Sql): Hono {
     const numLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
     const numOffset = Math.max(Number(offset) || 0, 0);
 
-    // 第一步：确定 source_id 过滤条件
+    // 第一步：确定 source_id 过滤条件（递归查所有子孙源）
     let sourceIds: number[] = [];
     if (source_id) {
       const sid = Number(source_id);
       if (isNaN(sid) || sid <= 0) return c.json({ error: 'Invalid source_id' }, 400);
-      const childSources = await sql`SELECT id FROM sources WHERE parent_id = ${sid}`;
-      sourceIds = [sid, ...childSources.map(c => c.id)];
+      // 递归 WITH 查询获取所有子孙源
+      const allDescendants = await sql`
+        WITH RECURSIVE tree AS (
+          SELECT id FROM sources WHERE id = ${sid}
+          UNION ALL
+          SELECT s.id FROM sources s JOIN tree t ON s.parent_id = t.id
+        )
+        SELECT id FROM tree
+      `;
+      sourceIds = allDescendants.map(c => c.id);
     }
 
     // 第二步：动态构建 WHERE 条件

@@ -613,11 +613,12 @@ function filterBySource(id) {
     currentSourceId = BILIBILI_ROOT;
   } else if (id === BILIBILI_UPDATES) {
     bilibiliSpecialFilter = null;
-    currentSourceId = BILIBILI_ROOT;
+    currentSourceId = BILIBILI_UPDATES; // 1273，后端递归查UP主子源
   } else if (id === BILIBILI_ROOT) {
-    // 点击 B站根节点，取消特殊过滤
+    // 点击 B站根节点：自动展开子源并显示"更新"内容
     bilibiliSpecialFilter = null;
-    currentSourceId = currentSourceId === id ? null : id;
+    expandedSources.add(BILIBILI_ROOT);
+    currentSourceId = BILIBILI_UPDATES; // 默认显示UP主更新
   } else {
     bilibiliSpecialFilter = null;
     currentSourceId = currentSourceId === id ? null : id;
