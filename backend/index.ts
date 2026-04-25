@@ -54,7 +54,7 @@ app.use('/api/*', cors({
 // ============ 管理员认证中间件 ============
 
 // 管理员 Token 缓存：启动时加载一次，env 更新时刷新
-let _cachedAdminToken: string | null | undefined = undefined;
+let _cachedAdminToken: string | undefined = undefined;
 
 function getAdminToken(): string {
   if (_cachedAdminToken !== undefined) return _cachedAdminToken;
@@ -230,6 +230,51 @@ sourcesRouter.patch('/:id/config', async (c) => {
 });
 app.route('/api/sources', sourcesRouter);
 app.route('/api/articles', createArticlesRoutes(sql));
+
+// 🔒 写操作鉴权中间件：对 POST/PATCH/DELETE 方法要求管理员 Token，GET 放行
+app.use('/api/fetch/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+app.use('/api/sync/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+app.use('/api/wechat-admin/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+app.use('/api/bilibili-admin/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+app.use('/api/youtube-admin/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+app.use('/api/wechat-group-admin/*', async (c, next) => {
+  if (['POST', 'PATCH', 'DELETE'].includes(c.req.method)) {
+    const auth = requireAdminAuth(c);
+    if (!auth.valid) return c.json({ error: auth.error }, 401);
+  }
+  return next();
+});
+
 app.route('/api/fetch', createFetchRoutes(sql));
 app.route('/api/sync', createSyncRoutes(sql));
 app.route('/api/wechat-admin', createWechatAdminRoutes(sql));

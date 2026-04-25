@@ -150,6 +150,7 @@ export interface ArticleMeta {
   author: string | null;
   is_read: boolean;
   is_starred: boolean;
+  is_watch_later?: boolean;
 }
 
 // ============ 公开函数 ============

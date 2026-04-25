@@ -8,7 +8,7 @@
  */
 
 import { Hono } from 'hono';
-import type { Sql } from 'sql.js';
+import type { Sql } from 'postgres';
 
 export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   const router = new Hono();

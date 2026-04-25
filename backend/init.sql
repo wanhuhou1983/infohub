@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS articles (
     tags          TEXT[]        DEFAULT '{}',
     is_read       BOOLEAN       DEFAULT FALSE,
     is_starred    BOOLEAN       DEFAULT FALSE,
+    is_watch_later BOOLEAN      DEFAULT FALSE,
     extra         JSONB         DEFAULT '{}',
     content_hash  VARCHAR(32)   UNIQUE NOT NULL
 );
@@ -40,6 +41,7 @@ CREATE INDEX IF NOT EXISTS idx_articles_published ON articles(published_at DESC)
 CREATE INDEX IF NOT EXISTS idx_articles_category ON articles(category);
 CREATE INDEX IF NOT EXISTS idx_articles_read ON articles(is_read);
 CREATE INDEX IF NOT EXISTS idx_articles_starred ON articles(is_starred);
+CREATE INDEX IF NOT EXISTS idx_articles_watch_later ON articles(is_watch_later);
 CREATE INDEX IF NOT EXISTS idx_articles_tags ON articles USING GIN(tags);
 CREATE INDEX IF NOT EXISTS idx_articles_fts ON articles USING GIN(to_tsvector('simple', title || ' ' || COALESCE(content, '')));
 

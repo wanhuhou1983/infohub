@@ -17,9 +17,14 @@ import { fileURLToPath } from 'url';
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SPIDER_DIR = path.resolve(__dirname, '../../../wechat-article-spider');
+const SPIDER_DIR = process.env.SPIDER_DIR || path.resolve(__dirname, '../../../wechat-article-spider');
 const PYTHON_CMD = path.join(SPIDER_DIR, '.venv/bin/python3');
-const MINERU_SCRIPT = '/Users/wuhuahui/.workbuddy/skills/mineru-extract/scripts/mineru_extract.py';
+const MINERU_SCRIPT = process.env.MINERU_SCRIPT || path.join(
+  process.env.HOME || '/root', '.workbuddy/skills/mineru-extract/scripts/mineru_extract.py'
+);
+const TENCENT_NEWS_CLI = process.env.TENCENT_NEWS_CLI || path.join(
+  process.env.HOME || '/root', '.workbuddy/skills/tencent-news/tencent-news-cli'
+);
 
 // ============ 辅助函数：调用 MinerU 抓取正文 ============
 export async function crawlArticleContent(articleUrl: string): Promise<string | null> {
@@ -708,7 +713,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       if (!rmrbSource) return c.json({ error: '人民日报信息源未配置' }, 400);
 
       const targetDate = date || new Date().toISOString().slice(0, 10);
-      const rmrbDir = path.resolve(__dirname, '../../skills/rmrb-daily');
+      const rmrbDir = process.env.RMRB_DIR || path.resolve(__dirname, '../../skills/rmrb-daily');
       const outputFile = path.join(rmrbDir, `rmrb_${targetDate}.md`);
 
       // 构建命令参数
@@ -813,7 +818,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       const [tencentSource] = await sql`SELECT id FROM sources WHERE type = 'tencent' LIMIT 1`;
       if (!tencentSource) return c.json({ error: '腾讯新闻信息源未配置' }, 400);
 
-      const cliPath = '/Users/wuhuahui/.workbuddy/skills/tencent-news/tencent-news-cli';
+      const cliPath = TENCENT_NEWS_CLI;
       const apiKey = process.env.TENCENT_NEWS_APIKEY;
 
       if (!apiKey) return c.json({ error: 'TENCENT_NEWS_APIKEY 未配置' }, 400);
