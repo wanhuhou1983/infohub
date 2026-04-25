@@ -6,7 +6,8 @@
  * - 图片缓存持久化到本地 JSON 文件，重启不丢失
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync, renameSync } from 'node:fs';
+import { mkdir, writeFile, rename, readFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';  // existsSync 启动检查 + readFileSync 仅 getEnvConfig 使用（一次性）
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,8 @@ function getEnvConfig(): Record<string, string> {
   if (!_envConfig) {
     try {
       const envFile = join(__dirname, '..', '.env.json');
+      // 注：此处保留同步读取，因为 getEnvConfig 在 getter 函数中高频调用，
+      // 且仅在首次调用时执行（_envConfig 为 null 时），对事件循环无实质影响
       if (existsSync(envFile)) {
         _envConfig = JSON.parse(readFileSync(envFile, 'utf-8'));
       }
@@ -64,63 +67,63 @@ let indexMap = new Map<string, string>();
 let indexLoaded = false;
 let indexPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
-function ensureIndexLoaded(): void {
+// 🔒 Bug fix：改为 async，不再用同步 I/O 阻塞事件循环
+async function ensureIndexLoaded(): Promise<void> {
   if (indexLoaded) return;
   indexLoaded = true;
   const indexPath = join(DATA_DIR, 'index.json');
   try {
-    if (existsSync(indexPath)) {
-      const data = JSON.parse(readFileSync(indexPath, 'utf-8'));
-      indexMap = new Map(Object.entries(data));
-    }
+    const data = await readFile(indexPath, 'utf-8');
+    indexMap = new Map(Object.entries(JSON.parse(data)));
   } catch {
     indexMap = new Map();
   }
 }
 
+// 🔒 Bug fix：防抖内改为异步写入，不再阻塞事件循环
 function persistIndex(): void {
   if (indexPersistTimer) clearTimeout(indexPersistTimer);
-  indexPersistTimer = setTimeout(() => {
+  indexPersistTimer = setTimeout(async () => {
     try {
       const obj = Object.fromEntries(indexMap);
-      mkdirSync(DATA_DIR, { recursive: true });
+      await mkdir(DATA_DIR, { recursive: true });
       const indexPath = join(DATA_DIR, 'index.json');
       const tempFile = `${indexPath}.tmp`;
-      writeFileSync(tempFile, JSON.stringify(obj, null, 2), 'utf-8');
-      renameSync(tempFile, indexPath);
+      await writeFile(tempFile, JSON.stringify(obj, null, 2), 'utf-8');
+      await rename(tempFile, indexPath);
     } catch (e: any) {
       console.error('索引持久化失败:', e.message);
     }
   }, 1000);
 }
 
-function ensureCacheLoaded(): void {
+// 🔒 Bug fix：改为 async，不再用同步 I/O 阻塞事件循环
+async function ensureCacheLoaded(): Promise<void> {
   if (cacheLoaded) return;
   cacheLoaded = true;
   try {
-    if (existsSync(CACHE_FILE)) {
-      const data = JSON.parse(readFileSync(CACHE_FILE, 'utf-8'));
-      imgCache = new Map(Object.entries(data));
-    }
+    const data = await readFile(CACHE_FILE, 'utf-8');
+    imgCache = new Map(Object.entries(JSON.parse(data)));
   } catch {
     imgCache = new Map();
   }
 }
 
+// 🔒 Bug fix：防抖内改为异步写入，不再阻塞事件循环
 function persistCache(): void {
   if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
+  persistTimer = setTimeout(async () => {
     try {
       const obj = Object.fromEntries(imgCache);
-      mkdirSync(DATA_DIR, { recursive: true });
+      await mkdir(DATA_DIR, { recursive: true });
       // 原子写入：先写临时文件，再重命名覆盖，防止并发写入损坏
       const tempFile = `${CACHE_FILE}.tmp`;
-      writeFileSync(tempFile, JSON.stringify(obj), 'utf-8');
-      renameSync(tempFile, CACHE_FILE);
+      await writeFile(tempFile, JSON.stringify(obj), 'utf-8');
+      await rename(tempFile, CACHE_FILE);
     } catch (e: any) {
       console.error('图片缓存持久化失败:', e.message);
     }
-  }, 1000); // 延迟 1 秒，将这段时间内的变动合并为一次写入
+  }, 1000);
 }
 
 /**
@@ -179,12 +182,12 @@ export async function saveArticleFile(
     // 4. 组装 Markdown 内容
     const md = buildMarkdown(processedContent, meta);
 
-    // 5. 确保目录存在并写入
-    mkdirSync(dirPath, { recursive: true });
-    writeFileSync(filePath, md, 'utf-8');
+    // 5. 确保目录存在并写入（🔒 异步 I/O，不阻塞事件循环）
+    await mkdir(dirPath, { recursive: true });
+    await writeFile(filePath, md, 'utf-8');
 
-    // 6. 更新索引
-    updateIndex(articleId, filePath);
+    // 6. 更新索引（🔒 异步等待）
+    await updateIndex(articleId, filePath);
 
     return { filePath, processedContent };
   } catch (e: any) {
@@ -194,19 +197,19 @@ export async function saveArticleFile(
 }
 
 /**
- * 获取文章的本地文件路径
+ * 获取文章的本地文件路径（🔒 异步，不阻塞事件循环）
  */
-export function getArticleFilePath(articleId: number): string | null {
-  ensureIndexLoaded();
+export async function getArticleFilePath(articleId: number): Promise<string | null> {
+  await ensureIndexLoaded();
   const path = indexMap.get(String(articleId));
   return path && existsSync(path) ? path : null;
 }
 
 /**
- * 检查文章是否已有本地文件
+ * 检查文章是否已有本地文件（🔒 异步）
  */
-export function hasArticleFile(articleId: number): boolean {
-  return getArticleFilePath(articleId) !== null;
+export async function hasArticleFile(articleId: number): Promise<boolean> {
+  return (await getArticleFilePath(articleId)) !== null;
 }
 
 /**
@@ -357,7 +360,7 @@ function buildMarkdown(content: string, meta: ArticleMeta): string {
  * 🔒 修复：先收集所有唯一 URL，批量处理后用全局正则替换
  */
 export async function processImages(content: string): Promise<string> {
-  ensureCacheLoaded();
+  await ensureCacheLoaded();
 
   // 收集所有需要处理的图片 URL
   const imgPattern = /__IMG__(.+?)__IMG__/g;
@@ -513,8 +516,9 @@ async function uploadToImgbed(imageUrl: string): Promise<string | null> {
  * 更新索引文件 (article_id -> filepath)
  * 🔒 修复：使用内存 Map + 防抖持久化，避免并发竞态
  */
-function updateIndex(articleId: number, filePath: string): void {
-  ensureIndexLoaded();
+// 🔒 Bug fix：改为 async，ensureIndexLoaded 不再同步阻塞
+async function updateIndex(articleId: number, filePath: string): Promise<void> {
+  await ensureIndexLoaded();
   indexMap.set(String(articleId), filePath);
   persistIndex();
 }

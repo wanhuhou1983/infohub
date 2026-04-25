@@ -93,15 +93,17 @@ export function createArticlesRoutes(sql: Sql): Hono {
       ORDER BY a.published_at DESC LIMIT ${numLimit} OFFSET ${numOffset}
     `;
 
-    // 🔒 优化：无条件时跳过 WHERE，避免全表扫描中 1=1 的冗余过滤
+    // 🔒 Bug fix：COUNT 查询保持与主查询一致的 JOIN 结构
+    // 防止未来 WHERE 条件引用 sources 表字段时因缺少 JOIN 报错
     const countResult = conditions.length > 0
-      ? await sql`SELECT COUNT(*)::int AS total FROM articles a WHERE ${buildWhere()}`
+      ? await sql`SELECT COUNT(*)::int AS total FROM articles a LEFT JOIN sources s ON a.source_id = s.id WHERE ${buildWhere()}`
       : await sql`SELECT COUNT(*)::int AS total FROM articles`;
 
     return c.json({ articles, total: countResult[0]?.total ?? 0 });
   });
 
-  // 获取单篇文章（自动抓取正文）
+  // 获取单篇文章（纯读取，不触发写操作）
+  // 🔒 Bug fix：原来 GET 内部执行远程抓取+写库，违背 REST 规范且有竞态风险
   router.get('/:id', async (c) => {
     const id = Number(c.req.param('id'));
     if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
@@ -115,68 +117,79 @@ export function createArticlesRoutes(sql: Sql): Hono {
     if (article.length === 0) return c.json({ error: 'Not found' }, 404);
 
     const art = article[0]!;
+    // 标记是否需要抓取正文（前端可据此提示用户手动触发）
+    const needsFetch = art.url && (!art.content || art.content.length < 100);
+    return c.json({ ...art, needsFetch: !!needsFetch });
+  });
 
-    // 如果正文是占位符或太短，尝试从原始 URL 抓取正文
-    console.log(`[文章 ${id}] source_type=${art.source_type}, url=${art.url?.slice(-30)}, content_len=${art.content?.length}`);
-    if (art.url && art.content && art.content.length < 100) {
-      console.log(`[文章 ${id}] 尝试抓取正文, source_type=${art.source_type}, url包含people=${art.url.includes('paper.people.com.cn')}`);
-      if (art.source_type === 'xwlb') {
-        try {
-          const fullContent = await fetchAndParseXWLBContent(art.url);
-          if (fullContent) {
-            const { processedContent } = await saveArticleFile(id, fullContent, {
-              id, title: art.title, source_type: art.source_type,
-              source_name: art.source_name || '新闻联播', url: art.url,
-              published_at: art.published_at, category: art.category,
-              tags: art.tags || [], author: art.author,
-              is_read: art.is_read, is_starred: art.is_starred,
-            });
-            await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${id}`;
-            art.content = processedContent;
-          }
-        } catch (e: any) {
-          console.error(`抓取新闻联播正文失败 [${art.url}]:`, e.message);
-        }
-      } else if (art.source_type === 'rss' && art.url.includes('mp.weixin.qq.com')) {
-        try {
-          const fullContent = await fetchAndParseWechatContent(art.url);
-          if (fullContent) {
-            const { processedContent } = await saveArticleFile(id, fullContent, {
-              id, title: art.title, source_type: 'wechat',
-              source_name: art.source_name || '微信公众号', url: art.url,
-              published_at: art.published_at, category: art.category,
-              tags: art.tags || [], author: art.author,
-              is_read: art.is_read, is_starred: art.is_starred,
-            });
-            await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${id}`;
-            art.content = processedContent;
-          }
-        } catch (e: any) {
-          console.error(`抓取公众号正文失败 [${art.url}]:`, e.message);
-        }
-      } else if (art.source_type === 'rmrb' && art.url && art.url.includes('paper.people.com.cn')) {
-        console.log(`[文章 ${id}] 开始抓取人民日报正文`);
-        try {
-          const fullContent = await fetchAndParseRMRBContent(art.url);
-          console.log(`[文章 ${id}] 抓取完成, length=${fullContent?.length}`);
-          if (fullContent) {
-            const { processedContent } = await saveArticleFile(id, fullContent, {
-              id, title: art.title, source_type: 'rmrb',
-              source_name: art.source_name || '人民日报', url: art.url,
-              published_at: art.published_at, category: art.category,
-              tags: art.tags || [], author: art.author,
-              is_read: art.is_read, is_starred: art.is_starred,
-            });
-            await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${id}`;
-            art.content = processedContent;
-          }
-        } catch (e: any) {
-          console.error(`抓取人民日报正文失败 [${art.url}]:`, e.message);
-        }
-      }
+  // 🔒 新增：独立正文抓取接口，POST 触发，带防重锁
+  router.post('/:id/fetch-content', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
+
+    const article = await sql`
+      SELECT a.*, s.name AS source_name, s.icon AS source_icon, s.type AS source_type
+      FROM articles a
+      LEFT JOIN sources s ON a.source_id = s.id
+      WHERE a.id = ${id}
+    `;
+    if (article.length === 0) return c.json({ error: 'Not found' }, 404);
+
+    const art = article[0]!;
+
+    // 已经有足够正文，无需抓取
+    if (art.content && art.content.length >= 100) {
+      return c.json({ ok: true, message: '正文已存在', content_length: art.content.length });
     }
 
-    return c.json(art);
+    // 防重锁：检查 extra.fetching 是否在 30 秒内（防并发重复抓取）
+    const extra = (art.extra as Record<string, any>) || {};
+    if (extra.fetching && Date.now() - extra.fetching < 30000) {
+      return c.json({ error: '正在抓取中，请稍候' }, 409);
+    }
+
+    // 设置抓取锁
+    await sql`UPDATE articles SET extra = jsonb_set(COALESCE(extra, '{}'), '{fetching}', '${Date.now()}'::jsonb) WHERE id = ${id}`;
+
+    try {
+      let fullContent: string | null = null;
+      let sourceType = art.source_type;
+
+      console.log(`[文章 ${id}] 开始抓取正文, source_type=${art.source_type}, url=${art.url}`);
+
+      if (art.source_type === 'xwlb') {
+        fullContent = await fetchAndParseXWLBContent(art.url);
+      } else if (art.source_type === 'rss' && art.url?.includes('mp.weixin.qq.com')) {
+        fullContent = await fetchAndParseWechatContent(art.url);
+        sourceType = 'wechat';
+      } else if (art.source_type === 'rmrb' && art.url?.includes('paper.people.com.cn')) {
+        fullContent = await fetchAndParseRMRBContent(art.url);
+      } else {
+        return c.json({ error: '不支持自动抓取该类型文章', source_type: art.source_type }, 400);
+      }
+
+      if (!fullContent) {
+        return c.json({ error: '抓取失败，可能是 URL 失效或网络问题' }, 502);
+      }
+
+      const { processedContent } = await saveArticleFile(id, fullContent, {
+        id, title: art.title, source_type: sourceType,
+        source_name: art.source_name || '', url: art.url,
+        published_at: art.published_at, category: art.category,
+        tags: art.tags || [], author: art.author,
+        is_read: art.is_read, is_starred: art.is_starred,
+      });
+
+      // 更新正文并清除抓取锁
+      await sql`UPDATE articles SET content = ${processedContent}, extra = extra - 'fetching' WHERE id = ${id}`;
+
+      return c.json({ ok: true, content_length: processedContent.length });
+    } catch (e: any) {
+      // 清除抓取锁（失败也要释放）
+      await sql`UPDATE articles SET extra = extra - 'fetching' WHERE id = ${id}`;
+      console.error(`抓取正文失败 [${id}]:`, e.message);
+      return c.json({ error: `抓取失败: ${e.message}` }, 500);
+    }
   });
 
   // 标记已读/未读

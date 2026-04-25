@@ -747,8 +747,16 @@ async function selectArticle(id) {
       }).join('') : `
         <div class="bg-surface2 rounded-lg p-6 border border-border text-center">
           <div class="text-4xl mb-3">📄</div>
-          <p class="text-muted text-sm mb-4">${article.url && article.url.includes('mp.weixin.qq.com') ? '微信公众号文章需在微信内查看完整内容' : '此文章正文需在原始页面查看'}</p>
-          ${article.url ? `<a href="${article.url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 bg-accent hover:bg-accent2 text-white text-sm px-5 py-2.5 rounded-lg transition font-medium">
+          ${article.needsFetch ? `
+            <p class="text-muted text-sm mb-4">此文章正文尚未抓取，点击下方按钮自动获取</p>
+            <button onclick="fetchArticleContent(${id})" id="fetchBtn-${id}" class="inline-flex items-center gap-2 bg-accent hover:bg-accent2 text-white text-sm px-5 py-2.5 rounded-lg transition font-medium">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              抓取正文
+            </button>
+          ` : `
+            <p class="text-muted text-sm mb-4">${article.url ? '此文章正文需在原始页面查看' : '此文章无正文内容'}</p>
+          `}
+          ${article.url ? `<a href="${article.url}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-2 bg-surface1 hover:bg-border text-fg text-sm px-5 py-2.5 rounded-lg transition font-medium mt-2">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
             阅读原文
           </a>` : ''}
@@ -857,6 +865,34 @@ function filterByCategory(cat) {
   currentCategory = cat;
   renderCategories();
   loadArticles();
+}
+
+// 🔒 独立正文抓取：POST 触发，防重锁保护
+async function fetchArticleContent(id) {
+  const btn = document.getElementById(`fetchBtn-${id}`);
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg> 抓取中...';
+  }
+  try {
+    const result = await api(`/articles/${id}/fetch-content`, { method: 'POST' });
+    if (result.ok) {
+      // 抓取成功，重新加载文章详情
+      await selectArticle(id);
+    } else {
+      alert(result.error || '抓取失败');
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> 抓取正文';
+      }
+    }
+  } catch (e) {
+    alert('网络错误');
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> 抓取正文';
+    }
+  }
 }
 
 async function toggleStar(id, isStarred) {
