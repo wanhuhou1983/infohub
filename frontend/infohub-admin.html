@@ -736,6 +736,57 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- ====== YouTube 配置弹窗 ====== -->
+<div id="youtubeUppersModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-semibold">YouTube 频道配置</h2>
+        <p class="text-xs text-muted mt-0.5">勾选要显示的频道，按最新视频时间排序</p>
+      </div>
+      <button class="text-muted hover:text-fg" onclick="closeYoutubeUppersModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
+      <button class="text-xs bg-accent/20 text-accent px-2.5 py-1 rounded transition" onclick="openYoutubeUpperModal()">
+        + 添加频道
+      </button>
+      <div class="flex-1"></div>
+      <div class="relative">
+        <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="youtube-search-input" placeholder="搜索频道..." 
+          class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
+          oninput="renderYoutubeUppers()">
+      </div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="youtube-select-all" class="accent-accent" onchange="toggleSelectAllYoutubeUppers()">
+        <span id="youtubeSelectAllText">全选</span>
+      </label>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="youtube-show-enabled-only" class="accent-accent" onchange="renderYoutubeUppers()">
+        只显示已启用
+      </label>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-3">
+      <div id="youtubeUppersList" class="space-y-2">
+        <div class="text-center text-muted py-8">加载中...</div>
+      </div>
+    </div>
+    <div class="px-6 py-3 border-t border-border shrink-0">
+      <div class="flex items-center justify-between">
+        <div class="text-xs text-muted">
+          已选择 <span id="youtubeSelectedCount" class="text-fg font-medium">0</span> 个频道
+        </div>
+        <div class="flex gap-3">
+          <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeYoutubeUppersModal()">取消</button>
+          <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeYoutubeUppersModal()">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== 模拟数据 =====
 const SOURCE_CONFIGS = [
@@ -767,7 +818,16 @@ const SOURCE_CONFIGS = [
     lastFetch: '2026-04-22 18:00', status: 'success',
     feeds: [], // 通过设置弹窗管理，不在卡片显示
   },
-  
+  {
+    id: 'youtube', name: 'YouTube', icon: '▶️', type: 'spider',
+    color: 'bg-red-600/20 text-red-500',
+    description: 'YouTube 频道视频，点击右侧设置按钮选择关注的频道',
+    config: { method: 'YouTube Data API' },
+    enabled: true, articleCount: 0, todayCount: 0,
+    lastFetch: '-', status: 'success',
+    feeds: [], // 通过设置弹窗管理，不在卡片显示
+  },
+
   {
     id: 'magazine', name: '报刊杂志', icon: '📰', type: 'magazine',
     color: 'bg-amber-500/20 text-amber-400',
@@ -882,15 +942,15 @@ async function saveApiConfig() {
 // ===== 信息源管理 =====
 // 判断是否为聚合源（通过设置弹窗管理子源）
 function isAggSource(s) {
-  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili' || s.id === 'wechat_group'
-    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili' || s.sourceType === 'wechat_group';
+  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili' || s.id === 'wechat_group' || s.id === 'youtube'
+    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili' || s.sourceType === 'wechat_group' || s.sourceType === 'youtube';
 }
 
 function renderSourceCards() {
   const el = document.getElementById('sourceCards');
   
-  // 自定义排序：公众号 -> 微信群聊 -> 哔哩哔哩 -> 其他
-  const order = { wechat: 1, wechat_group: 2, bilibili: 3 };
+  // 自定义排序：公众号 -> 微信群聊 -> 哔哩哔哩 -> YouTube -> 其他
+  const order = { wechat: 1, wechat_group: 2, bilibili: 3, youtube: 4 };
   const sortedSources = [...SOURCE_CONFIGS].sort((a, b) => {
     const orderA = order[a.sourceType] || 100;
     const orderB = order[b.sourceType] || 100;
@@ -968,6 +1028,10 @@ function renderSourceCards() {
           </button>
           ` : s.id === 'bilibili' || s.sourceType === 'bilibili' ? `
           <button class="text-muted hover:text-accent2 transition p-1" title="配置 UP 主" onclick="showBilibiliUppersModal()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </button>
+          ` : s.id === 'youtube' || s.sourceType === 'youtube' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置频道" onclick="showYoutubeUppersModal()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
           ` : s.id === 'wechat_group' || s.sourceType === 'wechat_group' ? `
@@ -1824,6 +1888,194 @@ async function refreshBilibiliUppers() {
     }
     
     await loadBilibiliUppers();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">刷新失败: ${e.message}</div>`;
+  }
+}
+
+// ===== YouTube 配置弹窗 =====
+let youtubeUppersData = [];
+
+function showYoutubeUppersModal() {
+  document.getElementById('youtubeUppersModal').classList.remove('hidden');
+  document.getElementById('youtubeUppersModal').classList.add('flex');
+  loadYoutubeUppers();
+}
+
+function closeYoutubeUppersModal() {
+  document.getElementById('youtubeUppersModal').classList.add('hidden');
+  document.getElementById('youtubeUppersModal').classList.remove('flex');
+}
+
+async function loadYoutubeUppers() {
+  const listEl = document.getElementById('youtubeUppersList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
+  
+  try {
+    const res = await fetch('/api/youtube-admin/uppers');
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      return;
+    }
+    
+    youtubeUppersData = data.uppers || [];
+    renderYoutubeUppers();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderYoutubeUppers() {
+  const listEl = document.getElementById('youtubeUppersList');
+  const showEnabledOnly = document.getElementById('youtube-show-enabled-only').checked;
+  const searchText = (document.getElementById('youtube-search-input')?.value || '').trim().toLowerCase();
+  
+  let uppers = youtubeUppersData;
+  
+  // 搜索过滤
+  if (searchText) {
+    uppers = uppers.filter(a => 
+      (a.name || '').toLowerCase().includes(searchText) ||
+      (a.channel_id || '').toLowerCase().includes(searchText)
+    );
+  }
+  
+  // 启用过滤
+  if (showEnabledOnly) {
+    uppers = uppers.filter(a => a.enabled);
+  }
+  
+  if (uppers.length === 0) {
+    listEl.innerHTML = '<div class="text-center text-muted py-8">暂无频道</div>';
+    return;
+  }
+  
+  const enabledCount = youtubeUppersData.filter(a => a.enabled).length;
+  document.getElementById('youtubeSelectedCount').textContent = enabledCount;
+  
+  // 更新全选 checkbox 状态
+  const selectAllCb = document.getElementById('youtube-select-all');
+  const selectAllText = document.getElementById('youtubeSelectAllText');
+  if (youtubeUppersData.length > 0 && enabledCount === youtubeUppersData.length) {
+    selectAllCb.checked = true;
+    selectAllText.textContent = '取消全选';
+  } else {
+    selectAllCb.checked = false;
+    selectAllText.textContent = '全选';
+  }
+  
+  listEl.innerHTML = uppers.map(a => `
+    <div class="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-surface2 transition">
+      <div class="flex items-center gap-3 min-w-0">
+        <label class="switch shrink-0">
+          <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleYoutubeUpper(${a.id}, this.checked)">
+          <span class="slider"></span>
+        </label>
+        <div class="min-w-0">
+          <span class="text-sm font-medium block truncate">${a.name}</span>
+          <span class="text-xs text-muted block truncate">channel: ${a.channel_id}</span>
+        </div>
+      </div>
+      <span class="text-xs ${a.enabled ? 'text-green-400' : 'text-muted'} shrink-0">${a.enabled ? '已启用' : '已禁用'}</span>
+    </div>
+  `).join('');
+}
+
+async function toggleYoutubeUpper(id, enabled) {
+  try {
+    const res = await fetch('/api/youtube-admin/uppers/' + id + '/toggle', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('切换失败: ' + data.error);
+      loadYoutubeUppers();
+      return;
+    }
+    
+    // 更新本地数据
+    const upper = youtubeUppersData.find(a => a.id === id);
+    if (upper) upper.enabled = enabled;
+    renderYoutubeUppers();
+  } catch (e) {
+    alert('切换失败: ' + e.message);
+    loadYoutubeUppers();
+  }
+}
+
+async function toggleSelectAllYoutubeUppers() {
+  const total = youtubeUppersData.length;
+  const enabledCount = youtubeUppersData.filter(a => a.enabled).length;
+  const newState = enabledCount < total;
+
+  // 逐个切换（后端没有 toggle-all，逐个调用）
+  try {
+    for (const upper of youtubeUppersData) {
+      if (upper.enabled !== newState) {
+        await fetch('/api/youtube-admin/uppers/' + upper.id + '/toggle', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: newState })
+        });
+        upper.enabled = newState;
+      }
+    }
+    renderYoutubeUppers();
+  } catch (e) {
+    alert('批量操作失败: ' + e.message);
+    loadYoutubeUppers();
+  }
+}
+
+async function addYoutubeUpper(channelId, name) {
+  name = decodeURIComponent(name);
+  
+  try {
+    const res = await fetch('/api/youtube-admin/uppers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelId, name })
+    });
+    
+    const data = await res.json();
+    
+    if (data.error) {
+      alert('添加失败: ' + data.error);
+      return;
+    }
+    
+    await loadYoutubeUppers();
+  } catch (e) {
+    alert('添加失败: ' + e.message);
+  }
+}
+
+function openYoutubeUpperModal() {
+  const name = prompt('请输入频道名称:');
+  if (!name) return;
+  const channelId = prompt('请输入频道 ID (Channel ID):');
+  if (!channelId) return;
+  addYoutubeUpper(channelId, name);
+}
+
+async function refreshYoutubeUppers() {
+  const listEl = document.getElementById('youtubeUppersList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">刷新中，请稍候...</div>';
+  
+  try {
+    const res = await fetch('/api/youtube-admin/refresh', { method: 'POST' });
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      return;
+    }
+    
+    await loadYoutubeUppers();
   } catch (e) {
     listEl.innerHTML = `<div class="text-center text-danger py-8">刷新失败: ${e.message}</div>`;
   }

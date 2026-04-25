@@ -25,6 +25,7 @@ import { createWechatAdminRoutes } from './routes/wechat-admin.js';
 import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';
 import { createBilibiliAdminUppersRoutes } from './routes/bilibili-admin-uppers.js';
 import { createWechatGroupAdminRoutes } from './routes/wechat-group-admin.js';
+import { createYoutubeAdminRoutes } from './routes/youtube-admin.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -219,6 +220,7 @@ app.route('/api/wechat-admin', createWechatAdminRoutes(sql));
 app.route('/api/bilibili-admin', createBilibiliAdminRoutes(sql));
 app.route('/api/bilibili-admin', createBilibiliAdminUppersRoutes(sql));
 app.route('/api/wechat-group-admin', createWechatGroupAdminRoutes(sql));
+app.route('/api/youtube-admin', createYoutubeAdminRoutes(sql));
 
 // ============ 启动 ============
 

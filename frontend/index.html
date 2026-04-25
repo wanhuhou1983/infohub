@@ -131,6 +131,54 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- YouTube UP 主管理模态框 -->
+<div id="youtubeAdminModal" class="fixed inset-0 z-[300] hidden">
+  <div class="absolute inset-0 bg-black/60" onclick="hideYoutubeAdmin()"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-2xl shadow-2xl w-[600px] max-h-[85vh] flex flex-col">
+    <div class="p-5 border-b border-border shrink-0">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-semibold flex items-center gap-2">▶️ YouTube UP 主管理</h2>
+        <button class="text-muted hover:text-fg transition" onclick="hideYoutubeAdmin()">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-muted">手动添加关注的 YouTube 频道，开启后自动采集最新视频。</p>
+      
+      <!-- 添加 UP 主表单 -->
+      <div class="flex items-center gap-2 mt-3">
+        <input id="youtubeAddInput" type="text" placeholder="YouTube 频道链接或 Channel ID" 
+          class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent placeholder-muted">
+        <button id="youtubeAddBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition font-medium" onclick="addYoutubeUpper()">
+          添加
+        </button>
+      </div>
+      
+      <!-- 搜索框 -->
+      <div class="flex items-center gap-2 mt-3">
+        <input id="youtubeSearchInput" type="text" placeholder="搜索频道名称..."
+          class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent placeholder-muted"
+          oninput="searchYoutubeUppers(this.value)">
+      </div>
+
+      <div class="flex items-center gap-3 mt-3">
+        <button id="youtubeRefreshBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5" onclick="youtubeRefresh()">
+          <svg id="youtubeRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          采集视频
+        </button>
+        <span id="youtubeAdminStatus" class="text-xs text-muted"></span>
+      </div>
+    </div>
+    <div class="flex-1 overflow-y-auto p-5">
+      <div id="youtubeAccountList" class="space-y-2">
+        <div class="text-center text-muted py-8 text-sm">加载中...</div>
+      </div>
+    </div>
+    <div class="p-3 border-t border-border text-center text-xs text-muted shrink-0">
+      <span>💡 点击开关选择要采集的频道，点击「采集视频」拉取已启用频道的最新视频</span>
+    </div>
+  </div>
+</div>
+
 <!-- 设置模态框 -->
 <div id="settingsModal" class="fixed inset-0 z-[200] hidden">
   <div class="absolute inset-0 bg-black/60" onclick="hideSettings()"></div>
@@ -334,7 +382,9 @@ const SOURCE_COLORS = {
   penti: 'bg-purple-500/20 text-purple-400',
   ai: 'bg-cyan-500/20 text-cyan-400',
   bilibili: 'bg-pink-500/20 text-pink-400',
+  'bilibili-updates': 'bg-pink-500/20 text-pink-400',
   youtube: 'bg-red-600/20 text-red-500',
+  'youtube-updates': 'bg-red-600/20 text-red-500',
 };
 
 const CATEGORIES = ['全部', '国内', '国际', '财经', '科技', '民生', '人文', '综合'];
@@ -601,7 +651,12 @@ const BILIBILI_WATCH_LATER = 1274;
 const BILIBILI_FAVORITES = 1275;
 const BILIBILI_ROOT = 1272;
 
+// YouTube 特殊子源
+const YOUTUBE_UPDATES = 1531;
+const YOUTUBE_ROOT = 1530;
+
 let bilibiliSpecialFilter = null; // 'watch_later', 'starred', 或 null
+let youtubeSpecialFilter = null;
 
 function filterBySource(id) {
   // 处理 B站特殊子源
@@ -619,8 +674,17 @@ function filterBySource(id) {
     bilibiliSpecialFilter = null;
     expandedSources.add(BILIBILI_ROOT);
     currentSourceId = BILIBILI_UPDATES; // 默认显示UP主更新
+  } else if (id === YOUTUBE_UPDATES) {
+    youtubeSpecialFilter = null;
+    currentSourceId = YOUTUBE_UPDATES; // 1531，后端递归查UP主子源
+  } else if (id === YOUTUBE_ROOT) {
+    // 点击 YouTube 根节点：自动展开子源并显示"更新"内容
+    youtubeSpecialFilter = null;
+    expandedSources.add(YOUTUBE_ROOT);
+    currentSourceId = YOUTUBE_UPDATES; // 默认显示UP主更新
   } else {
     bilibiliSpecialFilter = null;
+    youtubeSpecialFilter = null;
     currentSourceId = currentSourceId === id ? null : id;
   }
   loadSources();
@@ -1049,6 +1113,139 @@ async function bilibiliRefresh() {
   btn.disabled = false;
   icon.classList.remove('spin');
   btn.innerHTML = '<svg id="bilibiliRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 采集视频';
+}
+
+// ===== YouTube UP 主管理 =====
+let youtubeUppersCache = [];
+
+async function showYoutubeAdmin() {
+  document.getElementById('youtubeAdminModal').classList.remove('hidden');
+  document.getElementById('youtubeAccountList').innerHTML = '<div class="text-center text-muted py-8 text-sm">加载中...</div>';
+  await loadYoutubeUppers();
+}
+
+function hideYoutubeAdmin() {
+  document.getElementById('youtubeAdminModal').classList.add('hidden');
+}
+
+async function loadYoutubeUppers(search) {
+  const el = document.getElementById('youtubeAccountList');
+  try {
+    const url = search ? '/api/youtube-admin/uppers?search=' + encodeURIComponent(search) : '/api/youtube-admin/uppers';
+    const data = await api(url);
+    youtubeUppersCache = data.uppers || [];
+
+    if (youtubeUppersCache.length === 0) {
+      el.innerHTML = '<div class="text-center text-muted py-8 text-sm">无频道</div>';
+      return;
+    }
+
+    const enabledCount = youtubeUppersCache.filter(a => a.enabled).length;
+    document.getElementById('youtubeAdminStatus').textContent = '共 ' + data.total + ' 个，已启用 ' + enabledCount + ' 个';
+
+    const sorted = [...youtubeUppersCache].sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+      return a.name.localeCompare(a.name, 'zh');
+    });
+
+    el.innerHTML = sorted.map(a => {
+      const toggleClass = a.enabled ? 'bg-accent' : 'bg-border';
+      const spanClass = a.enabled ? 'translate-x-[18px]' : 'translate-x-[2px]';
+      const statusClass = a.enabled ? 'text-green-400' : 'text-muted';
+      return '<div class="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-surface2 transition">' +
+        '<div class="flex items-center gap-3 min-w-0">' +
+        '<button class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ' + toggleClass + '" onclick="toggleYoutubeUpper(' + a.id + ', ' + (!a.enabled) + ')">' +
+        '<span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ' + spanClass + '"></span></button>' +
+        '<div class="min-w-0"><span class="text-sm font-medium block truncate">' + a.name + '</span><span class="text-xs text-muted block truncate">channel: ' + a.channel_id + '</span></div></div>' +
+        '<span class="text-xs ' + statusClass + ' shrink-0">' + (a.enabled ? '已启用' : '已禁用') + '</span></div>';
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="text-center text-muted py-8 text-sm">加载失败: ' + e + '</div>';
+  }
+}
+
+async function toggleYoutubeUpper(id, enabled) {
+  try {
+    await api('/api/youtube-admin/uppers/' + id + '/toggle', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    const search = document.getElementById('youtubeSearchInput').value || '';
+    await loadYoutubeUppers(search);
+  } catch (e) {
+    showToast('切换失败: ' + e, 'error');
+  }
+}
+
+async function addYoutubeUpper() {
+  const input = document.getElementById('youtubeAddInput');
+  const val = input.value.trim();
+  if (!val) return;
+
+  const btn = document.getElementById('youtubeAddBtn');
+  btn.disabled = true;
+  btn.textContent = '添加中...';
+
+  try {
+    const result = await api('/api/youtube-admin/uppers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: val }),
+    });
+    if (result.ok) {
+      showToast('已添加: ' + result.upper.name, 'success');
+      input.value = '';
+      await loadYoutubeUppers();
+    } else {
+      showToast(result.error || '添加失败', 'error');
+    }
+  } catch (e) {
+    showToast('添加失败: ' + e, 'error');
+  }
+
+  btn.disabled = false;
+  btn.textContent = '添加';
+}
+
+let youtubeSearchTimeout = null;
+function searchYoutubeUppers(query) {
+  clearTimeout(youtubeSearchTimeout);
+  youtubeSearchTimeout = setTimeout(function() {
+    loadYoutubeUppers(query);
+  }, 300);
+}
+
+async function youtubeRefresh() {
+  const btn = document.getElementById('youtubeRefreshBtn');
+  const icon = document.getElementById('youtubeRefreshIcon');
+  btn.disabled = true;
+  icon.classList.add('spin');
+  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 采集中...';
+  document.getElementById('youtubeAdminStatus').textContent = '正在采集...';
+
+  try {
+    const result = await api('/api/youtube-admin/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (result.ok) {
+      showToast('采集完成：获取 ' + result.fetched + ' 个视频，新增 ' + result.inserted + ' 篇', 'success');
+    } else {
+      showToast('采集失败: ' + result.error, 'error');
+    }
+    await loadYoutubeUppers();
+    loadArticles();
+    loadStats();
+    loadSources();
+  } catch (e) {
+    showToast('采集异常: ' + e, 'error');
+    document.getElementById('youtubeAdminStatus').textContent = '采集失败';
+  }
+
+  btn.disabled = false;
+  icon.classList.remove('spin');
+  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 采集视频';
 }
 
 // ===== 初始化 =====
