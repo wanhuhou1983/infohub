@@ -14,6 +14,17 @@ import type { Sql } from 'postgres';
 import { hashString, saveArticleFile } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
 
+/** 解码 YouTube API 返回的 HTML 实体（如 &amp; &#39; &quot;） */
+function decodeHtmlEntities(str: string): string {
+  return str
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)));
+}
+
 export function createYoutubeAdminRoutes(sql: Sql): Hono {
   const router = new Hono();
 
@@ -30,7 +41,7 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
         SELECT s.id, s.name, s.enabled, s.config->>'channelId' AS channel_id,
                (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_video_at
         FROM sources s
-        WHERE s.type = 'youtube-updates' AND s.parent_id = ${updatesSource[0].id}
+        WHERE s.type = 'youtube-updates' AND s.parent_id = ${updatesSource[0]!.id}
         ORDER BY s.enabled DESC, s.name ASC
       `;
 
@@ -71,12 +82,34 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
         return c.json({ error: '请提供 UP 主 channelId 或 YouTube 频道链接' }, 400);
       }
 
+      // 如果没有提供名称，通过 YouTube API 获取频道信息
+      if (!name) {
+        try {
+          const [ytSrc] = await sql`SELECT config->>'apiKey' AS api_key FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
+          const apiKey = ytSrc?.api_key;
+          if (apiKey) {
+            const chResp = await fetch(
+              `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelId}&key=${apiKey}`,
+              { headers: { 'User-Agent': 'Mozilla/5.0' }, signal: AbortSignal.timeout(10000) }
+            );
+            if (chResp.ok) {
+              const chData = await chResp.json() as any;
+              if (chData.items?.[0]?.snippet?.title) {
+                name = chData.items[0].snippet.title;
+              }
+            }
+          }
+        } catch (_) {
+          // 忽略 API 错误
+        }
+      }
+
       name = name || `YouTuber ${channelId}`;
 
       // 检查是否已存在
       const [existing] = await sql`
         SELECT id FROM sources 
-        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0].id} AND config->>'channelId' = ${channelId}
+        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND config->>'channelId' = ${channelId}
       `;
       if (existing) {
         return c.json({ error: '该 UP 主已存在' }, 400);
@@ -85,11 +118,11 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       // 插入新 UP 主（默认禁用）
       const [inserted] = await sql`
         INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-        VALUES (${name}, 'youtube-updates', ${updatesSource[0].id}, ${sql.json({ channelId })}, false, NOW())
+        VALUES (${name}, 'youtube-updates', ${updatesSource[0]!.id}, ${sql.json({ channelId })}, false, NOW())
         RETURNING id, name, config
       `;
 
-      return c.json({ ok: true, upper: { id: inserted.id, name: inserted.name, channelId, enabled: false } });
+      return c.json({ ok: true, upper: { id: inserted!.id, name: inserted!.name, channelId, enabled: false } });
     } catch (e: any) {
       return c.json({ error: e.message }, 500);
     }
@@ -131,8 +164,11 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
     const startMs = Date.now();
 
     try {
-      const [youtubeSource] = await sql`SELECT id FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
+      const [youtubeSource] = await sql`SELECT id, config FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
       if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
+
+      const apiKey = youtubeSource.config?.apiKey;
+      if (!apiKey) return c.json({ error: 'YouTube API Key 未配置，请先在数据库 sources 表（id=1530）的 config 字段中添加 apiKey' }, 400);
 
       const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
       if (updatesSource.length === 0) return c.json({ error: 'YouTube "更新"源未配置' }, 400);
@@ -140,7 +176,7 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       const enabledUppers = await sql`
         SELECT id, name, config->>'channelId' AS channel_id
         FROM sources
-        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0].id} AND enabled = true
+        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND enabled = true
       `;
 
       if (enabledUppers.length === 0) {
@@ -151,11 +187,109 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       let inserted = 0;
       const errors: string[] = [];
 
-      // TODO: 接入 YouTube Data API 或 skill 获取视频
-      // 目前返回占位，等 skill 调试后再实现
       for (const upper of enabledUppers) {
-        totalFetched++;
-        errors.push(`${upper.name}: 待接入 YouTube API`);
+        const channelId = upper.channel_id;
+        const name = upper.name;
+
+        try {
+          // 调用 YouTube Search API 获取频道最新视频
+          const searchResp = await fetch(
+            `https://www.googleapis.com/youtube/v3/search?part=snippet&channelId=${channelId}&order=date&maxResults=10&type=video&key=${apiKey}`,
+            { headers: { 'User-Agent': 'Mozilla/5.0' } }
+          );
+          
+          if (!searchResp.ok) {
+            errors.push(`${name}: API ${searchResp.status}`);
+            continue;
+          }
+
+          const searchData = await searchResp.json() as any;
+          if (searchData.error) {
+            errors.push(`${name}: ${searchData.error.message || 'API 错误'}`);
+            continue;
+          }
+
+          const items = searchData.items || [];
+          if (items.length === 0) {
+            errors.push(`${name}: 无视频数据`);
+            continue;
+          }
+
+          // 为每个视频获取详细信息（播放量、描述等）
+          for (const item of items) {
+            try {
+              const videoId = item.id?.videoId;
+              if (!videoId) continue;
+
+              const title = decodeHtmlEntities(item.snippet?.title || '');
+              const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+              const contentHash = hashString(videoUrl);
+
+              // 检查是否已存在
+              const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+              if (existing) {
+                totalFetched++;
+                continue;
+              }
+
+              const publishedAt = item.snippet?.publishedAt || new Date().toISOString();
+              const description = decodeHtmlEntities(item.snippet?.description || '');
+              const author = name;
+              const thumbnailUrl = item.snippet?.thumbnails?.high?.url || '';
+
+              // 获取视频详细信息（播放量、点赞数等）
+              let stats = '';
+              try {
+                const videoResp = await fetch(
+                  `https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet&id=${videoId}&key=${apiKey}`,
+                  { headers: { 'User-Agent': 'Mozilla/5.0' } }
+                );
+                if (videoResp.ok) {
+                  const videoData = await videoResp.json() as any;
+                  if (videoData.items?.[0]) {
+                    const statsData = videoData.items[0].statistics;
+                    stats = `👁️ ${statsData.viewCount || 0} 观看 | 👍 ${statsData.likeCount || 0} | 💬 ${statsData.commentCount || 0}`;
+                  }
+                }
+              } catch (e) {
+                // 忽略详细信息获取失败
+              }
+
+              // 构建内容
+              let content = `${title}\n\n${description}\n\n${stats}`;
+              if (thumbnailUrl) {
+                content = `![缩略图](${thumbnailUrl})\n\n${content}`;
+              }
+
+              const category = classifyByFeed(name);
+              const tags = extractTags(title + ' ' + description.slice(0, 200), name);
+
+              const insertedRows = await sql`
+                INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
+                VALUES (${upper.id}, ${title}, ${content}, ${title.slice(0, 150)}, ${videoUrl}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author})
+                ON CONFLICT (content_hash) DO NOTHING
+                RETURNING id
+              `;
+
+              if (insertedRows.length > 0) {
+                inserted++;
+                const newId = insertedRows[0]!.id;
+                await saveArticleFile(newId, content, {
+                  id: newId, title, source_type: 'youtube',
+                  source_name: name, url: videoUrl, published_at: publishedAt,
+                  category, tags, author, is_read: false, is_starred: false,
+                });
+              }
+              totalFetched++;
+            } catch (e: any) {
+              if (e.code !== '23505') {
+                errors.push(`${name}: ${e.message}`);
+              }
+            }
+          }
+        } catch (e: any) {
+          errors.push(`${name}: ${e.message}`);
+        }
       }
 
       await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${youtubeSource.id}`;
@@ -163,7 +297,7 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
         VALUES (${youtubeSource.id}, 'YouTube UP主采集', 'success', ${inserted},
-          ${`已启用 ${enabledUppers.length} 个 UP 主，待接入 YouTube API`},
+          ${`已启用 ${enabledUppers.length} 个 UP 主，获取 ${totalFetched} 个视频，入库 ${inserted} 个${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
           ${durationMs})
       `;
 
