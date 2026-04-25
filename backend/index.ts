@@ -24,6 +24,7 @@ import { createSyncRoutes } from './routes/sync.js';
 import { createWechatAdminRoutes } from './routes/wechat-admin.js';
 import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';
 import { createBilibiliAdminUppersRoutes } from './routes/bilibili-admin-uppers.js';
+import { createWechatGroupAdminRoutes } from './routes/wechat-group-admin.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -189,7 +190,7 @@ sourcesRouter.get('/tree', async (c) => {
     } else {
       const parent = nodeMap.get(s.parent_id);
       if (parent) {
-        if (parent.type === 'wechat' && node.enabled === false) {
+        if ((parent.type === 'wechat' || parent.type === 'wechat_group') && node.enabled === false) {
           return;
         }
         parent.children.push(node);
@@ -217,6 +218,7 @@ app.route('/api/sync', createSyncRoutes(sql));
 app.route('/api/wechat-admin', createWechatAdminRoutes(sql));
 app.route('/api/bilibili-admin', createBilibiliAdminRoutes(sql));
 app.route('/api/bilibili-admin', createBilibiliAdminUppersRoutes(sql));
+app.route('/api/wechat-group-admin', createWechatGroupAdminRoutes(sql));
 
 // ============ 启动 ============
 

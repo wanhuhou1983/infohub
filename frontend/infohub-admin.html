@@ -628,6 +628,59 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- ====== 微信群聊配置弹窗 ====== -->
+<div id="wechatGroupModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-semibold">群聊配置</h2>
+        <p class="text-xs text-muted mt-0.5">勾选要监控的微信群聊</p>
+      </div>
+      <button class="text-muted hover:text-fg" onclick="closeWechatGroupModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    
+    <!-- 工具栏 -->
+    <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="wechat-group-select-all" class="accent-accent" onchange="toggleSelectAllWechatGroups()">
+        <span id="wechatGroupSelectAllText">全选</span>
+      </label>
+      <div class="flex-1"></div>
+      <!-- 搜索框 -->
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="wechat-group-search-input" placeholder="搜索群聊..." 
+          class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
+          oninput="renderWechatGroups()">
+      </div>
+      <label class="flex items-center gap-2 text-xs text-muted">
+        <input type="checkbox" id="wechat-group-show-enabled-only" class="accent-accent" onchange="renderWechatGroups()">
+        只显示已启用
+      </label>
+    </div>
+    
+    <!-- 群聊列表 -->
+    <div class="flex-1 overflow-y-auto p-4">
+      <div id="wechatGroupList" class="space-y-2">
+        <div class="text-center text-muted py-8">加载中...</div>
+      </div>
+    </div>
+    
+    <!-- 底部操作 -->
+    <div class="px-6 py-4 border-t border-border flex items-center justify-between shrink-0">
+      <div class="text-xs text-muted">
+        已选择 <span id="wechatGroupSelectedCount" class="text-fg font-medium">0</span> 个群聊
+      </div>
+      <div class="flex gap-3">
+        <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeWechatGroupModal()">取消</button>
+        <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeWechatGroupModal()">完成</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ====== 哔哩哔哩配置弹窗 ====== -->
 <div id="bilibiliUppersModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
   <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
@@ -829,8 +882,8 @@ async function saveApiConfig() {
 // ===== 信息源管理 =====
 // 判断是否为聚合源（通过设置弹窗管理子源）
 function isAggSource(s) {
-  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili'
-    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili';
+  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili' || s.id === 'wechat_group'
+    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili' || s.sourceType === 'wechat_group';
 }
 
 function renderSourceCards() {
@@ -905,6 +958,10 @@ function renderSourceCards() {
           </button>
           ` : s.id === 'bilibili' || s.sourceType === 'bilibili' ? `
           <button class="text-muted hover:text-accent2 transition p-1" title="配置 UP 主" onclick="showBilibiliUppersModal()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </button>
+          ` : s.id === 'wechat_group' || s.sourceType === 'wechat_group' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置群聊" onclick="showWechatGroupModal()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
           ` : ''}
@@ -1094,6 +1151,8 @@ function showSourceSettings(id) {
     showRssSettingsModal();
   } else if (id === 'wechat') {
     showWechatAccountsModal();
+  } else if (id === 'wechat_group') {
+    showWechatGroupModal();
   } else {
     alert('打开 ' + id + ' 设置（开发中）');
   }
@@ -1416,6 +1475,147 @@ async function refreshWechatAccounts() {
   }
 }
 
+// ===== 微信群聊配置弹窗 =====
+let wechatGroupsData = [];
+
+function showWechatGroupModal() {
+  document.getElementById('wechatGroupModal').classList.remove('hidden');
+  document.getElementById('wechatGroupModal').classList.add('flex');
+  loadWechatGroups();
+}
+
+function closeWechatGroupModal() {
+  document.getElementById('wechatGroupModal').classList.add('hidden');
+  document.getElementById('wechatGroupModal').classList.remove('flex');
+}
+
+async function loadWechatGroups() {
+  const listEl = document.getElementById('wechatGroupList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
+  
+  try {
+    const res = await fetch('/api/wechat-group-admin/groups');
+    const data = await res.json();
+    
+    if (data.error) {
+      listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      return;
+    }
+    
+    wechatGroupsData = data.groups || [];
+    renderWechatGroups();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderWechatGroups() {
+  const listEl = document.getElementById('wechatGroupList');
+  const showEnabledOnly = document.getElementById('wechat-group-show-enabled-only').checked;
+  const searchText = (document.getElementById('wechat-group-search-input')?.value || '').trim().toLowerCase();
+  
+  let groups = wechatGroupsData;
+  
+  // 搜索过滤
+  if (searchText) {
+    groups = groups.filter(g => 
+      (g.displayName || '').toLowerCase().includes(searchText) ||
+      (g.chatroom_id || '').toLowerCase().includes(searchText)
+    );
+  }
+  
+  // 只显示已启用过滤
+  if (showEnabledOnly) {
+    groups = groups.filter(g => g.enabled);
+  }
+  
+  if (groups.length === 0) {
+    listEl.innerHTML = '<div class="text-center text-muted py-8">暂无匹配的群聊</div>';
+  } else {
+    listEl.innerHTML = groups.map(g => {
+      const statusHtml = `<span class="text-xs ${g.enabled ? 'text-success' : 'text-muted'}">${g.enabled ? '已启用' : '已禁用'}</span>`;
+      return `
+      <div class="flex items-center gap-3 p-3 bg-surface2 rounded-lg hover:bg-border/50 transition">
+        <input type="checkbox" class="accent-accent w-4 h-4" ${g.enabled ? 'checked' : ''} onchange="toggleWechatGroup(${g.db_id}, this.checked)">
+        <div class="flex-1 min-w-0">
+          <div class="text-sm font-medium truncate">${g.displayName}</div>
+        </div>
+        ${statusHtml}
+      </div>
+      `;
+    }).join('');
+  }
+  
+  // 更新统计
+  const enabledCount = wechatGroupsData.filter(g => g.enabled).length;
+  document.getElementById('wechatGroupSelectedCount').textContent = enabledCount;
+  
+  // 更新全选 checkbox 状态
+  const selectAllCb = document.getElementById('wechat-group-select-all');
+  const selectAllText = document.getElementById('wechatGroupSelectAllText');
+  if (wechatGroupsData.length > 0 && enabledCount === wechatGroupsData.length) {
+    selectAllCb.checked = true;
+    selectAllText.textContent = '取消全选';
+  } else {
+    selectAllCb.checked = false;
+    selectAllText.textContent = '全选';
+  }
+}
+
+async function toggleWechatGroup(dbId, enabled) {
+  if (!dbId) return;
+  
+  try {
+    const res = await fetch(`/api/wechat-group-admin/groups/${dbId}/toggle`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    
+    if (!res.ok) {
+      const data = await res.json();
+      alert('操作失败: ' + (data.error || '未知错误'));
+      loadWechatGroups();
+      return;
+    }
+    
+    // 更新本地数据
+    const group = wechatGroupsData.find(g => g.db_id === dbId);
+    if (group) group.enabled = enabled;
+    
+    renderWechatGroups();
+  } catch (e) {
+    alert('操作失败: ' + e.message);
+    loadWechatGroups();
+  }
+}
+
+async function toggleSelectAllWechatGroups() {
+  const total = wechatGroupsData.length;
+  const enabledCount = wechatGroupsData.filter(g => g.enabled).length;
+  const newState = enabledCount < total;
+
+  try {
+    const res = await fetch('/api/wechat-group-admin/groups/toggle-all', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newState })
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('批量操作失败: ' + data.error);
+      return;
+    }
+    
+    // 更新本地数据
+    wechatGroupsData.forEach(g => g.enabled = newState);
+    renderWechatGroups();
+  } catch (e) {
+    alert('批量操作失败: ' + e.message);
+    loadWechatGroups();
+  }
+}
+
 // ===== 哔哩哔哩配置弹窗 =====
 let bilibiliUppersData = [];
 
@@ -1658,7 +1858,7 @@ async function loadSourcesFromAPI() {
     sources.forEach(s => {
       if (s.parent_id) {
         const parent = sourceMap.get(s.parent_id);
-        if (parent && parent.sourceType !== 'rss' && parent.sourceType !== 'wechat' && parent.sourceType !== 'bilibili') {
+        if (parent && parent.sourceType !== 'rss' && parent.sourceType !== 'wechat' && parent.sourceType !== 'bilibili' && parent.sourceType !== 'wechat_group') {
           parent.feeds.push({
             id: String(s.id),
             name: s.name,
@@ -1710,6 +1910,7 @@ function getTypeBySourceType(type) {
     wechat: 'spider',
     bilibili: 'spider',
     magazine: 'import',
+    wechat_group: 'api',
     api: 'api',
   };
   return types[type] || 'api';
@@ -1722,6 +1923,7 @@ function getColorByType(type) {
     wechat: 'bg-green-500/20 text-green-400',
     bilibili: 'bg-pink-500/20 text-pink-400',
     magazine: 'bg-amber-500/20 text-amber-400',
+    wechat_group: 'bg-teal-500/20 text-teal-400',
     api: 'bg-purple-500/20 text-purple-400',
     builtin: 'bg-gray-500/20 text-gray-400',
   };
@@ -1735,6 +1937,7 @@ function getDescByType(type) {
     wechat: '微信公众号文章抓取',
     bilibili: 'B站 UP 主视频抓取',
     magazine: '报刊杂志精选',
+    wechat_group: '微信群聊热点分析',
     api: 'API 数据源',
   };
   return descs[type] || '信息采集源';
