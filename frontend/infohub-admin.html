@@ -888,7 +888,17 @@ function isAggSource(s) {
 
 function renderSourceCards() {
   const el = document.getElementById('sourceCards');
-  el.innerHTML = SOURCE_CONFIGS.map(s => {
+  
+  // 自定义排序：公众号 -> 微信群聊 -> 哔哩哔哩 -> 其他
+  const order = { wechat: 1, wechat_group: 2, bilibili: 3 };
+  const sortedSources = [...SOURCE_CONFIGS].sort((a, b) => {
+    const orderA = order[a.sourceType] || 100;
+    const orderB = order[b.sourceType] || 100;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.id.localeCompare(b.id, 'zh-CN');
+  });
+  
+  el.innerHTML = sortedSources.map(s => {
     const statusDot = s.status === 'success' ? 'bg-success' : s.status === 'paused' ? 'bg-muted' : 'bg-danger';
     const statusText = s.status === 'success' ? '运行中' : s.status === 'paused' ? '已暂停' : '异常';
     const typeLabel = { builtin: '内置', miniflux: 'Miniflux', spider: '爬虫', api: 'API', aggregation: '聚合', import: '导入' }[s.type];
