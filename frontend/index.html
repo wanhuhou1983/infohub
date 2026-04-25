@@ -394,9 +394,8 @@ async function loadSources() {
         const cs = statsMap.get(child.id);
         const cCount = cs?.article_count || 0;
         const cUnread = cs?.unread_count || 0;
-        // B站"更新"节点显示设置按钮
-        const isBilibiliUpdates = child.id === 1273;
-        const settingsBtn = isBilibiliUpdates ? '<button class="text-muted hover:text-accent px-1" onclick="event.stopPropagation(); showBilibiliAdmin()" title="管理UP主">⚙️</button>' : '';
+        // B站子源不再显示设置按钮（设置已移到admin页面）
+        const settingsBtn = '';
         html += `
         <div class="flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer hover:bg-surface2 transition text-xs ${childActive}" onclick="filterBySource(${child.id})">
           <span class="text-muted flex-1 truncate">${child.name}</span>
@@ -475,6 +474,7 @@ async function loadArticles(reset = true) {
             <span class="text-xs text-muted ml-auto">${formatTime(a.published_at)}</span>
           </div>
           <h3 class="text-sm font-medium leading-snug mb-1">${a.title}</h3>
+          ${a.author ? `<span class="text-xs text-muted mt-1 inline-block">UP: ${a.author}</span>` : ''}
           <div class="flex items-center gap-2 mt-2">
             ${(a.tags || []).map(t => `<span class="text-xs text-accent2 bg-accent/10 px-2 py-0.5 rounded">#${t}</span>`).join('')}
           </div>

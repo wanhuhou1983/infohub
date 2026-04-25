@@ -149,11 +149,14 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       const [bilibiliSource] = await sql`SELECT id FROM sources WHERE type = 'bilibili' AND parent_id IS NULL LIMIT 1`;
       if (!bilibiliSource) return c.json({ error: 'B站信息源未配置' }, 400);
 
-      // 获取已启用的 UP 主
+      // 获取已启用的 UP 主（type=bilibili-updates, parent_id=更新节点1273）
+      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'bilibili-updates' AND parent_id = ${bilibiliSource.id} LIMIT 1`;
+      if (updatesSource.length === 0) return c.json({ error: 'B站"更新"源未配置' }, 400);
+
       const enabledAccounts = await sql`
         SELECT id, name, config->>'mid' AS mid
         FROM sources
-        WHERE type = 'bilibili' AND parent_id = ${bilibiliSource.id} AND enabled = true
+        WHERE type = 'bilibili-updates' AND parent_id = ${updatesSource[0].id} AND enabled = true
       `;
 
       if (enabledAccounts.length === 0) {
