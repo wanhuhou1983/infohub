@@ -5,10 +5,11 @@
  * - GET    /api/wechat-group-admin/groups           → 获取 WeFlow 群聊列表 + DB 启用状态
  * - PATCH  /api/wechat-group-admin/groups/:id/toggle → 切换单个群聊启用/禁用
  * - PATCH  /api/wechat-group-admin/groups/toggle-all → 批量切换所有群聊启用/禁用
- * - POST   /api/wechat-group-admin/fetch            → 采集已启用群聊消息入库
+ * - POST   /api/wechat-group-admin/fetch            → 采集已启用群聊消息入库（按天聚合+昵称替换）
  * - POST   /api/wechat-group-admin/analyze          → 调用 DeepSeek 分析群聊消息
  * - GET    /api/wechat-group-admin/prompt            → 获取当前提示词
  * - PATCH  /api/wechat-group-admin/prompt            → 更新提示词
+ * - GET    /api/wechat-group-admin/daily             → 获取按天聚合的群聊记录
  */
 
 import { Hono } from 'hono';
@@ -33,6 +34,55 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
     return row;
   }
 
+  // ============ 辅助：从 WeFlow 获取昵称映射 ============
+  async function buildNicknameMap(weflowUrl: string, weflowToken: string): Promise<Record<string, string>> {
+    const headers = { 'Authorization': `Bearer ${weflowToken}` };
+    const map: Record<string, string> = {};
+
+    // 一次性拉取所有联系人
+    try {
+      const resp = await fetch(`${weflowUrl}/api/v1/contacts?limit=1000`, { headers, signal: AbortSignal.timeout(30000) });
+      if (resp.ok) {
+        const data = await resp.json() as any;
+        const contacts: any[] = data.contacts || [];
+        for (const c of contacts) {
+          if (c.type === 'friend') {
+            const displayName = c.remark || c.nickname || c.displayName || '';
+            if (c.username && displayName) {
+              map[c.username] = displayName;
+            }
+          }
+        }
+        console.log(`昵称映射: 加载 ${contacts.length} 个联系人，${Object.keys(map).length} 个好友`);
+      }
+    } catch (e: any) {
+      console.error(`获取昵称映射失败: ${e.message}`);
+    }
+
+    return map;
+  }
+
+  // ============ 辅助：保存/加载昵称映射到 DB ============
+  async function saveNicknameMap(map: Record<string, string>) {
+    const groupSource = await getGroupSource();
+    if (!groupSource) return;
+    await sql`
+      UPDATE sources SET config = jsonb_set(COALESCE(config, '{}'), '{nickname_map}', ${sql.json(map)}), updated_at = NOW()
+      WHERE id = ${groupSource.id}
+    `;
+  }
+
+  async function loadNicknameMap(): Promise<Record<string, string>> {
+    const groupSource = await getGroupSource();
+    if (!groupSource?.config?.nickname_map) return {};
+    return groupSource.config.nickname_map as Record<string, string>;
+  }
+
+  // ============ 辅助：用昵称替换 wxid ============
+  function resolveNickname(wxid: string, nicknameMap: Record<string, string>): string {
+    return nicknameMap[wxid] || wxid;
+  }
+
   // ============ 获取所有群聊列表（WeFlow + DB 状态合并） ============
   router.get('/groups', async (c) => {
     try {
@@ -44,14 +94,12 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
 
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
 
-      // 获取 WeFlow 会话列表，筛选群聊（以 @chatroom 结尾）
       const sessionsResp = await fetch(`${weflowUrl}/api/v1/sessions?limit=500`, { headers });
       if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
       const sessionsData = await sessionsResp.json() as any;
       const allGroups: any[] = (sessionsData.sessions || [])
         .filter((s: any) => s.username?.endsWith('@chatroom'));
 
-      // 获取 DB 中已有的群聊子源
       const dbSources = await sql`
         SELECT id, name, enabled, config->>'chatroom_id' AS chatroom_id
         FROM sources
@@ -62,7 +110,6 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         if (s.chatroom_id) dbByChatroomId.set(s.chatroom_id, s);
       }
 
-      // 合并：确保 WeFlow 每个群聊都在 DB 中有记录
       let newlyCreated = 0;
       for (const session of allGroups) {
         const existing = dbByChatroomId.get(session.username);
@@ -75,7 +122,6 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         }
       }
 
-      // 重新读取（包含新创建的）
       const updatedSources = await sql`
         SELECT s.id, s.name, s.enabled, s.config->>'chatroom_id' AS chatroom_id
         FROM sources s
@@ -86,7 +132,6 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         if (s.chatroom_id) updatedByChatroomId.set(s.chatroom_id, s);
       }
 
-      // 组装响应
       let groups = allGroups.map((s: any) => {
         const db = updatedByChatroomId.get(s.username);
         return {
@@ -97,7 +142,6 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         };
       });
 
-      // 按名称排序
       groups.sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-CN'));
 
       return c.json({ groups, total: groups.length, newlyCreated });
@@ -148,7 +192,7 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
     }
   });
 
-  // ============ 采集已启用群聊消息入库 ============
+  // ============ 采集已启用群聊消息入库（按天聚合 + 昵称替换） ============
   router.post('/fetch', async (c) => {
     const startMs = Date.now();
     try {
@@ -159,9 +203,13 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
       if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置' }, 400);
 
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
-      const messageLimit = 50; // 每个群聊拉取最近50条消息
+      const messageLimit = 200; // 每个群聊拉取最近200条消息
 
-      // 获取已启用的群聊子源
+      // 1. 构建昵称映射
+      const nicknameMap = await buildNicknameMap(weflowUrl, weflowToken);
+      await saveNicknameMap(nicknameMap);
+
+      // 2. 获取已启用的群聊子源
       const enabledGroups = await sql`
         SELECT id, name, config->>'chatroom_id' AS chatroom_id
         FROM sources
@@ -172,8 +220,10 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         return c.json({ ok: true, fetched: 0, inserted: 0, message: '没有已启用的群聊' });
       }
 
+      // 3. 拉取消息，按群聊+日期分组
+      // { "群聊名::2026-04-25": { date, groupName, sourceId, messages: [...] } }
+      const dayBuckets: Record<string, { date: string; groupName: string; sourceId: number; chatroomId: string; messages: any[] }> = {};
       let totalFetched = 0;
-      let inserted = 0;
       const errors: string[] = [];
 
       for (const group of enabledGroups) {
@@ -181,7 +231,7 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
         if (!chatroomId) continue;
 
         try {
-          const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${encodeURIComponent(chatroomId)}&limit=${messageLimit}`, { headers });
+          const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${encodeURIComponent(chatroomId)}&limit=${messageLimit}`, { headers, signal: AbortSignal.timeout(30000) });
           if (!msgsResp.ok) {
             errors.push(`${group.name}: messages API ${msgsResp.status}`);
             continue;
@@ -197,47 +247,103 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
             const content = msg.parsedContent || msg.content || '';
             if (!content || content.trim().length === 0) continue;
 
-            const sender = msg.senderUsername || '';
+            const senderWxid = msg.senderUsername || '';
+            const senderName = msg.isSend === 1 ? '我' : resolveNickname(senderWxid, nicknameMap);
             const createTime = msg.createTime ? new Date(msg.createTime * 1000) : new Date();
-            const contentHash = createHash('md5').update(`${chatroomId}:${msg.serverId || msg.localId}`).digest('hex');
 
-            try {
-              await sql`
-                INSERT INTO articles (source_id, title, content, author, published_at, fetched_at, category, tags, content_hash, extra)
-                VALUES (
-                  ${group.id},
-                  ${content.slice(0, 100)},
-                  ${content},
-                  ${sender},
-                  ${createTime},
-                  NOW(),
-                  '综合',
-                  ARRAY['群聊', ${group.name}],
-                  ${contentHash},
-                  ${sql.json({ 
-                    chatroom_id: chatroomId, 
-                    group_name: group.name,
-                    server_id: String(msg.serverId || ''),
-                    local_id: String(msg.localId || ''),
-                    is_send: msg.isSend === 1,
-                    type: 'wechat_group_message'
-                  })}
-                )
-                ON CONFLICT (content_hash) DO NOTHING
-              `;
-              // 检查是否真的插入了（postgres.js 不直接返回 affected rows，用 ON CONFLICT DO NOTHING 不会报错）
-              inserted++;
-            } catch (e: any) {
-              // content_hash 唯一冲突忽略
-              if (!e.message?.includes('duplicate') && !e.message?.includes('unique')) {
-                console.error(`群聊消息入库失败: ${e.message}`);
-              }
+            // 按天分桶
+            const dateStr = createTime.toISOString().slice(0, 10); // YYYY-MM-DD
+            const bucketKey = `${group.name}::${dateStr}`;
+
+            if (!dayBuckets[bucketKey]) {
+              dayBuckets[bucketKey] = {
+                date: dateStr,
+                groupName: group.name,
+                sourceId: group.id,
+                chatroomId,
+                messages: [],
+              };
             }
+
+            dayBuckets[bucketKey].messages.push({
+              sender: senderName,
+              senderWxid,
+              content,
+              time: createTime,
+              serverId: String(msg.serverId || ''),
+              localId: String(msg.localId || ''),
+              isSend: msg.isSend === 1,
+            });
 
             totalFetched++;
           }
         } catch (e: any) {
           errors.push(`${group.name}: ${e.message}`);
+        }
+      }
+
+      // 4. 按天聚合入库
+      let inserted = 0;
+
+      for (const [bucketKey, bucket] of Object.entries(dayBuckets)) {
+        // 构建聚合内容：消息明细列表
+        const detailLines = bucket.messages.map(m => {
+          const timeStr = m.time.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+          return `${timeStr} ${m.sender}: ${m.content}`;
+        });
+        const content = detailLines.join('\n');
+
+        // 标题格式：日期 - 群聊名
+        const title = `${bucket.date} - ${bucket.groupName}`;
+
+        // content_hash：用 群聊ID+日期 做唯一键（同一天只保留一份）
+        const contentHash = createHash('md5').update(`group_daily:${bucket.chatroomId}:${bucket.date}`).digest('hex');
+
+        // extra 存消息明细 JSON（方便前端展开）
+        const messagesExtra = bucket.messages.map(m => ({
+          sender: m.sender,
+          senderWxid: m.senderWxid,
+          content: m.content,
+          time: m.time.toISOString(),
+          isSend: m.isSend,
+        }));
+
+        try {
+          const result = await sql`
+            INSERT INTO articles (source_id, title, content, published_at, fetched_at, category, tags, content_hash, extra)
+            VALUES (
+              ${bucket.sourceId},
+              ${title},
+              ${content},
+              ${new Date(bucket.date + 'T23:59:59')},
+              NOW(),
+              '综合',
+              ARRAY['群聊', ${bucket.groupName}],
+              ${contentHash},
+              ${sql.json({
+                type: 'group_daily',
+                chatroom_id: bucket.chatroomId,
+                group_name: bucket.groupName,
+                date: bucket.date,
+                message_count: bucket.messages.length,
+                messages: messagesExtra,
+              })}
+            )
+            ON CONFLICT (content_hash) DO UPDATE SET
+              content = ${content},
+              extra = ${sql.json({
+                type: 'group_daily',
+                chatroom_id: bucket.chatroomId,
+                group_name: bucket.groupName,
+                date: bucket.date,
+                message_count: bucket.messages.length,
+                messages: messagesExtra,
+              })},
+              fetched_at = NOW()
+          `;
+          inserted++;
+        } catch (e: any) {
+          console.error(`群聊日聚合入库失败: ${e.message}`);
         }
       }
 
@@ -248,7 +354,7 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
         VALUES (${groupSource.id}, '群聊消息采集', 'success', ${inserted},
-          ${`采集 ${enabledGroups.length} 个群聊，获取 ${totalFetched} 条消息，入库 ${inserted} 条`},
+          ${`采集 ${enabledGroups.length} 个群聊，获取 ${totalFetched} 条消息，聚合 ${inserted} 天`},
           ${durationMs})
       `;
 
@@ -298,7 +404,7 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
     return c.json({ ok: true, prompt });
   });
 
-  // ============ AI 分析群聊消息 ============
+  // ============ AI 分析群聊消息（按天分析，结果存 extra.ai_analysis） ============
   router.post('/analyze', async (c) => {
     const startMs = Date.now();
     try {
@@ -306,124 +412,92 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
       if (!groupSource) return c.json({ error: '微信群聊信息源未配置' }, 400);
 
       const body = await c.req.json().catch(() => ({}));
-      const sourceId = body.source_id; // 可选：只分析某个群聊
-      const hours = body.hours || 24; // 分析最近N小时的消息
+      const hours = body.hours || 24;
 
       const prompt = groupSource.config?.prompt || '请分析以下微信群聊记录，提取关键话题、重要观点和有价值的信息，生成简明扼要的中文摘要。';
 
-      // DeepSeek API 配置
       const deepseekApiKey = process.env.DEEPSEEK_API_KEY;
       if (!deepseekApiKey) return c.json({ error: 'DEEPSEEK_API_KEY 环境变量未配置' }, 400);
 
-      // 获取群聊消息
+      // 获取最近 N 小时的群聊日聚合记录
       const since = new Date(Date.now() - hours * 3600 * 1000);
-      let messagesQuery;
-      if (sourceId) {
-        messagesQuery = sql`
-          SELECT a.id, a.title, a.content, a.author, a.published_at, s.name as group_name
-          FROM articles a JOIN sources s ON a.source_id = s.id
-          WHERE a.source_id = ${sourceId} AND a.published_at >= ${since}
-          ORDER BY a.published_at ASC
-          LIMIT 500
-        `;
-      } else {
-        // 分析所有已启用群聊的消息
-        messagesQuery = sql`
-          SELECT a.id, a.title, a.content, a.author, a.published_at, s.name as group_name
-          FROM articles a JOIN sources s ON a.source_id = s.id
-          WHERE s.type = 'wechat_group' AND s.enabled = true AND a.published_at >= ${since}
-          ORDER BY a.published_at ASC
-          LIMIT 500
-        `;
-      }
-
-      const messages = await messagesQuery;
-      if (messages.length === 0) {
-        return c.json({ ok: true, analysis: '没有找到群聊消息', messageCount: 0 });
-      }
-
-      // 拼接消息文本
-      const chatText = messages.map((m: any) => {
-        const time = m.published_at ? new Date(m.published_at).toLocaleString('zh-CN') : '';
-        return `[${m.group_name}] ${time} ${m.author || '未知'}: ${m.content || m.title}`;
-      }).join('\n');
-
-      // 调用 DeepSeek API
-      const deepseekResp = await fetch('https://api.deepseek.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${deepseekApiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            { role: 'system', content: prompt },
-            { role: 'user', content: chatText },
-          ],
-          temperature: 0.3,
-          max_tokens: 2000,
-        }),
-      });
-
-      if (!deepseekResp.ok) {
-        const errText = await deepseekResp.text();
-        throw new Error(`DeepSeek API 返回 ${deepseekResp.status}: ${errText.slice(0, 200)}`);
-      }
-
-      const deepseekData = await deepseekResp.json() as any;
-      const analysis = deepseekData.choices?.[0]?.message?.content || '分析结果为空';
-
-      // 将分析结果作为一篇文章入库
-      const analysisHash = createHash('md5').update(`analysis:${hours}:${sourceId || 'all'}:${Date.now()}`).digest('hex');
-      const analysisTitle = `群聊AI分析 - 最近${hours}小时`;
-
-      // 找到或创建一个"AI分析"子源
-      let [analysisSource] = await sql`
-        SELECT id FROM sources WHERE type = 'wechat_group' AND parent_id = ${groupSource.id} AND config->>'is_analysis' = 'true' LIMIT 1
+      const dailyArticles = await sql`
+        SELECT a.id, a.title, a.content, a.extra, a.published_at
+        FROM articles a JOIN sources s ON a.source_id = s.id
+        WHERE s.type = 'wechat_group' AND s.enabled = true
+          AND a.extra->>'type' = 'group_daily'
+          AND a.published_at >= ${since}
+        ORDER BY a.published_at ASC
+        LIMIT 30
       `;
-      if (!analysisSource) {
-        [analysisSource] = await sql`
-          INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-          VALUES ('AI分析', 'wechat_group', ${groupSource.id}, ${sql.json({ is_analysis: 'true' })}, true, NOW())
-          RETURNING id
-        `;
+
+      if (dailyArticles.length === 0) {
+        return c.json({ ok: true, analysis: '没有找到群聊记录', messageCount: 0 });
       }
 
-      await sql`
-        INSERT INTO articles (source_id, title, content, summary, published_at, fetched_at, category, tags, content_hash, extra)
-        VALUES (
-          ${analysisSource.id},
-          ${analysisTitle},
-          ${analysis},
-          ${analysis.slice(0, 200)},
-          NOW(),
-          NOW(),
-          '综合',
-          ARRAY['AI分析', '群聊摘要'],
-          ${analysisHash},
-          ${sql.json({ 
-            type: 'group_analysis',
-            hours,
-            message_count: messages.length,
-            source_id: sourceId || null,
-          })}
-        )
-        ON CONFLICT (content_hash) DO NOTHING
-      `;
+      let totalAnalyzed = 0;
+
+      // 逐天分析
+      for (const article of dailyArticles) {
+        const messages: any[] = article.extra?.messages || [];
+        if (messages.length === 0) continue;
+
+        // 拼接消息文本
+        const chatText = messages.map(m => {
+          const time = new Date(m.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+          return `${time} ${m.sender}: ${m.content}`;
+        }).join('\n');
+
+        // 调用 DeepSeek API
+        const deepseekResp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${deepseekApiKey}`,
+          },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            messages: [
+              { role: 'system', content: prompt },
+              { role: 'user', content: chatText },
+            ],
+            temperature: 0.3,
+            max_tokens: 1500,
+          }),
+        });
+
+        if (!deepseekResp.ok) {
+          const errText = await deepseekResp.text();
+          console.error(`DeepSeek API 错误: ${deepseekResp.status} ${errText.slice(0, 200)}`);
+          continue;
+        }
+
+        const deepseekData = await deepseekResp.json() as any;
+        const analysis = deepseekData.choices?.[0]?.message?.content || '分析结果为空';
+
+        // 将分析结果存到 article 的 extra.ai_analysis 字段
+        await sql`
+          UPDATE articles SET
+            extra = jsonb_set(COALESCE(extra, '{}'), '{ai_analysis}', ${sql.json(analysis)}),
+            summary = ${analysis.slice(0, 200)}
+          WHERE id = ${article.id}
+        `;
+
+        totalAnalyzed += messages.length;
+      }
 
       const durationMs = Date.now() - startMs;
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
-        VALUES (${groupSource.id}, '群聊AI分析', 'success', 1,
-          ${`分析 ${messages.length} 条群聊消息，耗时 ${durationMs}ms`},
+        VALUES (${groupSource.id}, '群聊AI分析', 'success', ${dailyArticles.length},
+          ${`分析 ${dailyArticles.length} 天记录，共 ${totalAnalyzed} 条消息，耗时 ${durationMs}ms`},
           ${durationMs})
       `;
 
       return c.json({
         ok: true,
-        analysis,
-        messageCount: messages.length,
+        daysAnalyzed: dailyArticles.length,
+        messageCount: totalAnalyzed,
         hours,
       });
     } catch (e: any) {
@@ -435,6 +509,68 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
           VALUES (${groupSource.id}, '群聊AI分析', 'error', 0, ${e.message}, ${durationMs})
         `;
       }
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ 获取按天聚合的群聊记录（前端展示用） ============
+  router.get('/daily', async (c) => {
+    try {
+      const groupSource = await getGroupSource();
+      if (!groupSource) return c.json({ error: '微信群聊信息源未配置' }, 400);
+
+      const sourceId = c.req.query('source_id'); // 可选：只看某个群聊
+      const days = Math.min(Number(c.req.query('days') || 7), 30);
+      const since = new Date(Date.now() - days * 86400 * 1000);
+
+      let query;
+      if (sourceId) {
+        query = sql`
+          SELECT a.id, a.title, a.content, a.summary, a.published_at, a.extra,
+                 s.name as group_name, s.id as source_id
+          FROM articles a JOIN sources s ON a.source_id = s.id
+          WHERE a.source_id = ${Number(sourceId)}
+            AND a.extra->>'type' = 'group_daily'
+            AND a.published_at >= ${since}
+          ORDER BY a.published_at DESC
+          LIMIT 100
+        `;
+      } else {
+        // 获取所有已启用群聊的日聚合
+        query = sql`
+          SELECT a.id, a.title, a.content, a.summary, a.published_at, a.extra,
+                 s.name as group_name, s.id as source_id
+          FROM articles a JOIN sources s ON a.source_id = s.id
+          WHERE s.type = 'wechat_group' AND s.enabled = true
+            AND a.extra->>'type' = 'group_daily'
+            AND a.published_at >= ${since}
+          ORDER BY a.published_at DESC
+          LIMIT 100
+        `;
+      }
+
+      const articles = await query;
+
+      const result = articles.map((a: any) => ({
+        id: a.id,
+        title: a.title,
+        summary: a.summary || '',
+        aiAnalysis: a.extra?.ai_analysis || '',
+        groupName: a.group_name,
+        sourceId: a.source_id,
+        date: a.extra?.date || '',
+        messageCount: a.extra?.message_count || 0,
+        messages: (a.extra?.messages || []).map((m: any) => ({
+          sender: m.sender,
+          content: m.content,
+          time: m.time,
+          isSend: m.isSend,
+        })),
+        publishedAt: a.published_at,
+      }));
+
+      return c.json({ days: result, total: result.length });
+    } catch (e: any) {
       return c.json({ error: e.message }, 500);
     }
   });

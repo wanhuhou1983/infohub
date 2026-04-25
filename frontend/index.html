@@ -372,6 +372,7 @@ let currentSourceId = null;
 let selectedArticleId = null;
 let offset = 0;
 const PAGE_SIZE = 30;
+let groupSourceIds = new Set(); // 群聊子源ID集合（含根源）
 
 const SOURCE_COLORS = {
   xwlb: 'bg-red-500/20 text-red-400',
@@ -404,6 +405,17 @@ let expandedSources = new Set();
 async function loadSources() {
   const tree = await api('/sources/tree');
   sourceTree = tree;
+
+  // 收集群聊子源ID
+  groupSourceIds = new Set([WECHAT_GROUP_ROOT]);
+  for (const s of tree) {
+    if (s.type === 'wechat_group') {
+      groupSourceIds.add(s.id);
+      for (const c of (s.children || [])) {
+        groupSourceIds.add(c.id);
+      }
+    }
+  }
   
   // 统计每个父源的总文章数（含子源）
   const stats = await api('/sync/stats');
@@ -485,6 +497,11 @@ function renderCategories() {
 async function loadArticles(reset = true) {
   if (reset) offset = 0;
 
+  // 群聊模式：使用专用 API
+  if (isGroupChatMode) {
+    return loadGroupDailyArticles();
+  }
+
   let params = [`limit=${PAGE_SIZE}`, `offset=${offset}`];
   if (currentTab === 'unread') params.push('tab=unread');
   else if (currentTab === 'starred') params.push('tab=starred');
@@ -555,6 +572,124 @@ async function loadArticles(reset = true) {
 async function loadMoreArticles() {
   offset += PAGE_SIZE;
   await loadArticles(false);
+}
+
+// ===== 群聊按天渲染 =====
+async function loadGroupDailyArticles() {
+  const el = document.getElementById('articleList');
+  el.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
+
+  const sourceId = (currentSourceId !== WECHAT_GROUP_ROOT) ? currentSourceId : '';
+  const data = await api(`/wechat-group-admin/daily?days=7${sourceId ? '&source_id=' + sourceId : ''}`);
+  const days = data.days || [];
+
+  if (days.length === 0) {
+    el.innerHTML = '<div class="text-center text-muted py-16">暂无群聊记录</div>';
+    document.getElementById('loadMore').classList.add('hidden');
+    document.getElementById('articleCountLabel').textContent = '共 0 天';
+    return;
+  }
+
+  // 按群聊分组，再按日期排序
+  const byGroup = {};
+  for (const d of days) {
+    const g = d.groupName || '未知群聊';
+    if (!byGroup[g]) byGroup[g] = [];
+    byGroup[g].push(d);
+  }
+
+  el.innerHTML = Object.entries(byGroup).map(([groupName, items]) => `
+    <div class="mb-4">
+      <div class="text-xs font-medium text-muted px-1 mb-2 flex items-center gap-1.5">
+        <span>💬</span>
+        <span>${groupName}</span>
+      </div>
+      ${(items).map(d => `
+        <div class="article-card p-3 rounded-lg cursor-pointer border border-transparent hover:border-border fade-in mb-1.5"
+             onclick="selectGroupDaily(${d.id})">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium">📅 ${d.date}</span>
+              <span class="text-xs text-muted">${d.messageCount} 条消息</span>
+            </div>
+            <svg class="w-4 h-4 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+          </div>
+          ${d.aiAnalysis ? `<div class="mt-2 text-xs text-accent2 line-clamp-2">${d.aiAnalysis.slice(0, 100)}...</div>` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `).join('');
+
+  document.getElementById('articleCountLabel').textContent = `共 ${days.length} 天`;
+  document.getElementById('loadMore').classList.add('hidden');
+}
+
+async function selectGroupDaily(id) {
+  selectedArticleId = id;
+  const data = await api(`/wechat-group-admin/daily?days=30`);
+  const day = (data.days || []).find((d) => d.id === id);
+
+  if (!day) {
+    // fallback: 用通用 article API
+    const article = await api(`/articles/${id}`);
+    const extra = article.extra || {};
+    renderGroupDailyDetail({
+      date: extra.date || '',
+      groupName: extra.group_name || article.source_name || '',
+      aiAnalysis: extra.ai_analysis || '',
+      messages: extra.messages || [],
+    });
+    return;
+  }
+
+  renderGroupDailyDetail(day);
+}
+
+function renderGroupDailyDetail(day) {
+  document.getElementById('detailPanel').classList.remove('hidden');
+  document.getElementById('mainContent').classList.remove('max-w-2xl');
+  document.getElementById('mainContent').classList.add('w-[420px]','shrink-0');
+
+  const msgList = (day.messages || []).map(m => {
+    const time = m.time ? new Date(m.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+    const isMe = m.isSend;
+    return `
+      <div class="flex gap-2 ${isMe ? 'flex-row-reverse' : ''} mb-2">
+        <div class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs ${isMe ? 'bg-accent/20 text-accent' : 'bg-surface2 text-muted'}">
+          ${isMe ? '我' : (m.sender || '?').slice(0, 1)}
+        </div>
+        <div class="${isMe ? 'text-right' : ''}">
+          ${!isMe ? `<div class="text-xs text-muted mb-0.5">${m.sender}</div>` : ''}
+          <div class="inline-block text-sm px-3 py-1.5 rounded-xl max-w-[85%] ${isMe ? 'bg-accent/20 text-fg' : 'bg-surface2 text-fg/80'}">
+            ${m.content}
+          </div>
+          <div class="text-xs text-muted/50 mt-0.5">${time}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  document.getElementById('detailContent').innerHTML = `
+    <div class="mb-4">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="source-badge bg-green-500/20 text-green-400">💬 ${day.groupName || '群聊'}</span>
+        <span class="text-xs text-muted">${day.date}</span>
+      </div>
+      <h2 class="text-base font-semibold leading-relaxed mb-3">📅 ${day.date} - ${day.groupName}</h2>
+      ${day.aiAnalysis ? `
+      <div class="bg-accent/10 border border-accent/20 rounded-lg p-3 mb-4">
+        <div class="flex items-center gap-1.5 mb-1.5">
+          <svg class="w-3.5 h-3.5 text-accent2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <span class="text-xs font-medium text-accent2">AI 分析</span>
+        </div>
+        <div class="text-xs text-fg/80 leading-relaxed whitespace-pre-wrap">${day.aiAnalysis}</div>
+      </div>` : ''}
+    </div>
+    <div class="border-t border-border pt-3">
+      <div class="text-xs text-muted mb-3">💬 消息明细 (${(day.messages || []).length} 条)</div>
+      ${msgList || '<div class="text-muted text-sm">暂无消息</div>'}
+    </div>
+  `;
 }
 
 // ===== 统计 =====
@@ -664,8 +799,12 @@ const YOUTUBE_WATCH_LATER = 1533;
 const YOUTUBE_FAVORITES = 1534;
 const YOUTUBE_ROOT = 1530;
 
+// 微信群聊根源
+const WECHAT_GROUP_ROOT = 1268;
+
 let bilibiliSpecialFilter = null; // 'watch_later', 'starred', 或 null
 let youtubeSpecialFilter = null;
+let isGroupChatMode = false; // 群聊特殊渲染模式
 
 function filterBySource(id) {
   // 处理 B站特殊子源
@@ -697,9 +836,17 @@ function filterBySource(id) {
     youtubeSpecialFilter = null;
     expandedSources.add(YOUTUBE_ROOT);
     currentSourceId = YOUTUBE_UPDATES; // 默认显示UP主更新
+  } else if (id === WECHAT_GROUP_ROOT) {
+    // 点击群聊根节点：展开+显示所有群聊日聚合
+    bilibiliSpecialFilter = null;
+    youtubeSpecialFilter = null;
+    isGroupChatMode = true;
+    expandedSources.add(WECHAT_GROUP_ROOT);
+    currentSourceId = WECHAT_GROUP_ROOT;
   } else {
     bilibiliSpecialFilter = null;
     youtubeSpecialFilter = null;
+    isGroupChatMode = groupSourceIds.has(id);
     currentSourceId = currentSourceId === id ? null : id;
   }
   loadSources();
