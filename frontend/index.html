@@ -303,6 +303,8 @@ tailwind.config = {
         <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchXWLB()">📰 新闻联播</button>
         <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchRSS()">📡 RSS订阅</button>
         <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchWechat()">💬 公众号</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchBilibili()">📺 B站视频</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchYoutube()">▶️ YouTube</button>
         <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchAll()">🔄 全部采集</button>
       </div>
     </div>
@@ -446,6 +448,9 @@ async function loadSources() {
       ${hasChildren ? `<span class="text-xs text-muted w-3 cursor-pointer select-none" onclick="event.stopPropagation(); toggleSourceExpand(${s.id})">${isExpanded ? '▼' : '▶'}</span>` : '<span class="w-3"></span>'}
       <span class="text-base">${s.icon || '📄'}</span>
       <span class="text-sm flex-1">${s.name}</span>
+      ${s.type === 'bilibili' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showBilibiliAdmin()" title="管理 UP 主">⚙️</span>` : ''}
+      ${s.type === 'youtube' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showYoutubeAdmin()" title="管理频道">⚙️</span>` : ''}
+      ${s.type === 'wechat' && !s.parent_id ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showWechatAdmin()" title="管理公众号">⚙️</span>` : ''}
       ${unreadCount > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1.5 py-0.5 rounded">${unreadCount}</span>` : ''}
       <span class="text-xs text-muted">${articleCount}</span>
     </div>`;
@@ -967,6 +972,24 @@ async function fetchRSS() {
   loadSources();
 }
 
+async function fetchWechat() {
+  hideFetchMenu();
+  showToast('请在公众号管理面板中点击「刷新列表 + 采集」', 'success');
+  showWechatAdmin();
+}
+
+async function fetchBilibili() {
+  hideFetchMenu();
+  showToast('请在 B站管理面板中点击「采集视频」', 'success');
+  showBilibiliAdmin();
+}
+
+async function fetchYoutube() {
+  hideFetchMenu();
+  showToast('请在 YouTube 管理面板中点击「采集视频」', 'success');
+  showYoutubeAdmin();
+}
+
 async function fetchAll() {
   hideFetchMenu();
   const btn = document.getElementById('fetchBtn');
@@ -978,6 +1001,10 @@ async function fetchAll() {
     if (r1.ok) { totalFetched += r1.fetched; totalInserted += r1.inserted; }
     const r2 = await api('/fetch/rss', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ limit: 100 }) });
     if (r2.ok) { totalFetched += r2.fetched; totalInserted += r2.inserted; }
+    const r3 = await api('/api/bilibili-admin/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (r3.ok) { totalFetched += r3.fetched; totalInserted += r3.inserted; }
+    const r4 = await api('/api/youtube-admin/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+    if (r4.ok) { totalFetched += r4.fetched; totalInserted += r4.inserted; }
     showToast(`全部采集完成：获取 ${totalFetched} 条，入库 ${totalInserted} 条`, 'success');
   } catch (e) {
     showToast(`采集异常：${e}`, 'error');
@@ -1112,7 +1139,26 @@ let wechatAccountsCache = [];
 
 async function showWechatAdmin() {
   document.getElementById('wechatAdminModal').classList.remove('hidden');
-  document.getElementById('wechatAccountList').innerHTML = '<div class="text-center text-muted py-8 text-sm">加载中...</div>';
+  document.getElementById('wechatAccountList').innerHTML = '<div class="text-center text-muted py-8 text-sm">检查 WeFlow 连接状态...</div>';
+
+  // 先检查 WeFlow 是否在线
+  try {
+    const status = await api('/sync/weflow-status');
+    if (!status.online) {
+      document.getElementById('wechatAccountList').innerHTML = `
+        <div class="text-center py-8">
+          <div class="text-4xl mb-3">⚠️</div>
+          <div class="text-sm text-red-400 mb-2">WeFlow 服务未连接</div>
+          <div class="text-xs text-muted mb-4">${status.error || '请确认 WeFlow 桌面端已启动并开启 API 服务'}</div>
+          <button onclick="loadWechatAccounts()" class="bg-surface2 hover:bg-border text-sm px-4 py-1.5 rounded-lg transition">重试连接</button>
+        </div>`;
+      document.getElementById('wechatAdminStatus').textContent = 'WeFlow 离线';
+      return;
+    }
+  } catch (e) {
+    // 健康检查失败，仍然尝试加载
+  }
+
   await loadWechatAccounts();
 }
 

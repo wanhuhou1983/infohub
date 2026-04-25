@@ -9,6 +9,31 @@ import { syncAllFiles } from '../file-storage.js';
 export function createSyncRoutes(sql: Sql): Hono {
   const router = new Hono();
 
+  // WeFlow 健康检查
+  router.get('/weflow-status', async (c) => {
+    try {
+      const [wechatSource] = await sql`SELECT config FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
+      if (!wechatSource) return c.json({ online: false, error: '公众号信息源未配置' });
+
+      const config = wechatSource.config || {};
+      const weflowUrl = (config.weflow_url || process.env.WEFLOW_URL || 'http://127.0.0.1:5031').replace(/\/+$/, '');
+      const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN;
+      if (!weflowToken) return c.json({ online: false, error: 'WeFlow Token 未配置' });
+
+      const resp = await fetch(`${weflowUrl}/api/v1/sessions?limit=1`, {
+        headers: { 'Authorization': `Bearer ${weflowToken}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!resp.ok) return c.json({ online: false, error: `API 返回 ${resp.status}` });
+      return c.json({ online: true, url: weflowUrl });
+    } catch (e: any) {
+      if (e.name === 'AbortError' || e.code === 'ECONNREFUSED') {
+        return c.json({ online: false, error: 'WeFlow 服务未启动或端口未监听' });
+      }
+      return c.json({ online: false, error: e.message });
+    }
+  });
+
   // 全量同步：将数据库所有文章导出为本地文件
   // 修复：使用分页查询函数替代原始 SQL 字符串
   router.post('/files', async (c) => {
