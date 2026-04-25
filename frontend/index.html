@@ -385,6 +385,8 @@ const SOURCE_COLORS = {
   'bilibili-updates': 'bg-pink-500/20 text-pink-400',
   youtube: 'bg-red-600/20 text-red-500',
   'youtube-updates': 'bg-red-600/20 text-red-500',
+  'youtube-watch-later': 'bg-red-600/20 text-red-500',
+  'youtube-favorites': 'bg-red-600/20 text-red-500',
 };
 
 const CATEGORIES = ['全部', '国内', '国际', '财经', '科技', '民生', '人文', '综合'];
@@ -492,6 +494,11 @@ async function loadArticles(reset = true) {
   if (bilibiliSpecialFilter === 'watch_later') {
     params.push('is_watch_later=true');
   } else if (bilibiliSpecialFilter === 'starred') {
+    params.push('is_starred=true');
+  }
+  if (youtubeSpecialFilter === 'watch_later') {
+    params.push('is_watch_later=true');
+  } else if (youtubeSpecialFilter === 'starred') {
     params.push('is_starred=true');
   }
   if (currentCategory && currentCategory !== '全部') params.push(`category=${currentCategory}`);
@@ -653,6 +660,8 @@ const BILIBILI_ROOT = 1272;
 
 // YouTube 特殊子源
 const YOUTUBE_UPDATES = 1531;
+const YOUTUBE_WATCH_LATER = 1533;
+const YOUTUBE_FAVORITES = 1534;
 const YOUTUBE_ROOT = 1530;
 
 let bilibiliSpecialFilter = null; // 'watch_later', 'starred', 或 null
@@ -677,6 +686,12 @@ function filterBySource(id) {
   } else if (id === YOUTUBE_UPDATES) {
     youtubeSpecialFilter = null;
     currentSourceId = YOUTUBE_UPDATES; // 1531，后端递归查UP主子源
+  } else if (id === YOUTUBE_WATCH_LATER) {
+    youtubeSpecialFilter = 'watch_later';
+    currentSourceId = YOUTUBE_ROOT;
+  } else if (id === YOUTUBE_FAVORITES) {
+    youtubeSpecialFilter = 'starred';
+    currentSourceId = YOUTUBE_ROOT;
   } else if (id === YOUTUBE_ROOT) {
     // 点击 YouTube 根节点：自动展开子源并显示"更新"内容
     youtubeSpecialFilter = null;

@@ -630,17 +630,35 @@ tailwind.config = {
 
 <!-- ====== 微信群聊配置弹窗 ====== -->
 <div id="wechatGroupModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
-  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[80vh] fade-in flex flex-col">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-2xl max-h-[85vh] fade-in flex flex-col">
     <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
       <div>
         <h2 class="font-semibold">群聊配置</h2>
-        <p class="text-xs text-muted mt-0.5">勾选要监控的微信群聊</p>
+        <p class="text-xs text-muted mt-0.5">勾选要监控的微信群聊，配置提示词后采集分析</p>
       </div>
       <button class="text-muted hover:text-fg" onclick="closeWechatGroupModal()">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
     
+    <!-- AI 提示词 + 操作按钮 -->
+    <div class="px-6 py-3 border-b border-border space-y-3 shrink-0">
+      <div>
+        <label class="text-xs text-muted mb-1 block">🤖 AI 分析提示词</label>
+        <textarea id="groupPromptInput" rows="2" placeholder="请分析以下微信群聊记录，提取关键话题、重要观点和有价值的信息，生成简明扼要的中文摘要。"
+          class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent placeholder-muted resize-none"></textarea>
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="groupFetchBtn" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium" onclick="fetchGroupMessages()">
+          📥 采集消息
+        </button>
+        <button id="groupAnalyzeBtn" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium" onclick="analyzeGroupMessages()">
+          🤖 AI 分析
+        </button>
+        <span id="groupActionStatus" class="text-xs text-muted"></span>
+      </div>
+    </div>
+
     <!-- 工具栏 -->
     <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
       <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
@@ -648,7 +666,6 @@ tailwind.config = {
         <span id="wechatGroupSelectAllText">全选</span>
       </label>
       <div class="flex-1"></div>
-      <!-- 搜索框 -->
       <div class="relative">
         <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input type="text" id="wechat-group-search-input" placeholder="搜索群聊..." 
@@ -675,7 +692,7 @@ tailwind.config = {
       </div>
       <div class="flex gap-3">
         <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeWechatGroupModal()">取消</button>
-        <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeWechatGroupModal()">完成</button>
+        <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="saveGroupPromptAndClose()">完成</button>
       </div>
     </div>
   </div>
@@ -1556,6 +1573,7 @@ function showWechatGroupModal() {
   document.getElementById('wechatGroupModal').classList.remove('hidden');
   document.getElementById('wechatGroupModal').classList.add('flex');
   loadWechatGroups();
+  loadGroupPrompt();
 }
 
 function closeWechatGroupModal() {
@@ -1688,6 +1706,98 @@ async function toggleSelectAllWechatGroups() {
     alert('批量操作失败: ' + e.message);
     loadWechatGroups();
   }
+}
+
+// ===== 群聊提示词 & 采集 & 分析 =====
+
+async function loadGroupPrompt() {
+  try {
+    const res = await fetch('/api/wechat-group-admin/prompt');
+    const data = await res.json();
+    if (data.prompt) {
+      document.getElementById('groupPromptInput').value = data.prompt;
+    }
+  } catch (e) {
+    console.error('加载提示词失败:', e);
+  }
+}
+
+async function saveGroupPromptAndClose() {
+  const prompt = document.getElementById('groupPromptInput').value.trim();
+  if (prompt) {
+    try {
+      await fetch('/api/wechat-group-admin/prompt', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+    } catch (e) {
+      console.error('保存提示词失败:', e);
+    }
+  }
+  closeWechatGroupModal();
+}
+
+async function fetchGroupMessages() {
+  const btn = document.getElementById('groupFetchBtn');
+  const statusEl = document.getElementById('groupActionStatus');
+  btn.disabled = true;
+  btn.textContent = '📥 采集中...';
+  statusEl.textContent = '正在从 WeFlow 拉取群聊消息...';
+
+  try {
+    const res = await fetch('/api/wechat-group-admin/fetch', { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      statusEl.textContent = '❌ ' + data.error;
+    } else {
+      statusEl.textContent = `✅ 采集 ${data.fetched} 条，入库 ${data.inserted} 条`;
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ 采集失败: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '📥 采集消息';
+}
+
+async function analyzeGroupMessages() {
+  // 先保存提示词
+  const prompt = document.getElementById('groupPromptInput').value.trim();
+  if (prompt) {
+    try {
+      await fetch('/api/wechat-group-admin/prompt', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+    } catch (e) {}
+  }
+
+  const btn = document.getElementById('groupAnalyzeBtn');
+  const statusEl = document.getElementById('groupActionStatus');
+  btn.disabled = true;
+  btn.textContent = '🤖 分析中...';
+  statusEl.textContent = '正在调用 DeepSeek 分析群聊消息...';
+
+  try {
+    const res = await fetch('/api/wechat-group-admin/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours: 24 }),
+    });
+    const data = await res.json();
+    if (data.error) {
+      statusEl.textContent = '❌ ' + data.error;
+    } else {
+      statusEl.textContent = `✅ 分析完成，${data.messageCount} 条消息`;
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ 分析失败: ' + e.message;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🤖 AI 分析';
 }
 
 // ===== 哔哩哔哩配置弹窗 =====
