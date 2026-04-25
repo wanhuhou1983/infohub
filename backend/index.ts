@@ -168,7 +168,49 @@ app.patch('/api/sources/config/env', (c) => {
 
 // ============ 注册路由 ============
 
-app.route('/api/sources', createSourcesRoutes(sql));
+// 测试路由
+app.get('/api/test', (c) => c.json({ msg: 'test ok' }));
+
+// 信息源路由（内联，避免模块加载问题）
+const sourcesRouter = new Hono();
+sourcesRouter.get('/', async (c) => {
+  const sources = await sql`SELECT * FROM sources ORDER BY id`;
+  return c.json(sources);
+});
+sourcesRouter.get('/tree', async (c) => {
+  const sources = await sql`SELECT * FROM sources ORDER BY id`;
+  const nodeMap = new Map();
+  sources.forEach(s => nodeMap.set(s.id, { ...s, children: [] }));
+  const roots: any[] = [];
+  sources.forEach(s => {
+    const node = nodeMap.get(s.id);
+    if (s.parent_id === null) {
+      roots.push(node);
+    } else {
+      const parent = nodeMap.get(s.parent_id);
+      if (parent) {
+        if (parent.type === 'wechat' && node.enabled === false) {
+          return;
+        }
+        parent.children.push(node);
+      }
+    }
+  });
+  return c.json(roots);
+});
+sourcesRouter.patch('/:id/config', async (c) => {
+  const id = Number(c.req.param('id'));
+  if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
+  const body = await c.req.json().catch(() => ({}));
+  if (!body || typeof body !== 'object') return c.json({ error: 'Invalid body' }, 400);
+  const [row] = await sql`SELECT config FROM sources WHERE id = ${id}`;
+  if (!row) return c.json({ error: 'Source not found' }, 404);
+  const currentConfig = row.config || {};
+  const newConfig = { ...currentConfig, ...body };
+  const [updated] = await sql`UPDATE sources SET config = ${sql.json(newConfig)}, updated_at = NOW() WHERE id = ${id} RETURNING id, name, type, config`;
+  return c.json(updated);
+});
+app.route('/api/sources', sourcesRouter);
 app.route('/api/articles', createArticlesRoutes(sql));
 app.route('/api/fetch', createFetchRoutes(sql));
 app.route('/api/sync', createSyncRoutes(sql));

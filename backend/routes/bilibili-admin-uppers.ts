@@ -81,7 +81,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
 
       const [inserted] = await sql`
         INSERT INTO sources (name, type, parent_id, config, enabled, created_at, updated_at)
-        VALUES (${name}, 'bilibili-updates', ${parentId}, ${JSON.stringify({ mid })}, true, NOW(), NOW())
+        VALUES (${name}, 'bilibili-updates', ${parentId}, ${JSON.stringify({ mid })}, false, NOW(), NOW())
         RETURNING id
       `;
 
@@ -122,6 +122,29 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
       `;
 
       return c.json({ ok: true, id, enabled });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ 批量切换UP主启用/禁用 ============
+  router.patch('/uppers/toggle-all', async (c) => {
+    try {
+      const parentId = 1273; // B站"更新"节点
+      const body = await c.req.json().catch(() => ({}));
+      const enabled = body.enabled === true;
+
+      await sql`
+        UPDATE sources SET enabled = ${enabled}, updated_at = NOW()
+        WHERE type = 'bilibili-updates' AND parent_id = ${parentId}
+      `;
+
+      const [count] = await sql`
+        SELECT count(*)::int AS cnt FROM sources
+        WHERE type = 'bilibili-updates' AND parent_id = ${parentId} AND enabled = ${enabled}
+      `;
+
+      return c.json({ ok: true, enabled, count: count?.cnt || 0 });
     } catch (e: any) {
       return c.json({ error: e.message }, 500);
     }

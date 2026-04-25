@@ -653,7 +653,11 @@ tailwind.config = {
           class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
           oninput="renderBilibiliUppers()">
       </div>
-      <label class="flex items-center gap-2 text-xs text-muted">
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="bilibili-select-all" class="accent-accent" onchange="toggleSelectAllBilibiliUppers()">
+        <span id="bilibiliSelectAllText">全选</span>
+      </label>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
         <input type="checkbox" id="bilibili-show-enabled-only" class="accent-accent" onchange="renderBilibiliUppers()">
         只显示已启用
       </label>
@@ -686,29 +690,29 @@ const SOURCE_CONFIGS = [
   {
     id: 'rss', name: 'RSS 订阅', icon: '📡', type: 'miniflux',
     color: 'bg-orange-500/20 text-orange-400',
-    description: 'Miniflux 管理的 RSS 订阅源',
+    description: '通过 Miniflux 管理 RSS 订阅源，点击右侧设置按钮配置',
     config: { minifluxUrl: 'http://localhost:8084', totalFeeds: 28 },
     enabled: true, articleCount: 523, todayCount: 18,
     lastFetch: '2026-04-22 17:00', status: 'success',
-    feeds: [],
+    feeds: [], // 通过设置弹窗管理，不在卡片显示
   },
   {
     id: 'wechat', name: '公众号', icon: '💬', type: 'spider',
     color: 'bg-green-500/20 text-green-400',
-    description: '微信公众号文章抓取',
-    config: { method: 'URL 输入 + 爬虫' },
+    description: '通过 WeFlow 管理公众号，点击右侧设置按钮配置',
+    config: { method: 'WeFlow API' },
     enabled: true, articleCount: 86, todayCount: 3,
     lastFetch: '2026-04-22 15:30', status: 'success',
-    feeds: [],
+    feeds: [], // 通过设置弹窗管理，不在卡片显示
   },
   {
     id: 'bilibili', name: '哔哩哔哩', icon: '📺', type: 'spider',
     color: 'bg-pink-500/20 text-pink-400',
-    description: 'B站 UP 主视频抓取',
-    config: { method: '关注列表 API + 爬虫' },
+    description: 'B站 UP 主视频，点击右侧设置按钮选择关注的 UP 主',
+    config: { method: '关注列表 API' },
     enabled: true, articleCount: 42, todayCount: 5,
     lastFetch: '2026-04-22 18:00', status: 'success',
-    feeds: [],
+    feeds: [], // 通过设置弹窗管理，不在卡片显示
   },
   
   {
@@ -823,6 +827,12 @@ async function saveApiConfig() {
 }
 
 // ===== 信息源管理 =====
+// 判断是否为聚合源（通过设置弹窗管理子源）
+function isAggSource(s) {
+  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili'
+    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili';
+}
+
 function renderSourceCards() {
   const el = document.getElementById('sourceCards');
   el.innerHTML = SOURCE_CONFIGS.map(s => {
@@ -848,8 +858,8 @@ function renderSourceCards() {
           </div>
           <p class="text-xs text-muted mb-2">${s.description}</p>
           
-          <!-- 子源列表 -->
-          ${s.feeds.length > 0 ? `
+          <!-- 子源列表（聚合源通过设置按钮管理，不在卡片显示） -->
+          ${s.feeds.length > 0 && !isAggSource(s) ? `
           <div class="space-y-1 mb-2">
             ${s.feeds.map(f => `
               <div class="flex items-center gap-2 text-xs bg-surface2 rounded px-2.5 py-1.5">
@@ -885,24 +895,24 @@ function renderSourceCards() {
           <button class="text-muted hover:text-accent2 transition p-1" title="立即采集" onclick="runSourceFetch('${s.id}')">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
           </button>
-          ${s.id === 'wechat' ? `
-          <button class="text-muted hover:text-accent2 transition p-1" title="配置公众号" onclick="showWechatAccountsModal()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-          </button>
-          ` : ''}
-          ${s.id === 'bilibili' ? `
-          <button class="text-muted hover:text-accent2 transition p-1" title="配置 UP 主" onclick="showBilibiliUppersModal()">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
-          </button>
-          ` : ''}
-          ${s.id !== 'wechat' && s.id !== 'bilibili' ? `
-          <button class="text-muted hover:text-fg transition p-1" title="设置" onclick="showSourceSettings('${s.id}')">
+          ${!isAggSource(s) ? '' : s.id === 'rss' || s.sourceType === 'rss' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置订阅源" onclick="showRssSettingsModal()">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
           </button>
+          ` : s.id === 'wechat' || s.sourceType === 'wechat' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置公众号" onclick="showWechatAccountsModal()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </button>
+          ` : s.id === 'bilibili' || s.sourceType === 'bilibili' ? `
+          <button class="text-muted hover:text-accent2 transition p-1" title="配置 UP 主" onclick="showBilibiliUppersModal()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          </button>
+          ` : ''}
+          ${!isAggSource(s) ? `
           <button class="text-muted hover:text-danger transition p-1" title="删除" onclick="removeSource('${s.id}')">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
-          `}
+          ` : ''}
         </div>
       </div>
     </div>`;
@@ -1468,16 +1478,27 @@ function renderBilibiliUppers() {
   const enabledCount = bilibiliUppersData.filter(a => a.enabled).length;
   document.getElementById('bilibiliSelectedCount').textContent = enabledCount;
   
+  // 更新全选 checkbox 状态
+  const selectAllCb = document.getElementById('bilibili-select-all');
+  const selectAllText = document.getElementById('bilibiliSelectAllText');
+  if (bilibiliUppersData.length > 0 && enabledCount === bilibiliUppersData.length) {
+    selectAllCb.checked = true;
+    selectAllText.textContent = '取消全选';
+  } else {
+    selectAllCb.checked = false;
+    selectAllText.textContent = '全选';
+  }
+  
   listEl.innerHTML = uppers.map(a => {
-    const latestTime = a.latest_video_at ? new Date(a.latest_video_at).toLocaleString('zh-CN', { 
+    const latestTime = a.latest_article_at ? new Date(a.latest_article_at).toLocaleString('zh-CN', { 
       month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
     }) : '暂无视频';
     
-    const actionHtml = a.db_id 
-      ? `<input type="checkbox" class="accent-accent w-4 h-4" ${a.enabled ? 'checked' : ''} onchange="toggleBilibiliUpper(${a.db_id}, this.checked)">`
+    const actionHtml = a.id 
+      ? `<input type="checkbox" class="accent-accent w-4 h-4" ${a.enabled ? 'checked' : ''} onchange="toggleBilibiliUpper(${a.id}, this.checked)">`
       : `<button class="text-xs px-2 py-1 bg-accent/20 text-accent rounded hover:bg-accent/30 transition" onclick="addBilibiliUpper('${a.mid}', '${encodeURIComponent(a.name)}')">添加</button>`;
     
-    const statusHtml = a.db_id
+    const statusHtml = a.id
       ? `<span class="text-xs ${a.enabled ? 'text-success' : 'text-muted'}">${a.enabled ? '已启用' : '已禁用'}</span>`
       : `<span class="text-xs text-muted">未添加</span>`;
     
@@ -1512,12 +1533,38 @@ async function toggleBilibiliUpper(dbId, enabled) {
     }
     
     // 更新本地数据
-    const upper = bilibiliUppersData.find(a => a.db_id === dbId);
+    const upper = bilibiliUppersData.find(a => a.id === dbId);
     if (upper) upper.enabled = enabled;
     
     renderBilibiliUppers();
   } catch (e) {
     alert('操作失败: ' + e.message);
+    loadBilibiliUppers();
+  }
+}
+
+async function toggleSelectAllBilibiliUppers() {
+  const total = bilibiliUppersData.length;
+  const enabledCount = bilibiliUppersData.filter(a => a.enabled).length;
+  const newState = enabledCount < total; // 不全选时 → 全选，全选时 → 取消全选
+
+  try {
+    const res = await fetch('/api/bilibili-admin/uppers/toggle-all', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled: newState })
+    });
+    const data = await res.json();
+    if (data.error) {
+      alert('批量操作失败: ' + data.error);
+      return;
+    }
+    
+    // 更新本地数据
+    bilibiliUppersData.forEach(a => a.enabled = newState);
+    renderBilibiliUppers();
+  } catch (e) {
+    alert('批量操作失败: ' + e.message);
     loadBilibiliUppers();
   }
 }
@@ -1593,6 +1640,7 @@ async function loadSourcesFromAPI() {
         name: s.name,
         icon: s.icon || getIconByType(s.type),
         type: getTypeBySourceType(s.type),
+        sourceType: s.type, // 保留原始 DB type（rss/wechat/bilibili 等）
         color: getColorByType(s.type),
         description: s.description || getDescByType(s.type),
         config: s.config || {},
@@ -1606,11 +1654,11 @@ async function loadSourcesFromAPI() {
       });
     });
     
-    // 处理父子关系，构建feeds
+    // 处理父子关系，构建feeds（rss/wechat/bilibili 通过设置弹窗管理，不在此填充）
     sources.forEach(s => {
       if (s.parent_id) {
         const parent = sourceMap.get(s.parent_id);
-        if (parent) {
+        if (parent && parent.sourceType !== 'rss' && parent.sourceType !== 'wechat' && parent.sourceType !== 'bilibili') {
           parent.feeds.push({
             id: String(s.id),
             name: s.name,
