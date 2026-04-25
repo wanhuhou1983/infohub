@@ -34,6 +34,9 @@ function getEnvConfig(): Record<string, string> {
   return _envConfig;
 }
 
+/** 使环境配置缓存失效，下次读取时重新加载 .env.json */
+export function invalidateEnvCache(): void { _envConfig = null; }
+
 function envOrFile(key: string, fallback: string): string {
   const fileVal = getEnvConfig()[key];
   return fileVal || process.env[key] || fallback;
@@ -293,11 +296,22 @@ function sanitizeFilename(meta: ArticleMeta): string {
 
   let titlePart = (meta.title || 'untitled')
     .replace(/[\/\\:*?"<>|\n\r]/g, '')
-    .replace(/\s+/g, '_')
-    .slice(0, 40);
+    .replace(/\s+/g, '_');
+
+  // 按字节截断，中文每字3字节，避免总文件名超255字节
+  const maxTitleBytes = 60;
+  let titleBytes = 0;
+  let truncatedTitle = '';
+  for (const ch of titlePart) {
+    const charBytes = Buffer.byteLength(ch, 'utf-8');
+    if (titleBytes + charBytes > maxTitleBytes) break;
+    titleBytes += charBytes;
+    truncatedTitle += ch;
+  }
+  titlePart = truncatedTitle || 'untitled';
 
   const sourcePart = meta.source_name
-    ? meta.source_name.replace(/[\/\\:*?"<>|\n\r]/g, '').slice(0, 15)
+    ? meta.source_name.replace(/[\/\\:*?"<>|\n\r]/g, '').slice(0, 10)
     : '';
 
   // 🔒 修复：加入文章 ID 避免同名文件冲突
@@ -422,9 +436,10 @@ export async function processImages(content: string): Promise<string> {
   }
   for (const [originalUrl, data] of mdImgUrls) {
     if (data.replacement) {
-      // 🔒 修复：保留原始 alt 文本，仅替换 URL
+      // 🔒 修复：提前取值，避免 lambda 内二次查 Map 得到 undefined
+      const newUrl = imgCache.get(originalUrl) ?? originalUrl;
       const regex = new RegExp(`(!\\[)(.*?)(\\]\\(${escapeRegex(originalUrl)}\\))`, 'g');
-      result = result.replace(regex, (_, prefix, alt, suffix) => `${prefix}${alt}](${imgCache.get(originalUrl)})`);
+      result = result.replace(regex, (_, prefix, alt) => `${prefix}${alt}](${newUrl})`);
     }
   }
 

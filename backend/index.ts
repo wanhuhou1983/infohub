@@ -26,6 +26,7 @@ import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';
 import { createBilibiliAdminUppersRoutes } from './routes/bilibili-admin-uppers.js';
 import { createWechatGroupAdminRoutes } from './routes/wechat-group-admin.js';
 import { createYoutubeAdminRoutes } from './routes/youtube-admin.js';
+import { invalidateEnvCache } from './file-storage.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -52,9 +53,18 @@ app.use('/api/*', cors({
 
 // ============ 管理员认证中间件 ============
 
+// 管理员 Token 缓存：启动时加载一次，env 更新时刷新
+let _cachedAdminToken: string | null | undefined = undefined;
+
+function getAdminToken(): string {
+  if (_cachedAdminToken !== undefined) return _cachedAdminToken;
+  _cachedAdminToken = process.env.ADMIN_TOKEN || loadEnvConfig().ADMIN_TOKEN || '';
+  return _cachedAdminToken;
+}
+
 function requireAdminAuth(c: any): { valid: boolean; error?: string } {
   const authHeader = c.req.header('Authorization');
-  const adminToken = process.env.ADMIN_TOKEN || loadEnvConfig().ADMIN_TOKEN;
+  const adminToken = getAdminToken();
   
   // 未配置管理员 Token 时，拒绝所有写操作
   if (!adminToken) {
@@ -164,6 +174,8 @@ app.patch('/api/sources/config/env', (c) => {
     }
 
     saveEnvConfig(fileConfig);
+    invalidateEnvCache(); // 让 file-storage 下次重新读取
+    _cachedAdminToken = undefined; // 刷新 adminToken 缓存
     return c.json({ ok: true });
   }).catch(() => c.json({ error: 'Invalid JSON' }, 400));
 });
@@ -201,6 +213,10 @@ sourcesRouter.get('/tree', async (c) => {
   return c.json(roots);
 });
 sourcesRouter.patch('/:id/config', async (c) => {
+  // 管理员认证检查
+  const auth = requireAdminAuth(c);
+  if (!auth.valid) return c.json({ error: auth.error }, 401);
+
   const id = Number(c.req.param('id'));
   if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
   const body = await c.req.json().catch(() => ({}));
@@ -218,7 +234,7 @@ app.route('/api/fetch', createFetchRoutes(sql));
 app.route('/api/sync', createSyncRoutes(sql));
 app.route('/api/wechat-admin', createWechatAdminRoutes(sql));
 app.route('/api/bilibili-admin', createBilibiliAdminRoutes(sql));
-app.route('/api/bilibili-admin', createBilibiliAdminUppersRoutes(sql));
+app.route('/api/bilibili-admin/uppers', createBilibiliAdminUppersRoutes(sql));
 app.route('/api/wechat-group-admin', createWechatGroupAdminRoutes(sql));
 app.route('/api/youtube-admin', createYoutubeAdminRoutes(sql));
 

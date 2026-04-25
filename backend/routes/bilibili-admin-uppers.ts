@@ -14,7 +14,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   const router = new Hono();
 
   // ============ 获取UP主列表（支持搜索） ============
-  router.get('/uppers', async (c) => {
+  router.get('/', async (c) => {
     try {
       const search = c.req.query('search') || '';
       const parentId = 1273; // B站"更新"节点的ID
@@ -59,7 +59,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   });
 
   // ============ 添加UP主 ============
-  router.post('/uppers', async (c) => {
+  router.post('/', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({}));
       const { name, mid } = body;
@@ -92,7 +92,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   });
 
   // ============ 删除UP主 ============
-  router.delete('/uppers/:id', async (c) => {
+  router.delete('/:id', async (c) => {
     try {
       const id = Number(c.req.param('id'));
       if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
@@ -109,7 +109,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   });
 
   // ============ 切换UP主启用/禁用 ============
-  router.patch('/uppers/:id/toggle', async (c) => {
+  router.patch('/:id/toggle', async (c) => {
     try {
       const id = Number(c.req.param('id'));
       if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
@@ -128,7 +128,7 @@ export function createBilibiliAdminUppersRoutes(sql: Sql): Hono {
   });
 
   // ============ 批量切换UP主启用/禁用 ============
-  router.patch('/uppers/toggle-all', async (c) => {
+  router.patch('/toggle-all', async (c) => {
     try {
       const parentId = 1273; // B站"更新"节点
       const body = await c.req.json().catch(() => ({}));
