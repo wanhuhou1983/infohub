@@ -113,6 +113,126 @@ async function baiduTranslate(text: string, from: string = 'en', to: string = 'z
   }
 }
 
+// ============ Google Cloud Translation API ============
+
+/**
+ * Google Cloud Translation API
+ * 需要环境变量：GOOGLE_TRANSLATE_KEY（API Key）
+ */
+async function googleTranslate(text: string, from: string = 'en', to: string = 'zh'): Promise<string | null> {
+  const apiKey = process.env.GOOGLE_TRANSLATE_KEY;
+  if (!apiKey) {
+    console.error('[翻译] Google Translate API Key 未配置，跳过');
+    return null;
+  }
+
+  try {
+    const resp = await fetch(
+      `https://translation.googleapis.com/language/translate/v2?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          q: text,
+          source: from,
+          target: to,
+          format: 'text',
+        }),
+      }
+    );
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error(`[翻译] Google Translate 错误: ${err}`);
+      return null;
+    }
+
+    const data = await resp.json() as any;
+    if (data.data?.translations?.[0]?.translatedText) {
+      return data.data.translations[0].translatedText;
+    }
+    return null;
+  } catch (e: any) {
+    console.error(`[翻译] Google Translate 请求失败: ${e.message}`);
+    return null;
+  }
+}
+
+// ============ Azure Translator API ============
+
+/**
+ * Azure Translator API (Microsoft)
+ * 需要环境变量：
+ * - AZURE_TRANSLATE_KEY
+ * - AZURE_TRANSLATE_REGION (默认 eastasia)
+ * - AZURE_TRANSLATE_ENDPOINT (默认 https://api.cognitive.microsofttranslator.com/)
+ */
+async function azureTranslate(text: string, from: string = 'en', to: string = 'zh'): Promise<string | null> {
+  const apiKey = process.env.AZURE_TRANSLATE_KEY;
+  const region = process.env.AZURE_TRANSLATE_REGION || 'eastasia';
+  const endpoint = process.env.AZURE_TRANSLATE_ENDPOINT || 'https://api.cognitive.microsofttranslator.com/';
+
+  if (!apiKey) {
+    console.error('[翻译] Azure Translator API Key 未配置，跳过');
+    return null;
+  }
+
+  try {
+    const url = `${endpoint}translate?api-version=3.0&from=${from}&to=${to}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Ocp-Apim-Subscription-Key': apiKey,
+        'Ocp-Apim-Subscription-Region': region,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify([{ Text: text }]),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.error(`[翻译] Azure Translator 错误: ${err}`);
+      return null;
+    }
+
+    const data = await resp.json() as any;
+    if (data[0]?.translations?.[0]?.text) {
+      return data[0].translations[0].text;
+    }
+    return null;
+  } catch (e: any) {
+    console.error(`[翻译] Azure Translator 请求失败: ${e.message}`);
+    return null;
+  }
+}
+
+/**
+ * 统一翻译入口：按优先级尝试可用翻译API
+ * 优先级：百度 > Azure > Google
+ */
+async function translateText(text: string, from: string = 'en', to: string = 'zh'): Promise<string | null> {
+  // 1. 优先使用百度翻译
+  if (getBaiduConfig()) {
+    const result = await baiduTranslate(text, from, to);
+    if (result) return result;
+  }
+
+  // 2. Azure Translator
+  if (process.env.AZURE_TRANSLATE_KEY) {
+    const result = await azureTranslate(text, from, to);
+    if (result) return result;
+  }
+
+  // 3. Google Translate
+  if (process.env.GOOGLE_TRANSLATE_KEY) {
+    const result = await googleTranslate(text, from, to);
+    if (result) return result;
+  }
+
+  console.error('[翻译] 没有任何翻译API可用，跳过翻译');
+  return null;
+}
+
 /**
  * 检测文本是否主要为英文
  * 简单启发式：统计 ASCII 字母占比，>50% 视为英文，且中文字符 <10%
@@ -126,42 +246,57 @@ function isEnglish(text: string): boolean {
 }
 
 /**
- * 翻译英文文本为中文（分段处理，百度 API 限制单次 6000 字符）
+ * 翻译英文文本为中文（分段处理，按API限制调整每段长度）
  * 返回翻译后的中文文本
+ * 优先级：百度 > Azure > Google
  */
 async function translateToChinese(text: string): Promise<string> {
   if (!text || text.length < 10) return text;
 
-  // 百度翻译单次最大 6000 字符，分段翻译
-  const MAX_CHUNK = 5000; // 留余量
+  // 检查是否有任何翻译API可用
+  const hasBaidu = getBaiduConfig() !== null;
+  const hasAzure = !!process.env.AZURE_TRANSLATE_KEY;
+  const hasGoogle = !!process.env.GOOGLE_TRANSLATE_KEY;
+
+  if (!hasBaidu && !hasAzure && !hasGoogle) {
+    console.log('[翻译] 没有任何翻译API配置，跳过翻译');
+    return text;
+  }
+
+  // 根据不同API设置分段大小
+  let maxChunk = 5000; // 默认
+  if (hasBaidu) maxChunk = 5000;
+  else if (hasAzure) maxChunk = 10000; // Azure 限制更宽松
+  else if (hasGoogle) maxChunk = 5000;
+
   const chunks: string[] = [];
   let remaining = text;
   while (remaining.length > 0) {
-    chunks.push(remaining.slice(0, MAX_CHUNK));
-    remaining = remaining.slice(MAX_CHUNK);
+    chunks.push(remaining.slice(0, maxChunk));
+    remaining = remaining.slice(maxChunk);
   }
 
   const translatedChunks: string[] = [];
   for (const chunk of chunks) {
-    const result = await baiduTranslate(chunk, 'en', 'zh');
+    const result = await translateText(chunk, 'en', 'zh');
     if (result) {
       translatedChunks.push(result);
     } else {
       translatedChunks.push(chunk); // 翻译失败保留原文
     }
-    // 避免请求过快（百度 QPS 限制）
-    if (chunks.length > 1) await new Promise(r => setTimeout(r, 200));
+    // 避免请求过快
+    if (chunks.length > 1) await new Promise(r => setTimeout(r, 300));
   }
 
   return translatedChunks.join('\n');
 }
 
 /**
- * 翻译标题
+ * 翻译标题（使用统一翻译API）
  */
 async function translateTitle(title: string): Promise<string> {
   if (!isEnglish(title)) return title;
-  const result = await baiduTranslate(title, 'en', 'zh');
+  const result = await translateText(title, 'en', 'zh');
   return result || title;
 }
 

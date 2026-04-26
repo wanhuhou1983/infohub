@@ -57,6 +57,18 @@ CREATE TABLE IF NOT EXISTS fetch_logs (
     duration_ms INT
 );
 
+-- Google OAuth Token 存储
+CREATE TABLE IF NOT EXISTS google_oauth_tokens (
+    id            SERIAL PRIMARY KEY,
+    access_token  TEXT        NOT NULL,
+    refresh_token TEXT,
+    expires_at    TIMESTAMP,
+    user_name     VARCHAR(100),
+    user_email    VARCHAR(255),
+    created_at    TIMESTAMP   DEFAULT NOW(),
+    updated_at    TIMESTAMP   DEFAULT NOW()
+);
+
 -- 初始化顶级信息源
 INSERT INTO sources (name, type, icon, description, config) VALUES
     ('新闻联播', 'xwlb', '📺', 'CCTV 官网每日文字稿', '{"schedule": "0 20 * * *", "source_url": "https://tv.cctv.com/lm/xwlb/day/"}'),

@@ -26,6 +26,7 @@ import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';
 import { createBilibiliAdminUppersRoutes } from './routes/bilibili-admin-uppers.js';
 import { createWechatGroupAdminRoutes } from './routes/wechat-group-admin.js';
 import { createYoutubeAdminRoutes } from './routes/youtube-admin.js';
+import { createGoogleAuthRoutes, getValidAccessToken } from './routes/google-auth.js';
 import { invalidateEnvCache } from './file-storage.js';
 
 const sql = postgres(process.env.DATABASE_URL!);
@@ -129,16 +130,39 @@ function saveEnvConfig(config: Record<string, string>): void {
 }
 
 // 获取环境配置（合并 .env.json + process.env，.env.json 优先用于非敏感项）
-app.get('/api/sources/config/env', (c) => {
+app.get('/api/sources/config/env', async (c) => {
   const fileConfig = loadEnvConfig();
+
+  // 检查 Google OAuth 授权状态
+  let googleOAuthAuthorized = false;
+  let googleOAuthUser = '';
+  try {
+    const [token] = await sql`SELECT user_name, user_email FROM google_oauth_tokens WHERE id = 1 LIMIT 1`;
+    if (token) {
+      googleOAuthAuthorized = true;
+      googleOAuthUser = token.user_name || token.user_email || '';
+    }
+  } catch (_) { /* ignore */ }
+
   return c.json({
     imgbed_url: fileConfig.IMGBED_URL || process.env.IMGBED_URL || '',
     imgbed_base: fileConfig.IMGBED_BASE || process.env.IMGBED_BASE || '',
-    imgbed_token: fileConfig.IMGBED_TOKEN ? '******' : '',  // 不暴露已有 token
+    imgbed_token: fileConfig.IMGBED_TOKEN ? '******' : '',
     weflow_url: fileConfig.WEFLOW_URL || process.env.WEFLOW_URL || '',
     weflow_token: fileConfig.WEFLOW_TOKEN ? '******' : '',
     miniflux_url: fileConfig.MINIFLUX_URL || process.env.MINIFLUX_URL || '',
     miniflux_user: fileConfig.MINIFLUX_USER || process.env.MINIFLUX_USER || '',
+    // 翻译 API 配置
+    google_translate_key: fileConfig.GOOGLE_TRANSLATE_KEY ? '******' : '',
+    azure_translate_key: fileConfig.AZURE_TRANSLATE_KEY ? '******' : '',
+    azure_translate_region: fileConfig.AZURE_TRANSLATE_REGION || 'eastasia',
+    azure_translate_endpoint: fileConfig.AZURE_TRANSLATE_ENDPOINT || 'https://api.cognitive.microsofttranslator.com/',
+    baidu_translate_configured: existsSync(join(process.env.HOME || '/root', '.workbuddy/keys/baidu_translate.json')),
+    // Google OAuth 配置状态
+    google_oauth_client_id: fileConfig.GOOGLE_OAUTH_CLIENT_ID || '',
+    google_oauth_configured: !!fileConfig.GOOGLE_OAUTH_CLIENT_ID,
+    google_oauth_authorized: googleOAuthAuthorized,
+    google_oauth_user: googleOAuthUser,
   });
 });
 
@@ -163,6 +187,15 @@ app.patch('/api/sources/config/env', (c) => {
       miniflux_url: 'MINIFLUX_URL',
       miniflux_user: 'MINIFLUX_USER',
       miniflux_pass: 'MINIFLUX_PASS',
+      // 翻译 API
+      google_translate_key: 'GOOGLE_TRANSLATE_KEY',
+      azure_translate_key: 'AZURE_TRANSLATE_KEY',
+      azure_translate_region: 'AZURE_TRANSLATE_REGION',
+      azure_translate_endpoint: 'AZURE_TRANSLATE_ENDPOINT',
+      // Google OAuth
+      google_oauth_client_id: 'GOOGLE_OAUTH_CLIENT_ID',
+      google_oauth_client_secret: 'GOOGLE_OAUTH_CLIENT_SECRET',
+      google_oauth_redirect_uri: 'GOOGLE_OAUTH_REDIRECT_URI',
     };
 
     for (const [key, envKey] of Object.entries(mapping)) {
@@ -282,6 +315,7 @@ app.route('/api/bilibili-admin', createBilibiliAdminRoutes(sql));
 app.route('/api/bilibili-admin/uppers', createBilibiliAdminUppersRoutes(sql));
 app.route('/api/wechat-group-admin', createWechatGroupAdminRoutes(sql));
 app.route('/api/youtube-admin', createYoutubeAdminRoutes(sql));
+app.route('/api/auth/google', createGoogleAuthRoutes(sql));
 
 // ============ 启动 ============
 

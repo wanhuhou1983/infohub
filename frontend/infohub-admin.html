@@ -221,6 +221,45 @@ tailwind.config = {
         </button>
       </div>
     </div>
+
+    <!-- 翻译 API 配置 -->
+    <div class="bg-surface border border-border rounded-xl p-5 mt-4">
+      <h2 class="text-base font-medium mb-4 flex items-center gap-2">
+        <svg class="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129"/></svg>
+        翻译 API 配置
+      </h2>
+      <p class="text-xs text-muted mb-4">支持多个翻译引擎，优先级：百度 &gt; Azure &gt; Google。英文内容自动翻译为中文。</p>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">百度翻译</label>
+          <div class="flex items-center gap-2 text-xs text-muted">
+            <span class="inline-flex items-center px-2 py-0.5 rounded bg-surface2 text-muted" id="baidu-translate-status">未配置</span>
+            <span>配置文件: ~/.workbuddy/keys/baidu_translate.json</span>
+          </div>
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Google AI Studio API Key</label>
+          <input type="password" id="google-translate-key" placeholder="AIzaSy..." class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Azure Translator Key</label>
+          <input type="password" id="azure-translate-key" placeholder="Azure Translator 密钥" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div>
+          <label class="text-sm text-muted mb-1.5 block">Azure Translator 区域</label>
+          <input type="text" id="azure-translate-region" placeholder="eastasia" value="eastasia" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+        <div class="col-span-2">
+          <label class="text-sm text-muted mb-1.5 block">Azure Translator Endpoint</label>
+          <input type="text" id="azure-translate-endpoint" placeholder="https://api.cognitive.microsofttranslator.com/" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+        </div>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <button onclick="saveApiConfig()" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
+          保存翻译配置
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- ====== 页面4: 数据统计 ====== -->
@@ -766,13 +805,27 @@ tailwind.config = {
       </button>
     </div>
     <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
-      <button class="text-xs bg-accent/20 text-accent px-2.5 py-1 rounded transition" onclick="openYoutubeUpperModal()">
-        + 添加频道
+      <!-- Google 授权状态显示 -->
+      <div id="googleAuthStatus" class="flex items-center gap-2 text-xs">
+        <span class="text-muted">Google 账号:</span>
+        <span id="googleAuthUser" class="text-muted">未授权</span>
+        <button id="googleLoginBtn" class="text-xs bg-red-600/20 text-red-400 px-2.5 py-1 rounded transition hover:bg-red-600/30" onclick="googleLogin()">
+          登录 Google
+        </button>
+        <button id="googleLogoutBtn" class="hidden text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="googleLogout()">
+          退出
+        </button>
+      </div>
+      <button id="importSubscriptionsBtn" class="hidden text-xs bg-accent/20 text-accent px-2.5 py-1 rounded transition hover:bg-accent/30" onclick="showImportSubscriptionsModal()">
+        📥 导入关注
       </button>
       <div class="flex-1"></div>
+      <button class="text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="openYoutubeUpperModal()">
+        + 手动添加
+      </button>
       <div class="relative">
         <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-        <input type="text" id="youtube-search-input" placeholder="搜索频道..." 
+        <input type="text" id="youtube-search-input" placeholder="搜索频道..."
           class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
           oninput="renderYoutubeUppers()">
       </div>
@@ -798,6 +851,48 @@ tailwind.config = {
         <div class="flex gap-3">
           <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeYoutubeUppersModal()">取消</button>
           <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeYoutubeUppersModal()">完成</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ====== 导入订阅弹窗 ====== -->
+<div id="importSubscriptionsModal" class="fixed inset-0 bg-black/60 modal-overlay z-[60] hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-lg max-h-[70vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div>
+        <h2 class="font-semibold">导入关注的频道</h2>
+        <p class="text-xs text-muted mt-0.5">选择要导入的频道（已导入的会自动跳过）</p>
+      </div>
+      <button class="text-muted hover:text-fg" onclick="closeImportSubscriptionsModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
+      <button class="text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="refreshSubscriptions()">
+        🔄 刷新列表
+      </button>
+      <div class="flex-1"></div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="import-select-all" class="accent-accent" onchange="toggleSelectAllImport()">
+        <span id="importSelectAllText">全选</span>
+      </label>
+      <span id="importCount" class="text-xs text-muted">0 个频道</span>
+    </div>
+    <div class="flex-1 overflow-y-auto px-6 py-3">
+      <div id="subscriptionsList" class="space-y-2">
+        <div class="text-center text-muted py-8">加载中...</div>
+      </div>
+    </div>
+    <div class="px-6 py-3 border-t border-border shrink-0">
+      <div class="flex items-center justify-between">
+        <div class="text-xs text-muted">
+          已选择 <span id="importSelectedCount" class="text-fg font-medium">0</span> 个频道
+        </div>
+        <div class="flex gap-3">
+          <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeImportSubscriptionsModal()">取消</button>
+          <button id="doImportBtn" class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="doImportSubscriptions()">导入</button>
         </div>
       </div>
     </div>
@@ -907,6 +1002,20 @@ async function loadApiConfig() {
     document.getElementById('weflow-url').value = data.weflow_url || '';
     document.getElementById('miniflux-url').value = data.miniflux_url || '';
     document.getElementById('miniflux-user').value = data.miniflux_user || '';
+    // 翻译 API 配置
+    document.getElementById('google-translate-key').value = data.google_translate_key || '';
+    document.getElementById('azure-translate-key').value = data.azure_translate_key || '';
+    document.getElementById('azure-translate-region').value = data.azure_translate_region || 'eastasia';
+    document.getElementById('azure-translate-endpoint').value = data.azure_translate_endpoint || 'https://api.cognitive.microsofttranslator.com/';
+    // 百度翻译状态
+    const baiduStatus = document.getElementById('baidu-translate-status');
+    if (data.baidu_translate_configured) {
+      baiduStatus.textContent = '已配置';
+      baiduStatus.className = 'inline-flex items-center px-2 py-0.5 rounded bg-success/20 text-success';
+    } else {
+      baiduStatus.textContent = '未配置';
+      baiduStatus.className = 'inline-flex items-center px-2 py-0.5 rounded bg-surface2 text-muted';
+    }
   } catch (e) {
     console.error('加载配置失败:', e);
   }
@@ -934,6 +1043,11 @@ async function saveApiConfig() {
     weflow_token: document.getElementById('weflow-token').value,
     miniflux_url: document.getElementById('miniflux-url').value,
     miniflux_user: document.getElementById('miniflux-user').value,
+    // 翻译 API 配置
+    google_translate_key: document.getElementById('google-translate-key').value,
+    azure_translate_key: document.getElementById('azure-translate-key').value,
+    azure_translate_region: document.getElementById('azure-translate-region').value || 'eastasia',
+    azure_translate_endpoint: document.getElementById('azure-translate-endpoint').value || 'https://api.cognitive.microsofttranslator.com/',
   };
   
   try {
@@ -2010,6 +2124,7 @@ function showYoutubeUppersModal() {
   document.getElementById('youtubeUppersModal').classList.remove('hidden');
   document.getElementById('youtubeUppersModal').classList.add('flex');
   loadYoutubeUppers();
+  checkGoogleAuthStatus();
 }
 
 function closeYoutubeUppersModal() {
@@ -2170,6 +2285,232 @@ function openYoutubeUpperModal() {
   const channelId = prompt('请输入频道 ID (Channel ID):');
   if (!channelId) return;
   addYoutubeUpper(channelId, name);
+}
+
+// ===== Google OAuth 登录 =====
+
+async function checkGoogleAuthStatus() {
+  try {
+    const res = await fetch('/api/auth/google/status');
+    const data = await res.json();
+
+    const loginBtn = document.getElementById('googleLoginBtn');
+    const logoutBtn = document.getElementById('googleLogoutBtn');
+    const authUser = document.getElementById('googleAuthUser');
+    const importBtn = document.getElementById('importSubscriptionsBtn');
+
+    if (data.authorized) {
+      authUser.textContent = data.user_name || data.user_email || '已登录';
+      authUser.classList.remove('text-muted');
+      authUser.classList.add('text-green-400');
+      loginBtn.classList.add('hidden');
+      logoutBtn.classList.remove('hidden');
+      importBtn.classList.remove('hidden');
+    } else {
+      authUser.textContent = '未授权';
+      authUser.classList.add('text-muted');
+      authUser.classList.remove('text-green-400');
+      loginBtn.classList.remove('hidden');
+      logoutBtn.classList.add('hidden');
+      importBtn.classList.add('hidden');
+    }
+  } catch (e) {
+    console.error('检查授权状态失败:', e);
+  }
+}
+
+async function googleLogin() {
+  try {
+    const res = await fetch('/api/auth/google');
+    const data = await res.json();
+
+    if (data.error) {
+      alert('获取授权链接失败: ' + data.error);
+      return;
+    }
+
+    // 打开授权窗口
+    const width = 500, height = 600;
+    const left = (window.innerWidth - width) / 2;
+    const top = (window.innerHeight - height) / 2;
+    const authWindow = window.open(
+      data.authUrl,
+      'google_auth',
+      `width=${width},height=${height},left=${left},top=${top},popup=yes`
+    );
+
+    // 监听授权结果
+    const pollTimer = setInterval(async () => {
+      try {
+        if (authWindow?.closed) {
+          clearInterval(pollTimer);
+          // 窗口关闭后检查授权状态
+          await checkGoogleAuthStatus();
+        }
+      } catch (e) {
+        // 跨域访问可能失败，忽略
+      }
+    }, 500);
+  } catch (e) {
+    alert('打开授权页面失败: ' + e.message);
+  }
+}
+
+async function googleLogout() {
+  if (!confirm('确定要退出 Google 授权吗？')) return;
+
+  try {
+    const res = await fetch('/api/auth/google/logout', { method: 'DELETE' });
+    const data = await res.json();
+
+    if (data.ok) {
+      await checkGoogleAuthStatus();
+    }
+  } catch (e) {
+    alert('退出失败: ' + e.message);
+  }
+}
+
+// ===== 导入订阅 =====
+
+let subscriptionsData = [];
+let selectedSubscriptions = new Set();
+
+async function showImportSubscriptionsModal() {
+  document.getElementById('importSubscriptionsModal').classList.remove('hidden');
+  document.getElementById('importSubscriptionsModal').classList.add('flex');
+  await loadSubscriptions();
+}
+
+function closeImportSubscriptionsModal() {
+  document.getElementById('importSubscriptionsModal').classList.add('hidden');
+  document.getElementById('importSubscriptionsModal').classList.remove('flex');
+}
+
+async function loadSubscriptions() {
+  const listEl = document.getElementById('subscriptionsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
+
+  try {
+    const res = await fetch('/api/youtube-admin/subscriptions');
+    const data = await res.json();
+
+    if (data.error) {
+      if (data.error.includes('未授权')) {
+        listEl.innerHTML = `
+          <div class="text-center text-muted py-8">
+            <p class="mb-3">请先登录 Google 账号</p>
+            <button class="bg-red-600/20 text-red-400 px-4 py-2 rounded hover:bg-red-600/30" onclick="googleLogin()">
+              登录 Google
+            </button>
+          </div>
+        `;
+      } else {
+        listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;
+      }
+      return;
+    }
+
+    subscriptionsData = data.subscriptions || [];
+    selectedSubscriptions.clear();
+
+    renderSubscriptions();
+  } catch (e) {
+    listEl.innerHTML = `<div class="text-center text-danger py-8">加载失败: ${e.message}</div>`;
+  }
+}
+
+function renderSubscriptions() {
+  const listEl = document.getElementById('subscriptionsList');
+  const selectAllCb = document.getElementById('import-select-all');
+  const selectAllText = document.getElementById('importSelectAllText');
+  const countEl = document.getElementById('importCount');
+  const selectedCountEl = document.getElementById('importSelectedCount');
+
+  countEl.textContent = `${subscriptionsData.length} 个频道`;
+  selectedCountEl.textContent = selectedSubscriptions.size;
+
+  if (subscriptionsData.length === 0) {
+    listEl.innerHTML = '<div class="text-center text-muted py-8">暂无订阅频道</div>';
+    return;
+  }
+
+  selectAllCb.checked = selectedSubscriptions.size === subscriptionsData.length;
+  selectAllText.textContent = selectedSubscriptions.size === subscriptionsData.length ? '取消全选' : '全选';
+
+  listEl.innerHTML = subscriptionsData.map(sub => `
+    <div class="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-surface2 transition">
+      <div class="flex items-center gap-3 min-w-0">
+        <input type="checkbox"
+          ${selectedSubscriptions.has(sub.channelId) ? 'checked' : ''}
+          onchange="toggleSubscriptionSelection('${sub.channelId}', this.checked)"
+          class="accent-accent w-4 h-4">
+        <img src="${sub.thumbnail}" alt="" class="w-8 h-8 rounded-full shrink-0 bg-surface2">
+        <div class="min-w-0">
+          <span class="text-sm font-medium block truncate">${sub.title}</span>
+          <span class="text-xs text-muted block truncate">${sub.channelId}</span>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function toggleSubscriptionSelection(channelId, checked) {
+  if (checked) {
+    selectedSubscriptions.add(channelId);
+  } else {
+    selectedSubscriptions.delete(channelId);
+  }
+  renderSubscriptions();
+}
+
+function toggleSelectAllImport() {
+  const selectAllCb = document.getElementById('import-select-all');
+  if (selectAllCb.checked) {
+    subscriptionsData.forEach(sub => selectedSubscriptions.add(sub.channelId));
+  } else {
+    selectedSubscriptions.clear();
+  }
+  renderSubscriptions();
+}
+
+async function refreshSubscriptions() {
+  await loadSubscriptions();
+}
+
+async function doImportSubscriptions() {
+  const channelIds = Array.from(selectedSubscriptions);
+  if (channelIds.length === 0) {
+    alert('请选择要导入的频道');
+    return;
+  }
+
+  const btn = document.getElementById('doImportBtn');
+  btn.disabled = true;
+  btn.textContent = '导入中...';
+
+  try {
+    const res = await fetch('/api/youtube-admin/import-subscriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channelIds })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert('导入失败: ' + data.error);
+      return;
+    }
+
+    alert(`导入完成！新增 ${data.imported} 个频道，已存在 ${data.skipped} 个`);
+    closeImportSubscriptionsModal();
+    await loadYoutubeUppers(); // 刷新频道列表
+  } catch (e) {
+    alert('导入失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '导入';
+  }
 }
 
 async function refreshYoutubeUppers() {

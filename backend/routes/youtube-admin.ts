@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { hashString, saveArticleFile } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
+import { getValidAccessToken } from './google-auth.js';
 
 /** 解码 YouTube API 返回的 HTML 实体（如 &amp; &#39; &quot;） */
 function decodeHtmlEntities(str: string): string {
@@ -157,6 +158,117 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
     if (!updated) return c.json({ error: 'Source not found' }, 404);
 
     return c.json(updated);
+  });
+
+  // ============ 获取我关注的频道（需要 Google OAuth） ============
+  router.get('/subscriptions', async (c) => {
+    const accessToken = await getValidAccessToken(sql);
+    if (!accessToken) {
+      return c.json({ error: '未授权 Google 账号，请先在系统设置中完成 Google OAuth 授权' }, 401);
+    }
+
+    try {
+      const subscriptions: any[] = [];
+      let nextPageToken = '';
+
+      // 循环获取所有订阅（YouTube API 每次最多返回 50 个）
+      do {
+        const url = new URL('https://www.googleapis.com/youtube/v3/subscriptions');
+        url.searchParams.set('part', 'snippet');
+        url.searchParams.set('mine', 'true');
+        url.searchParams.set('maxResults', '50');
+        if (nextPageToken) url.searchParams.set('pageToken', nextPageToken);
+
+        const resp = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json() as any;
+          return c.json({ error: `YouTube API 错误: ${err.error?.message || resp.status}` }, 400);
+        }
+
+        const data = await resp.json() as any;
+        for (const item of data.items || []) {
+          const snippet = item.snippet;
+          subscriptions.push({
+            channelId: snippet.resourceId?.channelId,
+            title: snippet.title,
+            description: snippet.description,
+            thumbnail: snippet.thumbnails?.default?.url || '',
+          });
+        }
+
+        nextPageToken = data.nextPageToken || '';
+      } while (nextPageToken);
+
+      return c.json({ subscriptions, total: subscriptions.length });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // ============ 导入关注的频道到 UP 主列表 ============
+  router.post('/import-subscriptions', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { channelIds } = body;
+
+      if (!Array.isArray(channelIds) || channelIds.length === 0) {
+        return c.json({ error: '请选择要导入的频道' }, 400);
+      }
+
+      const [youtubeSource] = await sql`SELECT id FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
+      if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
+
+      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
+      if (updatesSource.length === 0) return c.json({ error: 'YouTube "更新"源未配置' }, 400);
+
+      // 获取每个频道的详情（获取 channelId 对应的名称）
+      const accessToken = await getValidAccessToken(sql);
+      const imported: string[] = [];
+      const skipped: string[] = [];
+
+      for (const channelId of channelIds) {
+        // 检查是否已存在
+        const [existing] = await sql`
+          SELECT id FROM sources
+          WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND config->>'channelId' = ${channelId}
+        `;
+        if (existing) {
+          skipped.push(channelId);
+          continue;
+        }
+
+        let name = `频道 ${channelId}`;
+
+        // 如果有 accessToken，获取频道名称
+        if (accessToken) {
+          try {
+            const chResp = await fetch(
+              `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelId}&key=${process.env.YOUTUBE_API_KEY || ''}`,
+              { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+            if (chResp.ok) {
+              const chData = await chResp.json() as any;
+              if (chData.items?.[0]?.snippet?.title) {
+                name = chData.items[0].snippet.title;
+              }
+            }
+          } catch (_) { /* ignore */ }
+        }
+
+        await sql`
+          INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
+          VALUES (${name}, 'youtube-updates', ${updatesSource[0]!.id}, ${sql.json({ channelId })}, false, NOW())
+        `;
+        imported.push(name);
+      }
+
+      return c.json({ ok: true, imported: imported.length, skipped: skipped.length, names: imported });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
   });
 
   // ============ 采集已启用 UP 主的最新视频 ============
