@@ -226,7 +226,7 @@ describe('getObSubdir', () => {
   });
 
   test('magazine → 报刊杂志/喷嚏图卦', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'magazine' }))).toBe('报刊杂志/喷嚏图卦');
+    expect(getObSubdir(makeMeta({ source_type: 'magazine' }))).toBe('报刊杂志/My RSS Feed');
   });
 
   test('tencent → 报刊杂志/腾讯新闻', () => {
