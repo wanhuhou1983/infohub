@@ -127,7 +127,7 @@ async function whisperWindowsTranscribe(audioUrl: string, durationSec: number = 
 
 // ============ RSS 直接解析（不再依赖 Miniflux） ============
 import RssParser from 'rss-parser';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 

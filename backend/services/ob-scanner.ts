@@ -14,7 +14,7 @@
  * 不推送：content、title、published_at、author（以 PG 为主）
  */
 
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Sql } from 'postgres';
 
@@ -124,6 +124,17 @@ export function scanObFiles(): ObFileMeta[] {
  * 解析单个 Markdown 文件，提取 frontmatter
  */
 export function parseFile(filePath: string): ObFileMeta | null {
+  // 路径遍历防护：必须解析到 OB_DIR 内部
+  try {
+    const realPath = realpathSync(filePath);
+    const obReal = realpathSync(getObDir());
+    if (!realPath.startsWith(obReal + '/') && realPath !== obReal) {
+      console.warn('[ob-scanner] 路径越界拦截:', filePath);
+      return null;
+    }
+  } catch {
+    return null; // 文件不存在或权限不足
+  }
   try {
     const content = readFileSync(filePath, 'utf-8');
     if (!content.startsWith('---')) return null;
