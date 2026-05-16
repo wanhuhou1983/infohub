@@ -36,6 +36,7 @@ async function ollamaTranslate(text: string, from: string = 'en', to: string = '
     const resp = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model: OLLAMA_TRANSLATE_MODEL,
         messages: [
@@ -73,6 +74,7 @@ async function llamaCppTranslate(text: string, from: string = 'en', to: string =
     const resp = await fetch(`${LLAMA_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model: LLAMA_MODEL,
         messages: [
@@ -667,7 +669,11 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
       resolve(null);
     }, 30000);
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
+    const MAX_OUTPUT = 10 * 1024 * 1024; // 10MB 上限
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+      if (stdout.length > MAX_OUTPUT) { proc.kill('SIGKILL'); stdout = stdout.slice(0, MAX_OUTPUT); }
+    });
     proc.stderr.on('data', (data) => { stderr += data.toString(); });
 
     proc.on('close', (code) => {
