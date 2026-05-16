@@ -39,14 +39,15 @@ import { processImages } from '../storage/image-processor.js';
 
 const TEST_DATA_DIR = join(tmpdir(), `infohub-test-${Date.now()}`);
 let origDataDir: string | undefined;
-let origObsidianPath: string | undefined;
+let origObsAttachDir: string | undefined;
 
 beforeAll(async () => {
   origDataDir = process.env.DATA_DIR;
-  origObsidianPath = process.env.OBSIDIAN_VAULT_PATH;
+  origObsAttachDir = process.env.OB_ATTACHMENTS_DIR;
   process.env.DATA_DIR = TEST_DATA_DIR;
-  process.env.OBSIDIAN_VAULT_PATH = TEST_DATA_DIR;
+  process.env.OB_ATTACHMENTS_DIR = TEST_DATA_DIR + '/附件';
   await mkdir(TEST_DATA_DIR, { recursive: true });
+  await mkdir(TEST_DATA_DIR + '/附件', { recursive: true });
 });
 
 afterEach(async () => {
@@ -61,7 +62,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   process.env.DATA_DIR = origDataDir;
-  process.env.OBSIDIAN_VAULT_PATH = origObsidianPath;
+  process.env.OB_ATTACHMENTS_DIR = origObsAttachDir;
   await rm(TEST_DATA_DIR, { recursive: true, force: true }).catch(() => {});
 });
 
