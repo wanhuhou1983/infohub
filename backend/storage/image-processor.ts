@@ -20,8 +20,10 @@ export const IMAGES_DIR = join(DATA_DIR, 'images');
 export function getImagesDir(): string { return IMAGES_DIR; }
 
 // ============ Obsidian 附件目录 ============
-const OB_ATTACHMENTS_DIR = process.env.OB_ATTACHMENTS_DIR || '/obsidian/附件';
-export function getObImagesDir(): string { return OB_ATTACHMENTS_DIR; }
+function getObAttachmentsDir(): string {
+  return process.env.OB_ATTACHMENTS_DIR || '/obsidian/附件';
+}
+export function getObImagesDir(): string { return getObAttachmentsDir(); }
 
 // ============ 图片 URL 缓存 ============
 
@@ -119,7 +121,7 @@ async function downloadAndSaveImage(imageUrl: string, sourceType: string): Promi
     }
 
     // 同时保存到 Obsidian 附件目录（用于 OB 本地图片显示）
-    const obAttachDir = join(OB_ATTACHMENTS_DIR, subdir);
+    const obAttachDir = join(getObAttachmentsDir(), subdir);
     const obFilePath = join(obAttachDir, filename);
     if (!existsSync(obFilePath)) {
       await mkdir(obAttachDir, { recursive: true });
