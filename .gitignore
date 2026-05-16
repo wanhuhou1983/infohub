@@ -31,3 +31,4 @@ weflow-source
 backend/data/
 _.DS_Store
 *.xlsx
+package-lock.json

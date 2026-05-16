@@ -187,6 +187,14 @@ export function createSyncRoutes(sql: Sql): Hono {
     const { dry_run } = c.req.query();
     const startMs = Date.now();
 
+    if (dry_run === 'true') {
+      const report = await diffReport(sql);
+      return c.json({ ok: true, direction: 'ob→pg', mode: 'dry_run',
+        totalObFiles: report.totalObFiles, matched: report.matched,
+        noMatch: report.noMatch, summary: report.summary,
+        duration_ms: Date.now() - startMs });
+    }
+
     try {
       // 1. 扫描 OB 文件
       const obFiles = scanObFiles();
@@ -200,11 +208,6 @@ export function createSyncRoutes(sql: Sql): Hono {
       const details: any[] = [];
 
       for (const obFile of obFiles) {
-        if (dry_run === 'true') {
-          // 干跑模式：使用 diffReport 已有数据
-          matched++;
-          continue;
-        }
 
         const result = await pushToPg(obFile, sql);
         switch (result.status) {
@@ -235,21 +238,6 @@ export function createSyncRoutes(sql: Sql): Hono {
       }
 
       const durationMs = Date.now() - startMs;
-
-      if (dry_run === 'true') {
-        // 干跑：用 diffReport 获取详情
-        const report = await diffReport(sql);
-        return c.json({
-          ok: true,
-          direction: 'ob→pg',
-          mode: 'dry_run',
-          totalObFiles: report.totalObFiles,
-          matched: report.matched,
-          noMatch: report.noMatch,
-          summary: report.summary,
-          duration_ms: durationMs,
-        });
-      }
 
       return c.json({
         ok: true,

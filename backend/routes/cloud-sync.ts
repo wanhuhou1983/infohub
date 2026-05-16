@@ -117,13 +117,15 @@ export function createCloudSyncRoutes(sql: Sql): Hono {
    * 清理 7 天前的 articles + fetch_logs
    */
   router.post('/cleanup', async (c) => {
-    const cutoffDays = Number(c.req.query('days') || '7');
+    const rawDays = c.req.query('days') || '7';
+    const parsed = Number(rawDays);
+    const cutoffDays = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 365)) : 7;
     
     const artResult = await sql`
-      DELETE FROM articles WHERE fetched_at < NOW() - interval '${sql.unsafe(String(cutoffDays))} days'
+      DELETE FROM articles WHERE fetched_at < NOW() - (${cutoffDays} || ' days')::interval
     `;
     const logResult = await sql`
-      DELETE FROM fetch_logs WHERE started_at < NOW() - interval '${sql.unsafe(String(cutoffDays))} days'
+      DELETE FROM fetch_logs WHERE started_at < NOW() - (${cutoffDays} || ' days')::interval
     `;
 
     return c.json({

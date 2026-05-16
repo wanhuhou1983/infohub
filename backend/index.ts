@@ -153,8 +153,7 @@ function writeAuthGuard(): MiddlewareHandler {
 
 // ============ 前端静态文件 ============
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const FRONTEND_DIR = join(__dirname, 'frontend');
+const FRONTEND_DIR = join(__dirname_env, 'frontend');
 
 // ============ 前端 JS 静态文件路由 ============
 // 提供 /js/api-client.js 供前端加载
@@ -230,7 +229,7 @@ app.get('/admin', (c) => {
 
 // ============ 运行时环境配置（.env.json） ============
 
-const ENV_FILE = join(__dirname, '..', '.env.json');
+const ENV_FILE = join(__dirname_env, '..', '.env.json');
 
 function loadEnvConfig(): Record<string, string> {
   try {
