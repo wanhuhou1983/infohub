@@ -12,8 +12,6 @@
  * - 所有路由参数化查询，消除 sql.unsafe()
  */
 
-const IS_CLOUD = process.env.CLOUD_MODE === 'true';
-
 import 'dotenv/config';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
@@ -62,6 +60,8 @@ const __dirname_env = dirname(fileURLToPath(import.meta.url));
   }
 })();
 
+
+const IS_CLOUD = process.env.CLOUD_MODE === 'true';
 const sql = postgres(process.env.DATABASE_URL!);
 
 const app = new Hono();
