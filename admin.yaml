@@ -1,0 +1,258 @@
+- generic [active] [ref=e1]:
+  - complementary [ref=e2]:
+    - generic [ref=e3]:
+      - generic [ref=e4]: I
+      - generic [ref=e5]: InfoHub
+      - generic [ref=e6]: 管理
+    - navigation [ref=e7]:
+      - generic [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+        - generic [ref=e11]: 信息源管理
+      - generic [ref=e12] [cursor=pointer]:
+        - img [ref=e13]
+        - generic [ref=e15]: 定时任务
+      - generic [ref=e16] [cursor=pointer]:
+        - img [ref=e17]
+        - generic [ref=e19]: 采集日志
+      - generic [ref=e20] [cursor=pointer]:
+        - img [ref=e21]
+        - generic [ref=e23]: 数据统计
+      - generic [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+        - generic [ref=e28]: 系统设置
+    - link "返回阅读视图" [ref=e30] [cursor=pointer]:
+      - /url: /
+      - img [ref=e31]
+      - text: 返回阅读视图
+  - generic [ref=e34]:
+    - generic [ref=e35]:
+      - generic [ref=e36]:
+        - heading "信息源管理" [level=1] [ref=e37]
+        - paragraph [ref=e38]: 管理所有信息采集源，配置采集参数
+      - button "添加信息源" [ref=e39] [cursor=pointer]:
+        - img [ref=e40]
+        - text: 添加信息源
+    - generic [ref=e42]:
+      - generic [ref=e44]:
+        - generic [ref=e45]: 💬
+        - generic [ref=e46]:
+          - generic [ref=e47]:
+            - generic [ref=e48]: 微信公众号
+            - generic [ref=e49]: 爬虫
+            - generic [ref=e52]: 运行中
+          - paragraph [ref=e53]: 微信公众号文章抓取
+          - generic [ref=e54]:
+            - generic [ref=e55]: 共 219 篇
+            - generic [ref=e56]: 今日 +1
+            - generic [ref=e57]: 最近采集 2026/5/2 23:12:10
+        - generic [ref=e58]:
+          - generic [ref=e59]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e61] [cursor=pointer]:
+            - img [ref=e62]
+          - button "配置公众号" [ref=e64] [cursor=pointer]:
+            - img [ref=e65]
+      - generic [ref=e69]:
+        - generic [ref=e70]: 📌
+        - generic [ref=e71]:
+          - generic [ref=e72]:
+            - generic [ref=e73]: 微信群聊分析
+            - generic [ref=e74]: API
+            - generic [ref=e77]: 运行中
+          - paragraph [ref=e78]: 微信群聊热点分析
+          - generic [ref=e79]:
+            - generic [ref=e80]: 共 153 篇
+            - generic [ref=e81]: 今日 +18
+            - generic [ref=e82]: 最近采集 2026/4/25 06:13:05
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e86] [cursor=pointer]:
+            - img [ref=e87]
+          - button "配置群聊" [ref=e89] [cursor=pointer]:
+            - img [ref=e90]
+      - generic [ref=e94]:
+        - generic [ref=e95]: 📺
+        - generic [ref=e96]:
+          - generic [ref=e97]:
+            - generic [ref=e98]: 哔哩哔哩
+            - generic [ref=e99]: 爬虫
+            - generic [ref=e102]: 运行中
+          - paragraph [ref=e103]: B站 UP 主视频抓取
+          - generic [ref=e104]:
+            - generic [ref=e105]: 共 262 篇
+            - generic [ref=e106]: 今日 +11
+            - generic [ref=e107]: 最近采集 2026/5/2 11:32:21
+        - generic [ref=e108]:
+          - generic [ref=e109]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e111] [cursor=pointer]:
+            - img [ref=e112]
+          - button "配置 UP 主" [ref=e114] [cursor=pointer]:
+            - img [ref=e115]
+      - generic [ref=e119]:
+        - generic [ref=e120]: ▶️
+        - generic [ref=e121]:
+          - generic [ref=e122]:
+            - generic [ref=e123]: YouTube
+            - generic [ref=e124]: API
+            - generic [ref=e127]: 运行中
+          - paragraph [ref=e128]: 信息采集源
+          - generic [ref=e129]:
+            - generic [ref=e130]: 共 379 篇
+            - generic [ref=e131]: 今日 +0
+            - generic [ref=e132]: 最近采集 2026/4/29 08:35:54
+        - generic [ref=e133]:
+          - generic [ref=e134]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e136] [cursor=pointer]:
+            - img [ref=e137]
+          - button "配置频道" [ref=e139] [cursor=pointer]:
+            - img [ref=e140]
+      - generic [ref=e144]:
+        - generic [ref=e145]: 🐦
+        - generic [ref=e146]:
+          - generic [ref=e147]:
+            - generic [ref=e148]: Twitter/X
+            - generic [ref=e149]: API
+            - generic [ref=e152]: 运行中
+          - paragraph [ref=e153]: X (Twitter) 推文采集
+          - generic [ref=e154]:
+            - generic [ref=e155]:
+              - generic [ref=e157]: "@elonmusk"
+              - generic [ref=e158]: undefined
+              - button "删除" [ref=e159] [cursor=pointer]:
+                - img [ref=e160]
+            - generic [ref=e162]:
+              - generic [ref=e164]: Ray Dalio
+              - generic [ref=e165]: undefined
+              - button "删除" [ref=e166] [cursor=pointer]:
+                - img [ref=e167]
+            - button "添加子源" [ref=e169] [cursor=pointer]:
+              - img [ref=e170]
+              - text: 添加子源
+          - generic [ref=e172]:
+            - generic [ref=e173]: 共 149 篇
+            - generic [ref=e174]: 今日 +16
+            - generic [ref=e175]: 最近采集 2026/5/2 23:01:18
+        - generic [ref=e176]:
+          - generic [ref=e177]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e179] [cursor=pointer]:
+            - img [ref=e180]
+          - button "删除" [ref=e182] [cursor=pointer]:
+            - img [ref=e183]
+      - generic [ref=e186]:
+        - generic [ref=e187]: 📌
+        - generic [ref=e188]:
+          - generic [ref=e189]:
+            - generic [ref=e190]: Admin Token
+            - generic [ref=e191]: API
+            - generic [ref=e194]: 运行中
+          - paragraph [ref=e195]: 信息采集源
+          - generic [ref=e196]:
+            - generic [ref=e197]: 共 156 篇
+            - generic [ref=e198]: 今日 +7
+            - generic [ref=e199]: 最近采集 未采集
+        - generic [ref=e200]:
+          - generic [ref=e201]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e203] [cursor=pointer]:
+            - img [ref=e204]
+          - button "删除" [ref=e206] [cursor=pointer]:
+            - img [ref=e207]
+      - generic [ref=e210]:
+        - generic [ref=e211]: 📊
+        - generic [ref=e212]:
+          - generic [ref=e213]:
+            - generic [ref=e214]: 雪球热帖
+            - generic [ref=e215]: API
+            - generic [ref=e218]: 运行中
+          - paragraph [ref=e219]: 雪球热门帖子采集
+          - generic [ref=e220]:
+            - generic [ref=e221]: 共 277 篇
+            - generic [ref=e222]: 今日 +12
+            - generic [ref=e223]: 最近采集 未采集
+        - generic [ref=e224]:
+          - generic [ref=e225]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e227] [cursor=pointer]:
+            - img [ref=e228]
+          - button "查看信息" [ref=e230] [cursor=pointer]:
+            - img [ref=e231]
+      - generic [ref=e235]:
+        - generic [ref=e236]: 📈
+        - generic [ref=e237]:
+          - generic [ref=e238]:
+            - generic [ref=e239]: 集思录热帖
+            - generic [ref=e240]: API
+            - generic [ref=e243]: 运行中
+          - paragraph [ref=e244]: 集思录可转债/基金热帖
+          - generic [ref=e245]:
+            - generic [ref=e246]: 共 113 篇
+            - generic [ref=e247]: 今日 +2
+            - generic [ref=e248]: 最近采集 未采集
+        - generic [ref=e249]:
+          - generic [ref=e250]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e252] [cursor=pointer]:
+            - img [ref=e253]
+          - button "查看信息" [ref=e255] [cursor=pointer]:
+            - img [ref=e256]
+      - generic [ref=e260]:
+        - generic [ref=e261]: 🎙️
+        - generic [ref=e262]:
+          - generic [ref=e263]:
+            - generic [ref=e264]: 播客
+            - generic [ref=e265]: API
+            - generic [ref=e268]: 运行中
+          - paragraph [ref=e269]: 播客音频节目
+          - generic [ref=e270]:
+            - generic [ref=e271]: 共 58 篇
+            - generic [ref=e272]: 今日 +19
+            - generic [ref=e273]: 最近采集 2026/5/2 13:53:12
+        - generic [ref=e274]:
+          - generic [ref=e275]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e277] [cursor=pointer]:
+            - img [ref=e278]
+          - button "管理播客频道" [ref=e280] [cursor=pointer]:
+            - img [ref=e281]
+      - generic [ref=e285]:
+        - generic [ref=e286]: 📡
+        - generic [ref=e287]:
+          - generic [ref=e288]:
+            - generic [ref=e289]: RSS订阅
+            - generic [ref=e290]: Miniflux
+            - generic [ref=e293]: 运行中
+          - paragraph [ref=e294]: RSS 订阅源
+          - generic [ref=e295]:
+            - generic [ref=e296]: 共 471 篇
+            - generic [ref=e297]: 今日 +14
+            - generic [ref=e298]: 最近采集 2026/5/3 00:08:38
+        - generic [ref=e299]:
+          - generic [ref=e300]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e302] [cursor=pointer]:
+            - img [ref=e303]
+          - button "配置订阅源" [ref=e305] [cursor=pointer]:
+            - img [ref=e306]
+      - generic [ref=e310]:
+        - generic [ref=e311]: 📰
+        - generic [ref=e312]:
+          - generic [ref=e313]:
+            - generic [ref=e314]: 报刊杂志
+            - generic [ref=e315]: 导入
+            - generic [ref=e318]: 运行中
+          - paragraph [ref=e319]: 报刊杂志精选
+          - generic [ref=e320]:
+            - generic [ref=e321]: 共 316 篇
+            - generic [ref=e322]: 今日 +4
+            - generic [ref=e323]: 最近采集 未采集
+        - generic [ref=e324]:
+          - generic [ref=e325]:
+            - checkbox [checked]
+          - button "立即采集" [ref=e327] [cursor=pointer]:
+            - img [ref=e328]
+          - button "配置文件夹" [ref=e330] [cursor=pointer]:
+            - img [ref=e331]

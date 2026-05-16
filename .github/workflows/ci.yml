@@ -1,0 +1,118 @@
+# InfoHub CI — 质量门禁工作流
+#
+# 触发条件：
+#   - push 到 main 分支（忽略 docs/** 和 *.md 变更）
+#   - pull request 到 main 分支
+#
+# 步骤：
+#   1. Setup Bun 1.x 运行时
+#   2. 缓存 node_modules（基于 bun.lock 哈希）
+#   3. 安装依赖
+#   4. TypeScript 类型检查（tsc --noEmit）
+#   5. 运行测试（bun test）
+#
+# 注意事项：
+#   - 当前测试为纯函数测试，不需要数据库
+#   - 如需添加集成测试，在 services: 中启动 postgres
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  pull_request:
+    branches: [main]
+
+# 取消正在运行的同一分支/PR 的旧工作流，节省资源
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============ Job 1: 测试 ============
+  test:
+    name: test (bun)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('backend/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run tests
+        run: bun test
+
+  # ============ Job 2: 类型检查 ============
+  type-check:
+    name: type-check (tsc)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        with:
+          path: backend/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('backend/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: TypeScript type check
+        run: bun x tsc --noEmit
+
+  # ============ Job 3: 构建验证 ============
+  build:
+    name: build (docker)
+    runs-on: ubuntu-latest
+    # 仅 push 到 main 时才构建 Docker 镜像验证
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: infohub-backend:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

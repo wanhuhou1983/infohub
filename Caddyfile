@@ -1,0 +1,26 @@
+# 备案完成后，把下面三个域名改成你实际备案的域名
+# 如果只备案了主域名，删除不需要的即可
+wuflux.cn, info.wuflux.cn {
+    encode gzip
+
+    reverse_proxy /api/* backend:3001
+    reverse_proxy /js/* backend:3001
+
+    handle /* {
+        reverse_proxy backend:3001
+    }
+
+    log {
+        output stdout
+    }
+}
+
+# Local access via port 80 (no TLS, for LAN/internal use)
+:80 {
+    encode gzip
+    reverse_proxy backend:3001
+
+    log {
+        output stdout
+    }
+}
