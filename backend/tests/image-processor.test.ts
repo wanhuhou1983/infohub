@@ -39,10 +39,13 @@ import { processImages } from '../storage/image-processor.js';
 
 const TEST_DATA_DIR = join(tmpdir(), `infohub-test-${Date.now()}`);
 let origDataDir: string | undefined;
+let origObsidianPath: string | undefined;
 
 beforeAll(async () => {
   origDataDir = process.env.DATA_DIR;
+  origObsidianPath = process.env.OBSIDIAN_VAULT_PATH;
   process.env.DATA_DIR = TEST_DATA_DIR;
+  process.env.OBSIDIAN_VAULT_PATH = TEST_DATA_DIR;
   await mkdir(TEST_DATA_DIR, { recursive: true });
 });
 
@@ -58,6 +61,7 @@ afterEach(async () => {
 
 afterAll(async () => {
   process.env.DATA_DIR = origDataDir;
+  process.env.OBSIDIAN_VAULT_PATH = origObsidianPath;
   await rm(TEST_DATA_DIR, { recursive: true, force: true }).catch(() => {});
 });
 
