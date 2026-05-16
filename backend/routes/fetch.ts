@@ -15,7 +15,7 @@ import { classifyByTitle, classifyByFeed, extractTags, extractXWLBTags } from '.
 import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { readdirSync, statSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, mkdirSync, writeFileSync, rmSync, existsSync, unlinkSync } from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SPIDER_DIR = process.env.SPIDER_DIR || path.resolve(__dirname, '../../../wechat-article-spider');
@@ -362,8 +362,8 @@ function isEnglish(text: string): boolean {
 async function translateToChinese(text: string): Promise<string> {
   if (!text || text.length < 10) return text;
 
-  // 检查是否有任何翻译API可用（llama.cpp 本地部署始终可用）
-  const hasOllama = true;
+  // 检查是否有任何翻译API可用
+  const hasOllama = !!process.env.LLAMA_BASE_URL || !!process.env.OLLAMA_BASE_URL;
   const hasBaidu = getBaiduConfig() !== null;
   const hasAzure = !!process.env.AZURE_TRANSLATE_KEY;
   const hasGoogle = !!process.env.GOOGLE_TRANSLATE_KEY;
@@ -1004,12 +1004,12 @@ export function createFetchRoutes(sql: Sql): Hono {
         for await (const chunk of proc.stderr) stderr += chunk;
         await new Promise((res, rej) => { proc.on('close', res); proc.on('error', rej); });
       } catch (e: any) {
-        if (!require('fs').existsSync(outputJson)) return c.json({ ok: false, error: `爬虫失败: ${stderr.slice(0,200)}` }, 500);
+        if (!existsSync(outputJson)) return c.json({ ok: false, error: `爬虫失败: ${stderr.slice(0,200)}` }, 500);
       }
 
       let articles: any[] = [];
-      try { articles = JSON.parse(require('fs').readFileSync(outputJson, 'utf-8')); } catch { /* ignore */ }
-      try { require('fs').unlinkSync(outputJson); } catch { /* ignore */ }
+      try { articles = JSON.parse(readFileSync(outputJson, 'utf-8')); } catch { /* ignore */ }
+      try { unlinkSync(outputJson); } catch { /* ignore */ }
 
       if (!Array.isArray(articles) || articles.length === 0) return c.json({ ok: false, error: '未获取到文章' }, 404);
 
@@ -1059,9 +1059,9 @@ export function createFetchRoutes(sql: Sql): Hono {
       for await (const chunk of proc.stderr) stderr += chunk;
       await new Promise((res, rej) => { proc.on('close', res); proc.on('error', rej); });
 
-      if (!require('fs').existsSync(outputMd)) return c.json({ ok: false, error: `采集失败: ${stderr.slice(0,200)}` }, 500);
-      const content = require('fs').readFileSync(outputMd, 'utf-8');
-      try { require('fs').unlinkSync(outputMd); } catch { /* ignore */ }
+      if (!existsSync(outputMd)) return c.json({ ok: false, error: `采集失败: ${stderr.slice(0,200)}` }, 500);
+      const content = readFileSync(outputMd, 'utf-8');
+      try { unlinkSync(outputMd); } catch { /* ignore */ }
 
       const lines = content.trim().split('\n');
       const title = lines[0]?.replace(/^#\s*/, '') || `人民日报 ${date}`;
@@ -1150,7 +1150,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       const rawHtml = tdMatch[1];
       const tempJson = '/tmp/penti_' + date + '.json';
       const tempMd = '/tmp/penti_' + date + '.md';
-      require('fs').writeFileSync(tempJson, JSON.stringify({ title: targetUrl.title, html: rawHtml }), 'utf-8');
+      writeFileSync(tempJson, JSON.stringify({ title: targetUrl.title, html: rawHtml }), 'utf-8');
 
       // Convert HTML to MD
       const pentiScript = path.join(PENTI_SCRIPT_DIR, 'html_to_md.py');
@@ -1159,9 +1159,9 @@ export function createFetchRoutes(sql: Sql): Hono {
       await new Promise((res, rej) => { convProc.on('close', res); convProc.on('error', rej); });
 
       let mdContent = '';
-      try { mdContent = require('fs').readFileSync(tempMd, 'utf-8'); } catch { /* */ }
-      try { require('fs').unlinkSync(tempJson); } catch { /* */ }
-      try { require('fs').unlinkSync(tempMd); } catch { /* */ }
+      try { mdContent = readFileSync(tempMd, 'utf-8'); } catch { /* */ }
+      try { unlinkSync(tempJson); } catch { /* */ }
+      try { unlinkSync(tempMd); } catch { /* */ }
 
       if (!mdContent) return c.json({ ok: false, error: '转换失败' }, 500);
 
@@ -1194,7 +1194,11 @@ export function createFetchRoutes(sql: Sql): Hono {
     try {
       const { id } = c.req.param();
       const auth = c.req.header('authorization');
-      if (!auth || auth !== `Bearer ${process.env.ADMIN_TOKEN}`) return c.json({ error: 'Unauthorized' }, 401);
+      const expected = Buffer.from(`Bearer ${process.env.ADMIN_TOKEN ?? ''}`);
+      const actual = Buffer.from(auth ?? '');
+      if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+        return c.json({ error: 'Unauthorized' }, 401);
+      }
 
       const [article] = await sql`SELECT id, title, url, extra FROM articles WHERE id = ${Number(id)}`;
       if (!article) return c.json({ error: 'Article not found' }, 404);
