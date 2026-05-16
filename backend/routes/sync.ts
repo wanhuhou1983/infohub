@@ -10,8 +10,9 @@
  */
 
 import { Hono } from 'hono';
+import { resolve } from 'node:path';
 import type { Sql } from 'postgres';
-import { syncAllFiles } from '../file-storage.js';
+import { syncAllFiles, getObDir } from '../file-storage.js';
 import {
   scanObFiles,
   pushToPg,
@@ -266,6 +267,13 @@ export function createSyncRoutes(sql: Sql): Hono {
       const body = await c.req.json();
       if (!body || !body.path) {
         return c.json({ error: '请提供 path 参数' }, 400);
+      }
+
+      // 路径遍历防护：校验 path 须在 OB_DIR 内
+      const obDirReal = resolve(getObDir());
+      const requestedReal = resolve(body.path);
+      if (!requestedReal.startsWith(obDirReal + '/')) {
+        return c.json({ error: '路径越界' }, 400);
       }
 
       // 解析单个文件

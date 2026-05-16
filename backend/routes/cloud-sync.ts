@@ -122,10 +122,10 @@ export function createCloudSyncRoutes(sql: Sql): Hono {
     const cutoffDays = Number.isFinite(parsed) ? Math.max(1, Math.min(parsed, 365)) : 7;
     
     const artResult = await sql`
-      DELETE FROM articles WHERE fetched_at < NOW() - (${cutoffDays} || ' days')::interval
+      DELETE FROM articles WHERE fetched_at < NOW() - (interval '1 day' * ${cutoffDays})
     `;
     const logResult = await sql`
-      DELETE FROM fetch_logs WHERE started_at < NOW() - (${cutoffDays} || ' days')::interval
+      DELETE FROM fetch_logs WHERE started_at < NOW() - (interval '1 day' * ${cutoffDays})
     `;
 
     return c.json({
