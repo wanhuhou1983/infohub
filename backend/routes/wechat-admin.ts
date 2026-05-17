@@ -198,13 +198,37 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         const dbSource = sourceByGhId.get(session.username)!;
 
         try {
-          const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
-          if (!msgsResp.ok) {
-            errors.push(`${displayName}: messages API ${msgsResp.status}`);
-            continue;
+          let messages: any[] = [];
+
+          // Try HTTP API first
+          try {
+            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
+            if (msgsResp.ok) {
+              const msgsData = await msgsResp.json() as any;
+              messages = msgsData.messages || [];
+            }
+          } catch (e: any) {
+            console.warn(`[WeChat] HTTP API failed for ${ghId}:`, e.message);
           }
-          const msgsData = await msgsResp.json() as any;
-          const messages = msgsData.messages || [];
+
+          // Fallback: read from WeFlow cache file (HTTP API often misses channel messages)
+          if (messages.length === 0) {
+            try {
+              const fs = require('fs');
+              const cachePath = '/weflow-cache/session-messages.json';
+              if (fs.existsSync(cachePath)) {
+                const cacheRaw = fs.readFileSync(cachePath, 'utf-8');
+                const cache = JSON.parse(cacheRaw);
+                const cached = cache[ghId];
+                if (cached && cached.messages && Array.isArray(cached.messages)) {
+                  messages = cached.messages;
+                  console.log(`[WeChat] Cache fallback: ${ghId} => ${messages.length} messages`);
+                }
+              }
+            } catch (e: any) {
+              console.warn(`[WeChat] Cache read failed for ${ghId}:`, e.message);
+            }
+          }
 
           for (const msg of messages) {
             try {

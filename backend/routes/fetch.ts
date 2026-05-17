@@ -731,7 +731,7 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
       const publishDate = dateMatch?.[1]?.trim() || '';
       const summary = descMatch?.[1] || '';
 
-      if (title || content) {
+      if (resp.ok) {
         console.log(`[WeChat fetch] OK: ${title.slice(0, 40)}`);
         return { title, content: content || summary, author, publishDate };
       }
