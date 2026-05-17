@@ -40,7 +40,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
       if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
       const sessionsData = await sessionsResp.json() as any;
       const allSessions: any[] = (sessionsData.sessions || [])
-        .filter((s: any) => s.username?.startsWith('gh_'));
+        .filter((s: any) => s.sessionType === 'channel' && s.username?.length > 0);
 
       // 获取 DB 中已有的 WeFlow 路子源（只认 gh_id，不按名称匹配）
       const dbSources = await sql`
@@ -146,7 +146,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
       if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
       const sessionsData = await sessionsResp.json() as any;
       const allSessions: any[] = (sessionsData.sessions || [])
-        .filter((s: any) => s.username?.startsWith('gh_'));
+        .filter((s: any) => s.sessionType === 'channel' && s.username?.length > 0);
 
       // Step 2: 获取 DB 现有子源（只认 gh_id）
       const existingSources = await sql`
