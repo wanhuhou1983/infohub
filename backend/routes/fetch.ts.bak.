@@ -36,7 +36,7 @@ async function ollamaTranslate(text: string, from: string = 'en', to: string = '
     const resp = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(300000),
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model: OLLAMA_TRANSLATE_MODEL,
         messages: [
@@ -74,14 +74,14 @@ async function llamaCppTranslate(text: string, from: string = 'en', to: string =
     const resp = await fetch(`${LLAMA_BASE_URL}/v1/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(300000),
+      signal: AbortSignal.timeout(30000),
       body: JSON.stringify({
         model: LLAMA_MODEL,
         messages: [
           { role: 'system', content: 'Translate English to Chinese. Reply ONLY with the translation, no other text.' },
           { role: 'user', content: text },
         ],
-        max_tokens: 4096,
+        max_tokens: 256,
         temperature: 0.1,
       }),
     });
@@ -696,51 +696,6 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
 
 // ============ 辅助函数：调用 wechat-article-spider v2.0 (Playwright + markdownify) 抓取正文 ============
 export async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
-  // Node.js fetch fallback: try direct HTTP extraction first (no Python dependency)
-  // WeChat articles are public and can be parsed from HTML
-  try {
-    const resp = await fetch(articleUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(30000),
-    });
-    if (resp.ok) {
-      const html = await resp.text();
-      const titleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"/);
-      const authorMatch = html.match(/<span[^>]*id="js_author_name"[^>]*>([^<]+)<\/span>/);
-      const dateMatch = html.match(/<em[^>]*id="publish_time"[^>]*>([^<]+)<\/em>/);
-      const descMatch = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"/);
-
-      // Extract content: find the js_content div (WeChat's rich text container)
-      const contentMatch = html.match(/<div[^>]*id="js_content"[^>]*>([\s\S]*?)<\/div>/);
-      let content = '';
-      if (contentMatch) {
-        content = contentMatch[1]
-          .replace(/<br\s*\/?>/gi, '\n')       // <br> → newline
-          .replace(/<[^>]+>/g, '')                 // strip all HTML tags
-          .replace(/\n{3,}/g, '\n\n')           // collapse multiple newlines
-          .replace(/&nbsp;/g, ' ')                 // HTML entities
-          .replace(/&amp;/g, '&')
-          .replace(/&lt;/g, '<')
-          .replace(/&gt;/g, '>')
-          .replace(/&quot;/g, '"')
-          .trim();
-      }
-
-      const title = titleMatch?.[1]?.replace(/^\d+[：:]\s*/, '') || '';
-      const author = authorMatch?.[1]?.trim() || '';
-      const publishDate = dateMatch?.[1]?.trim() || '';
-      const summary = descMatch?.[1] || '';
-
-      if (title || content) {
-        console.log(`[WeChat fetch] OK: ${title.slice(0, 40)}`);
-        return { title, content: content || summary, author, publishDate };
-      }
-    }
-  } catch (e: any) {
-    console.warn('[WeChat fetch] HTML fallback failed, trying spider:', e.message);
-  }
-
-  // Python spider fallback
   return new Promise((resolve) => {
     const outputDir = path.join(SPIDER_DIR, 'output');
 
@@ -1169,7 +1124,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       const sourceId = 12;
 
       const listUrl = `https://www.dapenti.com/blog/blog.asp?subjectid=70&name=xilei`;
-      const resp = await fetch(listUrl, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const resp = await fetch(listUrl, { signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'Mozilla/5.0' } });
       const html = await resp.text();
 
       // 提取文章链接
@@ -1185,7 +1140,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       if (!targetUrl) return c.json({ ok: false, error: `未找到 ${date} 的喷嚏图卦` }, 404);
 
       const base = 'https://www.dapenti.com/blog/';
-      const artResp = await fetch(base + targetUrl.href, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const artResp = await fetch(base + targetUrl.href, { signal: AbortSignal.timeout(30000), headers: { 'User-Agent': 'Mozilla/5.0' } });
       const artHtml = await artResp.text();
 
       // 提取正文

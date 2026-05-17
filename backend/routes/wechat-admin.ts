@@ -213,7 +213,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
               const articleUrl = urlMatches.map(m => m[1]).find((u: string) => u && u.includes('mp.weixin.qq.com'));
               if (!articleUrl) continue;
 
-              const titleMatch = rawContent.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/);
+              const titleMatch = rawContent.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/);
               const rawTitle = titleMatch?.[1] || '';
 
               const contentHash = hashString(articleUrl);
