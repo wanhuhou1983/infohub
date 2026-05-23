@@ -222,6 +222,10 @@ export function getObSubdir(meta: ArticleMeta): string {
       const name = sanitizeDirName(meta.source_name);
       return join('twitter-updates', name);
     }
+    case 'podcast-channel': {
+      const name = sanitizeDirName(meta.source_name);
+      return join('podcast-channel', name);
+    }
     default: return st;
   }
 }

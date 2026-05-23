@@ -4,69 +4,25 @@
  * 功能：
  * - GET /api/wechat-admin/accounts  → 获取 WeFlow 公众号列表 + DB 启用状态
  * - POST /api/wechat-admin/refresh  → 同步公众号列表 + 采集已启用的文章
- * - POST /api/wechat-admin/ob-resync → 补写缺失的 OB 文件
  * - PATCH /api/wechat-admin/accounts/:id/toggle → 切换单个公众号启用/禁用
  */
 
 import { Hono } from 'hono';
 import type { Sql } from 'postgres';
-import * as fs from 'fs';
-import * as path from 'path';
 import { crawlWechatArticle } from './fetch.js';
 import { saveArticleFile, hashString, processImages } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
-
-// Cache file path (mounted from host WeFlow cache)
-const WEFLOW_CACHE_PATH = '/weflow-cache/session-messages.json';
-
-/**
- * 从 WeFlow 缓存文件读取所有 gh_id → messages 映射
- * 缓存文件是 WeFlow 的 session-messages.json，key 是 gh_xxx
- */
-function loadWeflowCache(): Record<string, { messages: any[] }> {
-  try {
-    if (!fs.existsSync(WEFLOW_CACHE_PATH)) return {};
-    const raw = fs.readFileSync(WEFLOW_CACHE_PATH, 'utf-8');
-    return JSON.parse(raw);
-  } catch (e: any) {
-    console.warn(`[WeChat] Failed to read cache: ${e.message}`);
-    return {};
-  }
-}
-
-/**
- * 从消息列表中提取文章 URL + title + createTime
- * 只处理 localType=21474836529 且含 mp.weixin.qq.com URL 的消息
- */
-function extractArticleUrls(messages: any[]): Array<{ url: string; title: string; createTime: number }> {
-  const articles: Array<{ url: string; title: string; createTime: number }> = [];
-  for (const msg of messages) {
-    const raw = msg.rawContent || '';
-    // Must be an article-type message (not welcome text, etc.)
-    if (msg.localType !== 21474836529 && msg.localType !== undefined) continue;
-    
-    const urlMatches = [...raw.matchAll(/<url><!\[CDATA\[(.*?)\]\]><\/url>/g)];
-    const articleUrl = urlMatches.map(m => m[1]).find((u: string) => u && u.includes('mp.weixin.qq.com'));
-    if (!articleUrl) continue;
-
-    const titleMatch = raw.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/);
-    const title = titleMatch?.[1] || '';
-    articles.push({ url: articleUrl, title, createTime: msg.createTime || 0 });
-  }
-  // Deduplicate by URL
-  const seen = new Set<string>();
-  return articles.filter(a => {
-    if (seen.has(a.url)) return false;
-    seen.add(a.url);
-    return true;
-  });
-}
 
 export function createWechatAdminRoutes(sql: Sql): Hono {
   const router = new Hono();
 
   // ============ 获取所有公众号列表（WeFlow + DB 状态合并） ============
 
+  /**
+   * 从 WeFlow 获取所有会话列表，与数据库中的公众号子源合并，
+   * 返回每个账号的 gh_id、displayName、当前启用状态。
+   * 如果 WeFlow 有新账号但 DB 中没有，自动创建为禁用状态。
+   */
   router.get('/accounts', async (c) => {
     try {
       const [wechatSource] = await sql`SELECT id, config FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
@@ -79,12 +35,14 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
 
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
 
+      // 获取 WeFlow 会话列表
       const sessionsResp = await fetch(`${weflowUrl}/api/v1/sessions?limit=500`, { headers });
       if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
       const sessionsData = await sessionsResp.json() as any;
       const allSessions: any[] = (sessionsData.sessions || [])
         .filter((s: any) => s.sessionType === 'channel' && s.username?.length > 0);
 
+      // 获取 DB 中已有的 WeFlow 路子源（只认 gh_id，不按名称匹配）
       const dbSources = await sql`
         SELECT id, name, enabled, config->>'gh_id' AS gh_id
         FROM sources
@@ -95,6 +53,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         if (s.gh_id) dbByGhId.set(s.gh_id, s);
       }
 
+      // 合并：确保 WeFlow 每个账号都在 DB 中有记录，只按 gh_id 匹配
       let newlyCreated = 0;
       for (const session of allSessions) {
         const existing = dbByGhId.get(session.username);
@@ -107,6 +66,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         }
       }
 
+      // 重新读取（包含新创建的），并获取每个公众号的最新文章时间
       const updatedSources = await sql`
         SELECT s.id, s.name, s.enabled, s.config->>'gh_id' AS gh_id,
                (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_article_at
@@ -118,6 +78,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         if (s.gh_id) updatedByGhId.set(s.gh_id, s);
       }
 
+      // 组装响应（只按 gh_id 匹配），按最新文章时间排序
       let accounts = allSessions.map((s: any) => {
         const db = updatedByGhId.get(s.username);
         return {
@@ -129,6 +90,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         };
       });
 
+      // 按最新文章时间降序排序（最新的在前）
       accounts.sort((a, b) => {
         if (!a.latest_article_at) return 1;
         if (!b.latest_article_at) return -1;
@@ -162,9 +124,8 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
   // ============ 刷新公众号列表 + 采集已启用的文章 ============
 
   /**
-   * 改进点：
-   * 1. 始终合并 HTTP API + Cache 数据（按 URL 去重），不再仅 API=0 时 fallback
-   * 2. 采集完成后自动补写缺失的 OB 文件（对已入库但无 OB 文件的文章）
+   * 1. 从 WeFlow 同步最新公众号列表，新账号自动创建为禁用状态
+   * 2. 对已启用的公众号采集最新文章
    */
   router.post('/refresh', async (c) => {
     const startMs = Date.now();
@@ -226,14 +187,10 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         return !!db?.enabled;
       });
 
-      // ======== Step 6: 采集文章（API + Cache 合并） ========
+      // Step 6: 逐个已启用的公众号采集文章
       let totalFetched = 0;
       let inserted = 0;
       const errors: string[] = [];
-
-      // Pre-load cache once for all accounts (avoid repeated file reads)
-      const weflowCache = loadWeflowCache();
-      console.log(`[WeChat] Loaded cache: ${Object.keys(weflowCache).filter(k => k.startsWith('gh_')).length} gh_ids`);
 
       for (const session of enabledAccounts) {
         const ghId = session.username;
@@ -241,62 +198,64 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         const dbSource = sourceByGhId.get(session.username)!;
 
         try {
-          // --- Always try BOTH API and Cache, then merge by URL ---
+          let messages: any[] = [];
 
-          // 6a: Try HTTP API
-          let apiMessages: any[] = [];
+          // Try HTTP API first
           try {
             const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
             if (msgsResp.ok) {
               const msgsData = await msgsResp.json() as any;
-              apiMessages = msgsData.messages || [];
+              messages = msgsData.messages || [];
             }
           } catch (e: any) {
-            console.warn(`[WeChat] HTTP API failed for ${ghId}: ${e.message}`);
+            console.warn(`[WeChat] HTTP API failed for ${ghId}:`, e.message);
           }
 
-          // 6b: Always read from cache too
-          let cacheMessages: any[] = [];
-          const cached = weflowCache[ghId];
-          if (cached?.messages && Array.isArray(cached.messages)) {
-            cacheMessages = cached.messages;
-          }
-
-          // 6c: Extract article URLs from both sources and merge (deduplicate by URL)
-          const apiArticles = extractArticleUrls(apiMessages);
-          const cacheArticles = extractArticleUrls(cacheMessages);
-          
-          const allArticles = new Map<string, { url: string; title: string; createTime: number }>();
-          for (const a of cacheArticles) allArticles.set(a.url, a);
-          for (const a of apiArticles) {
-            if (!allArticles.has(a.url)) allArticles.set(a.url, a);
-          }
-
-          if (cacheArticles.length > 0) {
-            console.log(`[WeChat] ${displayName} (${ghId}): API=${apiArticles.length}, Cache=${cacheArticles.length}, Merged=${allArticles.size}`);
-          }
-
-          // 6d: Process merged articles
-          for (const article of allArticles.values()) {
+          // Fallback: read from WeFlow cache file (HTTP API often misses channel messages)
+          if (messages.length === 0) {
             try {
-              const { url: articleUrl, title: rawTitle, createTime } = article;
+              const fs = require('fs');
+              const cachePath = '/weflow-cache/session-messages.json';
+              if (fs.existsSync(cachePath)) {
+                const cacheRaw = fs.readFileSync(cachePath, 'utf-8');
+                const cache = JSON.parse(cacheRaw);
+                const cached = cache[ghId];
+                if (cached && cached.messages && Array.isArray(cached.messages)) {
+                  messages = cached.messages;
+                  console.log(`[WeChat] Cache fallback: ${ghId} => ${messages.length} messages`);
+                }
+              }
+            } catch (e: any) {
+              console.warn(`[WeChat] Cache read failed for ${ghId}:`, e.message);
+            }
+          }
+
+          for (const msg of messages) {
+            try {
+              const rawContent = msg.rawContent || '';
+              const urlMatches = [...rawContent.matchAll(/<url><!\[CDATA\[(.*?)\]\]><\/url>/g)];
+              const articleUrl = urlMatches.map(m => m[1]).find((u: string) => u && u.includes('mp.weixin.qq.com'));
+              if (!articleUrl) continue;
+
+              const titleMatch = rawContent.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/);
+              const rawTitle = titleMatch?.[1] || '';
+
               const contentHash = hashString(articleUrl);
 
-              // Skip if already in DB
               const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
               if (existing) {
                 totalFetched++;
                 continue;
               }
 
-              console.log(`🕷️ 抓取: [${displayName}] ${rawTitle.slice(0, 40) || articleUrl}`);
-              const crawledArticle = await crawlWechatArticle(articleUrl);
+              console.log(`🕷️ 抓取: [${displayName}] ${rawTitle || articleUrl}`);
+              const article = await crawlWechatArticle(articleUrl);
 
-              const title = rawTitle || (crawledArticle?.title && crawledArticle.title !== '无标题' ? crawledArticle.title : '') || displayName;
-              const publishedAt = createTime ? new Date(createTime * 1000).toISOString() : new Date().toISOString();
+              const title = rawTitle || (article?.title && article.title !== '无标题' ? article.title : '') || displayName;
+              const publishedAt = msg.createTime ? new Date(msg.createTime * 1000).toISOString() : new Date().toISOString();
               const author = displayName;
 
-              let content = crawledArticle?.content || `${title}\n\n来源：${displayName}\n链接：${articleUrl}`;
+              let content = article?.content || `${title}\n\n来源：${displayName}\n链接：${articleUrl}`;
               try { content = await processImages(content, 'wechat'); } catch (e: any) { /* ignore */ }
 
               const category = classifyByFeed(displayName);
@@ -330,66 +289,12 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         }
       }
 
-      // ======== Step 7: OB 补写（对已入库但缺少 OB 文件的文章） ========
-      let obResynced = 0;
-      try {
-        const OB_DIR = process.env.OB_DIR || (fs.existsSync('/obsidian') ? '/obsidian' : '');
-        if (OB_DIR) {
-          // Find wechat articles in DB that don't have corresponding OB files
-          const unsynced = await sql`
-            SELECT a.id, a.title, a.url, a.published_at, a.content, a.category, a.tags, a.author,
-                   s.name as source_name
-            FROM articles a
-            JOIN sources s ON a.source_id = s.id
-            WHERE s.type = 'wechat' AND a.published_at >= NOW() - INTERVAL '30 days'
-            ORDER BY a.published_at DESC
-          `;
-
-          for (const art of unsynced) {
-            // Check if OB file exists using the same logic as saveArticleFile
-            const subDir = '微信公众号';
-            const dateStr = new Date(art.published_at).toISOString().slice(0, 10).replace(/-/g, '');
-            const safeTitle = (art.title || 'untitled').slice(0, 60).replace(/[\/\\:*?"<>|]/g, '_').trim();
-            const fileName = `${dateStr}-${safeTitle}.md`;
-            const dirPath = path.join(OB_DIR, subDir, art.source_name || '未分类');
-            const filePath = path.join(dirPath, fileName);
-
-            if (!fs.existsSync(filePath)) {
-              // Write the OB file
-              fs.mkdirSync(dirPath, { recursive: true });
-              const frontmatter = [
-                '---',
-                `id: ${art.id}`,
-                `title: "${(art.title || '').replace(/"/g, '\\"')}"`,
-                `source: 微信公众号`,
-                `author: "${(art.author || '').replace(/"/g, '\\"')}"`,
-                `url: ${art.url || ''}`,
-                `published: ${art.published_at}`,
-                `category: ${art.category || ''}`,
-                `tags: ${art.tags || ''}`,
-                `date: ${new Date(art.published_at).toISOString().slice(0, 10)}`,
-                '---',
-                '',
-                art.content || '',
-              ].join('\n');
-              fs.writeFileSync(filePath, frontmatter, 'utf-8');
-              obResynced++;
-            }
-          }
-          if (obResynced > 0) {
-            console.log(`[WeChat] OB resync: wrote ${obResynced} missing files`);
-          }
-        }
-      } catch (e: any) {
-        console.warn(`[WeChat] OB resync failed: ${e.message}`);
-      }
-
       await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${wechatSource.id}`;
       const durationMs = Date.now() - startMs;
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
         VALUES (${wechatSource.id}, '公众号管理刷新', 'success', ${inserted},
-          ${`同步 ${allSessions.length} 个公众号（新增 ${newlyAdded} 个），已启用 ${enabledAccounts.length} 个，获取 ${totalFetched} 条，入库 ${inserted} 条，OB补写 ${obResynced} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
+          ${`同步 ${allSessions.length} 个公众号（新增 ${newlyAdded} 个），已启用 ${enabledAccounts.length} 个，获取 ${totalFetched} 条，入库 ${inserted} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
           ${durationMs})
       `;
 
@@ -400,7 +305,6 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         totalAccounts: allSessions.length,
         fetched: totalFetched,
         inserted,
-        obResynced,
         errors: errors.length ? errors : undefined,
       });
     } catch (e: any) {

@@ -21,7 +21,7 @@ import { fail } from '../shared/response.js';
 import { processImages } from '../storage/image-processor.js';
 import { getObDir, hashString } from '../file-storage.js';
 
-const CLIPPINGS_DIR = '/Users/wuhuahui/Documents/infohub/Clippings';
+const CLIPPINGS_DIR = process.env.CLIPPINGS_DIR || '/obsidian/Clippings';
 
 // ============ 辅助函数 ============
 

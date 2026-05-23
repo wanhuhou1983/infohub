@@ -889,8 +889,8 @@ export function createFetchRoutes(sql: Sql): Hono {
   router.post('/xwlb', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({} as any));
-      const date = body?.date || new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const sourceId = 26;
+      const date = body?.date || new Date().toISOString().slice(0, 10).replace(/-/g, ''); const pubDate = date.slice(0,4)+'-'+date.slice(4,6)+'-'+date.slice(6,8);
+      const sourceId = 1;
       console.log(`[xwlb] 获取 ${date} 新闻联播...`);
 
       // 1. 尝试获取 govopendata 全文
@@ -901,7 +901,7 @@ export function createFetchRoutes(sql: Sql): Hono {
       try {
         const resp = await fetch(`https://tv.cctv.com/lm/xwlb/day/${date}.shtml`, { signal: AbortSignal.timeout(15000) });
         listHtml = await resp.text();
-        listData = parseXWLBListHtml(listHtml);
+        listData = parseXWLBListHtml(listHtml, date);
       } catch (e: any) { console.error(`[xwlb] 列表获取失败: ${e.message}`); }
 
       const title = fullData?.title || `新闻联播 ${date.slice(0,4)}-${date.slice(4,6)}-${date.slice(6,8)}`;
@@ -909,9 +909,9 @@ export function createFetchRoutes(sql: Sql): Hono {
       if (!content) return c.json({ ok: false, error: '获取失败' }, 500);
 
       const hash = hashString('xwlb:' + date);
-      const inserted = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${content},${(content||"").slice(0,150)},'https://tv.cctv.com/lm/xwlb/',${date},'时政',${['新闻联播',date.slice(0,6)]},${hash},NOW(),'央视','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+      const inserted = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${content},${(content||"").slice(0,150)},'https://tv.cctv.com/lm/xwlb/',${pubDate},'时政',${['新闻联播',date.slice(0,6)]},${hash},NOW(),'央视','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
       if (inserted.length > 0) {
-        await saveArticleFile(inserted[0].id, content, { id:inserted[0].id, title, source_type:'rss', source_name:'新闻联播', url:'https://tv.cctv.com/lm/xwlb/', published_at:date, category:'时政', tags:['新闻联播',date.slice(0,6)], author:'央视', is_read:false, is_starred:false });
+        await saveArticleFile(inserted[0].id, content, { id:inserted[0].id, title, source_type:'xwlb', source_name:'新闻联播', url:'https://tv.cctv.com/lm/xwlb/', published_at:pubDate, category:'时政', tags:['新闻联播',date.slice(0,6)], author:'央视', is_read:false, is_starred:false });
         return c.json({ ok:true, fetched:listData.length, inserted:1, date });
       }
       return c.json({ ok:true, fetched:listData.length, inserted:0, date });
@@ -1091,9 +1091,9 @@ export function createFetchRoutes(sql: Sql): Hono {
   router.post('/rmrb', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({} as any));
-      const date = body?.date || new Date().toISOString().slice(0,10);
+      const date = body?.date || new Date().toISOString().slice(0,10); const pubDate = (body?.date || new Date().toISOString().slice(0,10)).replace(/(\d{4})-(\d{2})-(\d{2})/g, '$1-$2-$3').replace(/(\d{4})(\d{2})(\d{2})/g, '$1-$2-$3');
       const full = body?.full !== false;
-      const sourceId = 1957;
+      const sourceId = 1264;
 
       const rmrbDir = process.env.RMRB_DIR || path.resolve(__dirname, '../../skills/rmrb-daily');
       const python = 'python3';
@@ -1113,11 +1113,11 @@ export function createFetchRoutes(sql: Sql): Hono {
       const bodyContent = lines.slice(1).join('\n').trim();
       const contentHash = hashString('rmrb:' + date.replace(/-/g,''));
 
-      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${bodyContent},${bodyContent.slice(0,150)},${'https://paper.people.com.cn/rmrb/'},${date.replace(/-/g,'')},'时政',${['人民日报',date.slice(0,7)]},${contentHash},NOW(),'人民日报','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${bodyContent},${bodyContent.slice(0,150)},${'https://paper.people.com.cn/rmrb/'},${pubDate},'时政',${['人民日报',date.slice(0,7)]},${contentHash},NOW(),'人民日报','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
       let inserted = 0;
       if (rows.length > 0) {
         inserted = 1;
-        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'rss', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:date.replace(/-/g,''), category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
+        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'rmrb', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:pubDate, category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
       }
       const cnt = bodyContent.split('###').filter(l => l.trim()).length;
       return c.json({ ok: true, fetched: cnt, inserted, date });
@@ -1165,19 +1165,20 @@ export function createFetchRoutes(sql: Sql): Hono {
   router.post('/penti', async (c) => {
     try {
       const body = await c.req.json().catch(() => ({} as any));
-      const date = body?.date || new Date().toISOString().slice(0,10).replace(/-/g, '');
+      const date = body?.date || new Date().toISOString().slice(0,10).replace(/-/g, ''); const pubDate = date.slice(0,4)+'-'+date.slice(4,6)+'-'+date.slice(6,8);
       const sourceId = 12;
 
       const listUrl = `https://www.dapenti.com/blog/blog.asp?subjectid=70&name=xilei`;
       const resp = await fetch(listUrl, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
-      const html = await resp.text();
+      const buf = await resp.arrayBuffer();
+      const html = new TextDecoder('gbk').decode(buf);
 
       // 提取文章链接
-      const linkPattern = /<a\s+href="[^"]*blog\.asp\?name=xilei&subjectid=70[^"]*"[^>]*>([^<]+)<\/a>/gi;
+      const linkPattern = /<a\s+href=[^>]*more\.asp\?name=xilei&id=\d+[^>]*>([^<]+)<\/a>/gi;
       const links: Array<{ title: string; href: string }> = [];
       let match;
       while ((match = linkPattern.exec(html)) !== null) {
-        const hrefMatch = match[0].match(/href="([^"]+)"/);
+        const hrefMatch = match[0].match(/href=([^\s>]+)/);
         if (hrefMatch) links.push({ title: match[1].trim(), href: hrefMatch[1] });
       }
       const targetUrl = links.find(l => l.title.includes(date)) || links.find(l => l.title.includes(date.slice(4,8)));
@@ -1186,13 +1187,14 @@ export function createFetchRoutes(sql: Sql): Hono {
 
       const base = 'https://www.dapenti.com/blog/';
       const artResp = await fetch(base + targetUrl.href, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
-      const artHtml = await artResp.text();
+      const artBuf = await artResp.arrayBuffer();
+      const artHtml = new TextDecoder('gbk').decode(artBuf);
 
       // 提取正文
-      const tdMatch = artHtml.match(/<td[^>]*class="oblog_t_2"[^>]*>([\s\S]*?)<\/td>/i);
-      if (!tdMatch) return c.json({ ok: false, error: '未找到正文' }, 500);
-
-      const rawHtml = tdMatch[1];
+      // Use proper nesting-aware extraction: find opening tag, match with last </td>
+      const tdOpen = artHtml.match(/<td[^>]*class="oblog_t_2"[^>]*>/i);
+      if (!tdOpen) return c.json({ ok: false, error: '未找到正文' }, 500);
+      const rawHtml = artHtml.substring(tdOpen.index! + tdOpen[0].length, artHtml.lastIndexOf('</td>'));
       const tempJson = '/tmp/penti_' + date + '.json';
       const tempMd = '/tmp/penti_' + date + '.md';
       writeFileSync(tempJson, JSON.stringify({ title: targetUrl.title, html: rawHtml }), 'utf-8');
@@ -1212,15 +1214,17 @@ export function createFetchRoutes(sql: Sql): Hono {
 
       const title = targetUrl.title;
       const contentHash = hashString('penti:' + date);
-      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${mdContent},${mdContent.slice(0,150)},${base + targetUrl.href},${date},'社会',${['喷嚏图卦',date.slice(0,6)]},${contentHash},NOW(),'喷嚏图卦','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${mdContent},${mdContent.slice(0,150)},${base + targetUrl.href},${pubDate},'社会',${['喷嚏图卦',date.slice(0,6)]},${contentHash},NOW(),'喷嚏图卦','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
 
       let inserted = false;
       if (rows.length > 0) {
         inserted = true;
-        await saveArticleFile(rows[0].id, mdContent, { id:rows[0].id, title, source_type:'rss', source_name:'喷嚏图卦', url:base + targetUrl.href, published_at:date, category:'社会', tags:['喷嚏图卦',date.slice(0,6)], author:'喷嚏图卦', is_read:false, is_starred:false });
+        await saveArticleFile(rows[0].id, mdContent, { id:rows[0].id, title, source_type:'magazine', source_name:'喷嚏图卦', url:base + targetUrl.href, published_at:pubDate, category:'社会', tags:['喷嚏图卦',date.slice(0,6)], author:'喷嚏图卦', is_read:false, is_starred:false });
       }
       return c.json({ ok: true, date, inserted });
-    } catch (e: any) { return c.json({ ok: false, error: e.message }, 500); }
+    } catch (e: any) {
+return c.json({ ok: false, error: e.message }, 500);
+    }
   });
 
   // ============ 播客转录 ============
