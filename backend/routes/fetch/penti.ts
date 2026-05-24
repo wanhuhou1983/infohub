@@ -69,7 +69,7 @@ export function createPentiRoutes(sql: Sql): Hono {
 
       if (!mdContent) return c.json({ ok: false, error: '转换失败' }, 500);
 
-      const title = targetUrl.title;
+      const title = targetUrl.title.replace(/[【】]/g, '');
       const contentHash = hashString('penti:' + date);
       const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${mdContent},${mdContent.slice(0,150)},${base + targetUrl.href},${pubDate},'社会',${['喷嚏图卦',date.slice(0,6)]},${contentHash},NOW(),'喷嚏图卦','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
 

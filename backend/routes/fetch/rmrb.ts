@@ -38,7 +38,8 @@ export function createRmrbRoutes(sql: Sql): Hono {
       try { unlinkSync(outputMd); } catch { /* ignore */ }
 
       const lines = content.trim().split('\n');
-      const title = lines[0]?.replace(/^#\s*/, '') || `人民日报 ${date}`;
+      const dateCompact = date.replace(/-/g, '');
+      const title = `${dateCompact}-人民日报要闻汇总`;
       const bodyContent = lines.slice(1).join('\n').trim();
       const contentHash = hashString('rmrb:' + date.replace(/-/g,''));
 

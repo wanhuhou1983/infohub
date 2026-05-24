@@ -56,7 +56,7 @@ async function fetchArticleContent(url: string): Promise<string | null> {
  */
 async function fetchXWLBFull(date: string): Promise<{ title: string; content: string; articleCount: number }> {
   const pubDate = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
-  const title = `新闻联播 ${pubDate}`;
+  const title = `${date}-新闻联播`;
 
   // Step 1: Get article list from day page
   let listData: Array<{ title: string; link?: string }> = [];
