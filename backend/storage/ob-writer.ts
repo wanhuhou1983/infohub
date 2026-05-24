@@ -201,20 +201,9 @@ export function getObSubdir(meta: ArticleMeta): string {
       const name = sanitizeDirName(meta.source_name);
       return join('RSS订阅', name);
     }
-    case 'bilibili-updates': {
-      const name = sanitizeDirName(meta.source_name);
-      return join('哔哩哩哔', '更新', name);
-    }
-    case 'bilibili-watch-later': {
-      // source_name 固定为 '稍后再看'，实际 UP 主在 author 字段
-      const name = meta.author ? sanitizeDirName(meta.author) : '未分类';
-      return join('哔哩哩哔', '稍后再看', name);
-    }
-    case 'bilibili-favorites': {
-      // source_name 固定为 '收藏'，实际 UP 主在 author 字段
-      const name = meta.author ? sanitizeDirName(meta.author) : '未分类';
-      return join('哔哩哩哔', '收藏', name);
-    }
+    case 'bilibili-updates': return '哔哩哩哔';
+    case 'bilibili-watch-later': return '哔哩哩哔';
+    case 'bilibili-favorites': return '哔哩哩哔';
     case 'youtube-updates': return 'YouTube/更新';
     case 'youtube-watch-later': return 'YouTube/稍后再看';
     case 'youtube-favorites': return 'YouTube/收藏';
