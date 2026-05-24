@@ -246,7 +246,7 @@ describe('getObSubdir', () => {
   });
 
   test('bilibili-updates → 哔哩哩哔/更新/{sanitized}', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'bilibili-updates', source_name: '某UP主' }))).toBe('哔哩哩哔/更新');
+    expect(getObSubdir(makeMeta({ source_type: 'bilibili-updates', source_name: '某UP主' }))).toBe('哔哩哩哔/更新/某UP主');
   });
 
   test('bilibili-watch-later 有 author → 哔哩哩哔/稍后再看/{author}', () => {
