@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url';
 
 import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
-import { createFetchRoutes } from './routes/fetch.js';
+import { createFetchRoutes } from './routes/fetch/index.js';
 import { createSyncRoutes } from './routes/sync.js';
 import { createWechatAdminRoutes } from './routes/wechat-admin.js';
 import { createBilibiliAdminRoutes } from './routes/bilibili-admin.js';

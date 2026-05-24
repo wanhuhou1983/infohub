@@ -12,7 +12,7 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import * as fs from 'fs';
 import * as path from 'path';
-import { crawlWechatArticle } from './fetch.js';
+import { crawlWechatArticle } from '../services/crawler.js';
 import { saveArticleFile, hashString, processImages } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
 
