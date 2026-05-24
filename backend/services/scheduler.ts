@@ -133,7 +133,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
       SELECT a.title, s.name AS source_name
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND s.type = 'wechat'
       ORDER BY s.name, a.published_at
     `;
@@ -148,7 +148,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
       SELECT a.title, a.author
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND LOWER(s.type) LIKE 'bilibili%'
     `;
     for (const r of biliRows) {
@@ -160,7 +160,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
       SELECT a.title, s.name AS channel
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND s.type = 'podcast-channel'
     `;
     for (const r of podRows) {
@@ -172,7 +172,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
       SELECT a.title, a.author AS channel
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND LOWER(s.type) LIKE 'youtube%'
     `;
     for (const r of ytRows) {
@@ -183,7 +183,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
     const twRows = await sql`
       SELECT COUNT(*)::int AS cnt FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND LOWER(s.type) LIKE 'twitter%'
     `;
     twitter = twRows[0]?.cnt || 0;
@@ -192,7 +192,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
     const rssRows = await sql`
       SELECT COUNT(*)::int AS cnt FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
         AND LOWER(s.type) IN ('rss', 'podcast-channel')
     `;
     rss = rssRows[0]?.cnt || 0;
@@ -215,14 +215,14 @@ async function detectAnomalies(sql: Sql): Promise<string[]> {
       SELECT s.name, COUNT(*)::int AS cnt
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${today}
+      WHERE a.fetched_at::date = ${today}
       GROUP BY s.name
     `;
     const yesterdayCounts = await sql`
       SELECT s.name, COUNT(*)::int AS cnt
       FROM articles a
       JOIN sources s ON a.source_id = s.id
-      WHERE a.published_at::date = ${yesterday}
+      WHERE a.fetched_at::date = ${yesterday}
       GROUP BY s.name
     `;
 
@@ -394,9 +394,9 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
     let todayTotal = 0;
     let yesterdayTotal = 0;
     try {
-      const t = await sql`SELECT COUNT(*)::int AS cnt FROM articles WHERE published_at::date = ${today}`;
+      const t = await sql`SELECT COUNT(*)::int AS cnt FROM articles WHERE fetched_at::date = ${today}`;
       todayTotal = t[0].cnt;
-      const y = await sql`SELECT COUNT(*)::int AS cnt FROM articles WHERE published_at::date = ${yesterday}`;
+      const y = await sql`SELECT COUNT(*)::int AS cnt FROM articles WHERE fetched_at::date = ${yesterday}`;
       yesterdayTotal = y[0].cnt;
     } catch { /* ignore */ }
 
