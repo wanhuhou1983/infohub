@@ -246,22 +246,22 @@ describe('getObSubdir', () => {
   });
 
   test('bilibili-updates → 哔哩哩哔/更新/{sanitized}', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'bilibili-updates', source_name: '某UP主' }))).toBe('哔哩哩哔');
+    expect(getObSubdir(makeMeta({ source_type: 'bilibili-updates', source_name: '某UP主' }))).toBe('哔哩哩哔/更新');
   });
 
   test('bilibili-watch-later 有 author → 哔哩哩哔/稍后再看/{author}', () => {
     const meta = makeMeta({ source_type: 'bilibili-watch-later', source_name: '稍后再看', author: 'UP主A' });
-    expect(getObSubdir(meta)).toBe('哔哩哩哔');
+    expect(getObSubdir(meta)).toBe('哔哩哩哔/稍后再看');
   });
 
   test('bilibili-watch-later 无 author → 哔哩哩哔/稍后再看/未分类', () => {
     const meta = makeMeta({ source_type: 'bilibili-watch-later', source_name: '稍后再看', author: null });
-    expect(getObSubdir(meta)).toBe('哔哩哩哔');
+    expect(getObSubdir(meta)).toBe('哔哩哩哔/稍后再看');
   });
 
   test('bilibili-favorites → 哔哩哩哔/收藏/{author}', () => {
     const meta = makeMeta({ source_type: 'bilibili-favorites', source_name: '收藏', author: 'UP主B' });
-    expect(getObSubdir(meta)).toBe('哔哩哩哔');
+    expect(getObSubdir(meta)).toBe('哔哩哩哔/收藏');
   });
 
   test('twitter-updates → twitter-updates/{source_name}', () => {
