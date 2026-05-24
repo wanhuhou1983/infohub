@@ -622,6 +622,11 @@ function buildReport(
 
 // ============ Main Entry Point ============
 export async function runDailyFetch(sql: Sql): Promise<string> {
+  // Auto-reset stuck flag after 10 minutes
+  const timeout = setTimeout(() => {
+    console.error('[scheduler] 10 minute timeout reached, force-resetting');
+    _isRunning = false;
+  }, 600_000);
   if (_isRunning) {
     throw new Error('Another fetch is already running');
   }
@@ -685,6 +690,7 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
     console.error('[scheduler] Daily fetch error:', e.message);
     throw e;
   } finally {
+    clearTimeout(timeout);
     _isRunning = false;
   }
 }
@@ -728,6 +734,24 @@ export function createSchedulerRoutes(sql: Sql): Hono {
       lastRunStatus: _lastRunStatus,
       lastRunError: _lastRunError,
     });
+  });
+
+  // POST /reset — force reset stuck scheduler (admin only)
+  router.post('/reset', async (c) => {
+    const adminToken = process.env.ADMIN_TOKEN || '';
+    if (adminToken) {
+      const authHeader = c.req.header('Authorization');
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return c.json({ error: '缺少 Authorization 头' }, 401);
+      }
+      const token = authHeader.slice(7);
+      if (token !== adminToken) {
+        return c.json({ error: '管理员 Token 无效' }, 403);
+      }
+    }
+    _isRunning = false;
+    _lastRunStatus = 'reset';
+    return c.json({ ok: true, message: 'Scheduler state reset' });
   });
 
   return router;
