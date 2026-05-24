@@ -58,14 +58,26 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
   const now = new Date();
   const todayCompact = now.toISOString().slice(0, 10).replace(/-/g, '');
   const todayDash = now.toISOString().slice(0, 10);
+  const yesterdayCompact = new Date(Date.now() - 86400000).toISOString().slice(0, 10).replace(/-/g, '');
+  const yesterdayDash = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
   const fetches: Promise<FetchResult>[] = [
-    fetchApi('/fetch/rmrb', { date: todayDash })
-      .then(r => ({ source: '人民日报', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error })),
-    fetchApi('/fetch/xwlb', { date: todayCompact })
-      .then(r => ({ source: '新闻联播', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error })),
-    fetchApi('/fetch/penti', { date: todayCompact })
-      .then(r => ({ source: '喷嚏图卦', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
+    // 报刊杂志: try today, then fallback to yesterday if 0 inserted
+    (async () => {
+      let r = await fetchApi('/fetch/rmrb', { date: todayDash });
+      if (!r.inserted) r = await fetchApi('/fetch/rmrb', { date: yesterdayDash });
+      return { source: '人民日报', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
+    })(),
+    (async () => {
+      let r = await fetchApi('/fetch/xwlb', { date: todayCompact });
+      if (!r.inserted) r = await fetchApi('/fetch/xwlb', { date: yesterdayCompact });
+      return { source: '新闻联播', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
+    })(),
+    (async () => {
+      let r = await fetchApi('/fetch/penti', { date: todayCompact });
+      if (!r.inserted) r = await fetchApi('/fetch/penti', { date: yesterdayCompact });
+      return { source: '喷嚏图卦', success: !!r.ok, inserted: r.inserted || 0, error: r.error };
+    })(),
     fetchApi('/wechat-admin/refresh')
       .then(r => ({ source: '公众号', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
     fetchApi('/bilibili-admin/refresh')
