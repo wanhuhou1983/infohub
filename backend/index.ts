@@ -39,6 +39,7 @@ import { createAiRoutes } from './routes/ai.js';
 import { createPodcastTranscribeRoutes } from './routes/podcast-transcribe.js';
 import { createTwitterAdminRoutes } from './routes/twitter-admin.js';
 import { createCaixinRoutes } from './routes/caixin.js';
+import { createSchedulerRoutes } from './services/scheduler.js';
 import { invalidateEnvCache, getImagesDir, getObDir } from './file-storage.js';
 import { fail } from './shared/response.js';
 
@@ -349,6 +350,7 @@ app.use('/api/podcast/*', writeAuthGuard());
 app.use('/api/twitter-admin/*', writeAuthGuard());
 app.use('/api/wechat-group-admin/*', writeAuthGuard());
 app.use('/api/ai/*', writeAuthGuard());
+app.use('/api/scheduler/*', writeAuthGuard());
 
 // 云端模式：采集/管理/OB 相关路由全部拦截
 app.use('/api/fetch/*', cloudGuard());
@@ -360,6 +362,7 @@ app.use('/api/youtube-admin/*', cloudGuard());
 app.use('/api/podcast-admin/*', cloudGuard());
 app.use('/api/twitter-admin/*', cloudGuard());
 app.use('/api/caixin/*', cloudGuard());
+app.use('/api/scheduler/*', cloudGuard());
 app.use('/api/auth/google/*', cloudGuard());
 // sync 写操作：云端只保留 GET（统计/日志），写操作拦截
 app.use('/api/sync/files', cloudGuard());
@@ -382,6 +385,7 @@ app.route('/api/twitter-admin', createTwitterAdminRoutes(sql));
 app.route('/api/auth/google', createGoogleAuthRoutes(sql));
 app.route('/api/ai', createAiRoutes(sql));
 app.route('/api/caixin', createCaixinRoutes(sql, requireAdminAuth));
+app.route('/api/scheduler', createSchedulerRoutes(sql));
 
 // ============ 云端模式：数据同步接收端点 ============
 
