@@ -3,6 +3,9 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { translateToChinese, isEnglish, createConcurrencyPool } from './translate.js';
+import { whisperWindowsTranscribe } from './transcribe.js';
+import { saveArticleFile } from '../file-storage.js';
 
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
 const OB_DIR = process.env.OB_DIR || '/obsidian';
@@ -51,6 +54,12 @@ interface SourceTitles {
   youtube: Array<{ title: string; channel: string }>;
   twitter: number;
   rss: number;
+}
+
+interface PostProcessStats {
+  translated: number;
+  transcribed: number;
+  subtitles: number;
 }
 
 // ============ Phase 1: Parallel Fetch ============
@@ -128,7 +137,235 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
   return results;
 }
 
-// ============ Phase 2: Query Today's Titles ============
+// ============ Phase 2: Post-Processing (Translation, Transcription, Subtitles) ============
+async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
+  const stats: PostProcessStats = { translated: 0, transcribed: 0, subtitles: 0 };
+  const today = new Date().toISOString().slice(0, 10);
+
+  // --- 2a: English Translation ---
+  console.log('[scheduler] Phase 2a: English translation...');
+  try {
+    const engArticles = await sql`
+      SELECT a.id, a.title, a.content, s.name, s.type
+      FROM articles a JOIN sources s ON a.source_id = s.id
+      WHERE a.fetched_at::date = ${today}
+        AND (s.type IN ('twitter', 'twitter-updates', 'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
+             OR (s.type = 'rss' AND a.content ~ '[a-zA-Z]{20,}'))
+        AND (a.title ~ '[a-zA-Z]{10,}' OR a.content ~ '[a-zA-Z]{50,}')
+        AND a.content NOT LIKE '%【中文翻译】%'
+      ORDER BY a.id
+      LIMIT 30
+    `;
+
+    if (engArticles.length > 0) {
+      // GPU-bound: limit to 2 concurrent
+      const translationLimit = createConcurrencyPool(2);
+      const translationResults = await Promise.allSettled(
+        engArticles.map((article: any) => translationLimit(async () => {
+          const content = article.content || '';
+          if (!isEnglish(content)) return;
+          const translated = await translateToChinese(content);
+          if (!translated || translated === content) return;
+
+          const newContent = `【中文翻译】\n${translated}\n\n---\n【English Original】\n${content}`;
+
+          await sql`UPDATE articles SET content = ${newContent} WHERE id = ${article.id}`;
+
+          // Update OB file
+          try {
+            const [updated] = await sql`
+              SELECT a.*, s.name AS source_name, s.type AS source_type
+              FROM articles a LEFT JOIN sources s ON a.source_id = s.id
+              WHERE a.id = ${article.id}
+            `;
+            if (updated) {
+              await saveArticleFile(article.id, newContent, {
+                id: article.id,
+                title: updated.title,
+                source_type: updated.source_type || 'unknown',
+                source_name: updated.source_name || '',
+                url: updated.url,
+                published_at: updated.published_at,
+                category: updated.category,
+                tags: updated.tags || [],
+                author: updated.author,
+                is_read: updated.is_read,
+                is_starred: updated.is_starred,
+                content_hash: updated.content_hash,
+                extra: updated.extra,
+              });
+            }
+          } catch (e: any) {
+            console.error(`[scheduler] OB update failed for translation id=${article.id}:`, e.message);
+          }
+
+          stats.translated++;
+        }))
+      );
+      const failed = translationResults.filter(r => r.status === 'rejected').length;
+      if (failed > 0) {
+        console.error(`[scheduler] Phase 2a: ${failed} translations failed`);
+      }
+    }
+    console.log(`[scheduler] Phase 2a complete: ${stats.translated} articles translated`);
+  } catch (e: any) {
+    console.error('[scheduler] Phase 2a error:', e.message);
+  }
+
+  // --- 2b: Podcast Transcription ---
+  console.log('[scheduler] Phase 2b: Podcast transcription...');
+  try {
+    const podcastArticles = await sql`
+      SELECT a.id, a.title, a.extra->>'audio_url' AS audio_url, s.name
+      FROM articles a JOIN sources s ON a.source_id = s.id
+      WHERE a.fetched_at::date = ${today}
+        AND s.type IN ('podcast-channel', 'rss')
+        AND a.extra->>'audio_url' IS NOT NULL
+        AND a.extra->>'audio_url' != ''
+        AND a.content NOT LIKE '%音频转录%'
+      ORDER BY a.id
+      LIMIT 10
+    `;
+
+    // GPU-bound (Whisper): STRICTLY SERIAL
+    for (const article of podcastArticles) {
+      try {
+        const audioUrl = article.audio_url;
+        if (!audioUrl) continue;
+
+        console.log(`[scheduler] Transcribing podcast: ${article.title} (${audioUrl})`);
+        const transcript = await whisperWindowsTranscribe(audioUrl, 0);
+        if (!transcript) {
+          console.log(`[scheduler] Transcription returned null for id=${article.id}`);
+          continue;
+        }
+
+        const originalContent = await sql`SELECT content FROM articles WHERE id = ${article.id}`;
+        const content = originalContent[0]?.content || '';
+
+        const newContent = `> 🎙️ 音频转录\n> \n> ${transcript}\n\n---\n\n${content}`;
+
+        await sql`UPDATE articles SET content = ${newContent} WHERE id = ${article.id}`;
+
+        // Update OB file
+        try {
+          const [updated] = await sql`
+            SELECT a.*, s.name AS source_name, s.type AS source_type
+            FROM articles a LEFT JOIN sources s ON a.source_id = s.id
+            WHERE a.id = ${article.id}
+          `;
+          if (updated) {
+            await saveArticleFile(article.id, newContent, {
+              id: article.id,
+              title: updated.title,
+              source_type: updated.source_type || 'unknown',
+              source_name: updated.source_name || '',
+              url: updated.url,
+              published_at: updated.published_at,
+              category: updated.category,
+              tags: updated.tags || [],
+              author: updated.author,
+              is_read: updated.is_read,
+              is_starred: updated.is_starred,
+              content_hash: updated.content_hash,
+              extra: updated.extra,
+            });
+          }
+        } catch (e: any) {
+          console.error(`[scheduler] OB update failed for transcription id=${article.id}:`, e.message);
+        }
+
+        stats.transcribed++;
+      } catch (e: any) {
+        console.error(`[scheduler] Transcription failed for id=${article.id}:`, e.message);
+      }
+    }
+    console.log(`[scheduler] Phase 2b complete: ${stats.transcribed} podcasts transcribed`);
+  } catch (e: any) {
+    console.error('[scheduler] Phase 2b error:', e.message);
+  }
+
+  // --- 2c: Subtitle Download (Bilibili & YouTube) ---
+  console.log('[scheduler] Phase 2c: Subtitle download...');
+  try {
+    const subtitleArticles = await sql`
+      SELECT a.id, a.title, a.url, s.type
+      FROM articles a JOIN sources s ON a.source_id = s.id
+      WHERE a.fetched_at::date = ${today}
+        AND s.type IN ('bilibili', 'bilibili-watch-later', 'bilibili-updates', 'bilibili-favorites',
+                        'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
+      ORDER BY a.id
+    `;
+
+    if (subtitleArticles.length > 0) {
+      // Network I/O: parallel with max 3 concurrent
+      const subtitleLimit = createConcurrencyPool(3);
+      const subtitleResults = await Promise.allSettled(
+        subtitleArticles.map((article: any) => subtitleLimit(async () => {
+          const isBilibili = article.type.startsWith('bilibili');
+          const apiPath = isBilibili ? '/bilibili-subtitle/subtitle' : '/youtube-subtitle/subtitle';
+          const resp = await fetchApi(apiPath, { article_id: article.id });
+
+          if (!resp.ok || !resp.subtitle) return;
+
+          // Append subtitle text to article content
+          const [row] = await sql`SELECT content, extra FROM articles WHERE id = ${article.id}`;
+          const existingContent = row?.content || '';
+          const subtitle = resp.subtitle;
+
+          // Only append if not already present
+          if (existingContent.includes(subtitle.slice(0, 100))) return;
+
+          const newContent = `${existingContent}\n\n---\n\n${subtitle}`;
+
+          await sql`UPDATE articles SET content = ${newContent} WHERE id = ${article.id}`;
+
+          // Update OB file
+          try {
+            const [updated] = await sql`
+              SELECT a.*, s.name AS source_name, s.type AS source_type
+              FROM articles a LEFT JOIN sources s ON a.source_id = s.id
+              WHERE a.id = ${article.id}
+            `;
+            if (updated) {
+              await saveArticleFile(article.id, newContent, {
+                id: article.id,
+                title: updated.title,
+                source_type: updated.source_type || 'unknown',
+                source_name: updated.source_name || '',
+                url: updated.url,
+                published_at: updated.published_at,
+                category: updated.category,
+                tags: updated.tags || [],
+                author: updated.author,
+                is_read: updated.is_read,
+                is_starred: updated.is_starred,
+                content_hash: updated.content_hash,
+                extra: updated.extra,
+              });
+            }
+          } catch (e: any) {
+            console.error(`[scheduler] OB update failed for subtitle id=${article.id}:`, e.message);
+          }
+
+          stats.subtitles++;
+        }))
+      );
+      const failed = subtitleResults.filter(r => r.status === 'rejected').length;
+      if (failed > 0) {
+        console.error(`[scheduler] Phase 2c: ${failed} subtitle downloads failed`);
+      }
+    }
+    console.log(`[scheduler] Phase 2c complete: ${stats.subtitles} subtitles downloaded`);
+  } catch (e: any) {
+    console.error('[scheduler] Phase 2c error:', e.message);
+  }
+
+  console.log(`[scheduler] Phase 2 post-processing complete: translated=${stats.translated}, transcribed=${stats.transcribed}, subtitles=${stats.subtitles}`);
+  return stats;
+}
+
+// ============ Phase 3: Query Today's Titles ============
 async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -216,7 +453,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
   return { wechat, bilibili, podcast, youtube, twitter, rss };
 }
 
-// ============ Phase 3: Anomaly Detection ============
+// ============ Phase 4: Anomaly Detection ============
 async function detectAnomalies(sql: Sql): Promise<string[]> {
   const today = new Date().toISOString().slice(0, 10);
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
@@ -262,13 +499,14 @@ async function detectAnomalies(sql: Sql): Promise<string[]> {
   return lines;
 }
 
-// ============ Phase 4: Build Markdown Report ============
+// ============ Phase 5: Build Markdown Report ============
 function buildReport(
   fetchResults: FetchResult[],
   titles: SourceTitles,
   anomalies: string[],
   todayTotal: number,
   yesterdayTotal: number,
+  postProcessStats: PostProcessStats,
 ): string {
   const todayDash = new Date().toISOString().slice(0, 10);
   const lines: string[] = [];
@@ -357,6 +595,13 @@ function buildReport(
   }
   lines.push('');
 
+  // 后处理统计
+  lines.push('## 🔄 后处理');
+  lines.push(`- 英文翻译: ${postProcessStats.translated} 篇`);
+  lines.push(`- 音频转录: ${postProcessStats.transcribed} 篇`);
+  lines.push(`- 字幕下载: ${postProcessStats.subtitles} 篇`);
+  lines.push('');
+
   // 异常检测
   lines.push('## ⚠️ 异常检测');
   if (anomalies.length === 0) {
@@ -388,16 +633,20 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
   try {
     console.log('[scheduler] === Daily fetch started ===');
 
-    // Phase 1
+    // Phase 1: Parallel fetch
     console.log('[scheduler] Phase 1: Parallel fetch...');
     const fetchResults = await phase1ParallelFetch(sql);
 
-    // Phase 2: Query today's titles
-    console.log('[scheduler] Phase 2: Query titles...');
+    // Phase 2: Post-processing (translation, transcription, subtitles)
+    console.log('[scheduler] Phase 2: Post-processing...');
+    const postProcessStats = await phase2PostProcess(sql);
+
+    // Phase 3: Query today's titles
+    console.log('[scheduler] Phase 3: Query titles...');
     const titles = await queryTodayTitles(sql);
 
-    // Phase 3: Anomaly detection
-    console.log('[scheduler] Phase 3: Anomaly detection...');
+    // Phase 4: Anomaly detection
+    console.log('[scheduler] Phase 4: Anomaly detection...');
     const anomalies = await detectAnomalies(sql);
 
     // Get today/yesterday totals
@@ -412,9 +661,9 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
       yesterdayTotal = y[0].cnt;
     } catch { /* ignore */ }
 
-    // Phase 4: Build report
-    console.log('[scheduler] Phase 4: Build report...');
-    const markdown = buildReport(fetchResults, titles, anomalies, todayTotal, yesterdayTotal);
+    // Phase 5: Build report
+    console.log('[scheduler] Phase 5: Build report...');
+    const markdown = buildReport(fetchResults, titles, anomalies, todayTotal, yesterdayTotal, postProcessStats);
 
     // Write to OB
     try {
