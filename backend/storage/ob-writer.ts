@@ -204,9 +204,9 @@ export function getObSubdir(meta: ArticleMeta): string {
     case 'bilibili-updates': return '哔哩哩哔';
     case 'bilibili-watch-later': return '哔哩哩哔';
     case 'bilibili-favorites': return '哔哩哩哔';
-    case 'youtube-updates': return 'YouTube/更新';
-    case 'youtube-watch-later': return 'YouTube/稍后再看';
-    case 'youtube-favorites': return 'YouTube/收藏';
+    case 'youtube-updates': return 'YouTube';
+    case 'youtube-watch-later': return 'YouTube';
+    case 'youtube-favorites': return 'YouTube';
     case 'twitter-updates': {
       const name = sanitizeDirName(meta.source_name);
       return join('twitter-updates', name);

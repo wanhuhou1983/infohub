@@ -269,15 +269,15 @@ describe('getObSubdir', () => {
   });
 
   test('youtube-updates → YouTube/更新', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'youtube-updates' }))).toBe('YouTube/更新');
+    expect(getObSubdir(makeMeta({ source_type: 'youtube-updates' }))).toBe('YouTube');
   });
 
   test('youtube-watch-later → YouTube/稍后再看', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'youtube-watch-later' }))).toBe('YouTube/稍后再看');
+    expect(getObSubdir(makeMeta({ source_type: 'youtube-watch-later' }))).toBe('YouTube');
   });
 
   test('youtube-favorites → YouTube/收藏', () => {
-    expect(getObSubdir(makeMeta({ source_type: 'youtube-favorites' }))).toBe('YouTube/收藏');
+    expect(getObSubdir(makeMeta({ source_type: 'youtube-favorites' }))).toBe('YouTube');
   });
 
   test('未知 source_type 回退到类型本身', () => {
