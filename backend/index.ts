@@ -18,6 +18,7 @@ import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import postgres from 'postgres';
 import { readFileSync, existsSync, writeFileSync, chmodSync } from 'fs';
+import { execSync } from 'node:child_process';
 import { join, dirname, extname } from 'path';
 import { timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'url';
@@ -431,11 +432,37 @@ if (!IS_CLOUD) {
   async function pushToCloud() {
     console.log('[cloud-sync] 开始推送数据到云...');
     try {
-      const dumpCmd = 'pg_dump --dbname "' + LOCAL_PG + '" --data-only --column-inserts --table sources --table articles -f /tmp/infohub_daily_sync.sql';
-      execSync(dumpCmd, { timeout: 120000 });
-      const pushCmd = 'cat /tmp/infohub_daily_sync.sql | sshpass -p "' + CLOUD_PASS + '" ssh -o StrictHostKeyChecking=no ' + CLOUD_USER + '@' + CLOUD_HOST + ' "sudo -u ubuntu psql -h localhost -p 5432 -U infohub -d infohub 2>/dev/null"';
-      execSync(pushCmd, { timeout: 180000, shell: '/bin/bash' });
-      console.log('[cloud-sync] OK');
+      const SYNC_TOKEN = process.env.SYNC_TOKEN || '';
+      if (!SYNC_TOKEN) {
+        console.log('[cloud-sync] SYNC_TOKEN 未配置，跳过');
+        return;
+      }
+      const [srcCount] = await sql`SELECT COUNT(*)::int AS c FROM sources`;
+      const articles = await sql`
+        SELECT a.source_id, a.title, a.content, a.summary, a.url, a.author,
+               a.published_at, a.fetched_at, a.category, a.tags, a.content_hash
+        FROM articles a
+        WHERE a.fetched_at > NOW() - interval '24 hours'
+        ORDER BY a.id DESC LIMIT 50
+      `;
+      if (articles.length === 0) {
+        console.log('[cloud-sync] 24h内无新文章');
+        return;
+      }
+      const cloudUrl = 'https://info.wuflux.cn/api/cloud-sync/push';
+      const resp = await fetch(cloudUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SYNC_TOKEN },
+        body: JSON.stringify({ articles }),
+        signal: AbortSignal.timeout(30000),
+      });
+      if (resp.ok) {
+        const result = await resp.json();
+        console.log('[cloud-sync] OK: ' + JSON.stringify(result));
+      } else {
+        const errText = (await resp.text()).slice(0, 100);
+        console.error('[cloud-sync] API ' + resp.status + ': ' + errText);
+      }
     } catch (e: any) {
       console.error('[cloud-sync] FAIL:', e.message);
     }
