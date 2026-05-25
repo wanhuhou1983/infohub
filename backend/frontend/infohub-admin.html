@@ -170,10 +170,12 @@ tailwind.config = {
         <h1 class="text-xl font-semibold">定时任务</h1>
         <p class="text-sm text-muted mt-1">配置自动采集的时间和频率</p>
       </div>
-      <button class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showAddScheduleModal()">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        新建任务
-      </button>
+      <div class="flex items-center gap-2">
+        <button class="bg-surface2 hover:bg-border text-fg text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showCollectionSettingsModal()">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          采集设置
+        </button>
+      </div>
     </div>
 
     <div id="scheduleList" class="space-y-3"></div>
@@ -562,6 +564,48 @@ tailwind.config = {
     <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
       <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeAddSourceModal()">取消</button>
       <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="addSource()">添加</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- ====== 采集设置弹窗 ====== -->
+<div id="collectionSettingsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-lg max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <h2 class="font-semibold">采集设置</h2>
+      <button onclick="closeCollectionSettingsModal()" class="text-muted hover:text-fg transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-4 overflow-y-auto flex-1 space-y-5">
+      <!-- 每日执行时间 -->
+      <div>
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          全量采集时间
+        </h3>
+        <div class="flex items-center gap-3">
+          <label class="text-sm text-muted">每日</label>
+          <input type="time" id="collectionTime" value="22:00" class="bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          <label class="text-sm text-muted">执行全量采集</label>
+        </div>
+      </div>
+
+      <!-- 各板块采集开关 -->
+      <div>
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          采集板块
+        </h3>
+        <div class="space-y-2" id="collectionSourceToggles">
+          <!-- JS 动态填充 -->
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-border flex justify-end gap-3 shrink-0">
+      <button onclick="closeCollectionSettingsModal()" class="px-4 py-2 text-sm text-muted hover:text-fg rounded-lg transition">取消</button>
+      <button onclick="applyCollectionSettings()" class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium">保存设置</button>
     </div>
   </div>
 </div>
@@ -1212,13 +1256,43 @@ const SOURCE_CONFIGS = [
 ];
 
 const SCHEDULES = [
+  { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'active', lastResult: 'success' },
   { id: 1, name: '新闻联播每日采集', sources: ['📺 新闻联播'], cron: '0 20 * * *', lastRun: '2026-04-22 20:01', nextRun: '2026-04-23 20:00', status: 'active', lastResult: 'success' },
   { id: 2, name: 'RSS 定时同步', sources: ['📡 RSS'], cron: '0 */6 * * *', lastRun: '2026-04-22 18:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
   { id: 3, name: '公众号同步', sources: ['💬 公众号'], cron: '0 */4 * * *', lastRun: '2026-04-22 16:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
   { id: 4, name: 'AI 新闻早报', sources: ['🤖 AI资讯'], cron: '0 9 * * *', lastRun: '2026-04-22 09:15', nextRun: '2026-04-23 09:00', status: 'active', lastResult: 'success' },
   { id: 5, name: '腾讯新闻同步', sources: ['📰 腾讯新闻'], cron: '0 8,14,20 * * *', lastRun: '2026-04-22 20:00', nextRun: '2026-04-23 08:00', status: 'active', lastResult: 'success' },
-  { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'paused', lastResult: 'success' },
 ];
+
+// ===== 采集设置（存 localStorage） =====
+const DEFAULT_COLLECTION_SETTINGS = {
+  dailyTime: '22:00',
+  sources: {
+    wechat: { name: '微信公众号', enabled: true },
+    rss: { name: 'RSS 订阅', enabled: true },
+    bilibili: { name: '哔哩哔哩', enabled: true },
+    youtube: { name: 'YouTube', enabled: true },
+    newspaper: { name: '报刊杂志', enabled: true },
+    podcast: { name: '播客', enabled: true },
+    twitter: { name: 'Twitter/X', enabled: true },
+    xwlb: { name: '新闻联播', enabled: true },
+    penti: { name: '喷嚏图卦', enabled: true },
+    rmrb: { name: '人民日报', enabled: true },
+    wechat_group: { name: '微信群聊', enabled: false },
+  }
+};
+
+function getCollectionSettings() {
+  try {
+    const saved = localStorage.getItem('collectionSettings');
+    if (saved) return { ...DEFAULT_COLLECTION_SETTINGS, ...JSON.parse(saved) };
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_COLLECTION_SETTINGS));
+}
+
+function saveCollectionSettings(settings) {
+  localStorage.setItem('collectionSettings', JSON.stringify(settings));
+}
 
 // ===== API 客户端 =====
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -1476,6 +1550,56 @@ function renderSourceCards() {
       </div>
     </div>`;
   }).join('');
+}
+
+
+function showCollectionSettingsModal() {
+  const settings = getCollectionSettings();
+  document.getElementById('collectionTime').value = settings.dailyTime || '22:00';
+  
+  const container = document.getElementById('collectionSourceToggles');
+  container.innerHTML = '';
+  for (const [key, src] of Object.entries(settings.sources)) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between p-3 bg-surface2 rounded-lg';
+    row.innerHTML = `
+      <span class="text-sm font-medium">${src.name}</span>
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="checkbox" data-source-key="${key}" class="sr-only peer collection-toggle" ${src.enabled ? 'checked' : ''}>
+        <div class="w-9 h-5 bg-border rounded-full peer peer-checked:bg-accent transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-fg after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+      </label>
+    `;
+    container.appendChild(row);
+  }
+  
+  document.getElementById('collectionSettingsModal').classList.remove('hidden');
+  document.getElementById('collectionSettingsModal').classList.add('flex');
+}
+
+function closeCollectionSettingsModal() {
+  document.getElementById('collectionSettingsModal').classList.add('hidden');
+  document.getElementById('collectionSettingsModal').classList.remove('flex');
+}
+
+function applyCollectionSettings() {
+  const settings = getCollectionSettings();
+  settings.dailyTime = document.getElementById('collectionTime').value;
+  
+  document.querySelectorAll('.collection-toggle').forEach(toggle => {
+    const key = toggle.dataset.sourceKey;
+    if (settings.sources[key]) {
+      settings.sources[key].enabled = toggle.checked;
+    }
+  });
+  
+  saveCollectionSettings(settings);
+  
+  // Update SCHEDULES[0] cron based on time
+  const [h, m] = settings.dailyTime.split(':');
+  SCHEDULES[0].cron = `${m} ${h} * * *`;
+  renderSchedules();
+  
+  closeCollectionSettingsModal();
 }
 
 function renderSchedules() {
