@@ -64,6 +64,9 @@ interface PostProcessStats {
 
 // ============ Phase 1: Parallel Fetch ============
 async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
+  const settings = await loadCollectionSettings(sql);
+  const s = settings.sources;
+
   const now = new Date();
   const todayCompact = now.toISOString().slice(0, 10).replace(/-/g, '');
   const todayDash = now.toISOString().slice(0, 10);
@@ -72,31 +75,31 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
 
   const fetches: Promise<FetchResult>[] = [
     // 报刊杂志: try today, then fallback to yesterday if 0 inserted
-    (async () => {
+    ...(s.rmrb?.enabled !== false ? [(async () => {
       let r = await fetchApi('/fetch/rmrb', { date: todayDash });
       if (!r.inserted) r = await fetchApi('/fetch/rmrb', { date: yesterdayDash });
       return { source: '人民日报', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
-    })(),
-    (async () => {
+    })()] : []),
+    ...(s.xwlb?.enabled !== false ? [(async () => {
       let r = await fetchApi('/fetch/xwlb', { date: todayCompact });
       if (!r.inserted) r = await fetchApi('/fetch/xwlb', { date: yesterdayCompact });
       return { source: '新闻联播', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
-    })(),
-    (async () => {
+    })()] : []),
+    ...(s.penti?.enabled !== false ? [(async () => {
       let r = await fetchApi('/fetch/penti', { date: todayCompact });
       if (!r.inserted) r = await fetchApi('/fetch/penti', { date: yesterdayCompact });
       return { source: '喷嚏图卦', success: !!r.ok, inserted: r.inserted || 0, error: r.error };
-    })(),
-    fetchApi('/wechat-admin/refresh')
-      .then(r => ({ source: '公众号', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
-    fetchApi('/bilibili-admin/refresh')
-      .then(r => ({ source: 'B站', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error })),
-    fetchApi('/twitter-admin/refresh')
-      .then(r => ({ source: 'X/推特', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
-    fetchApi('/youtube-admin/refresh')
-      .then(r => ({ source: 'YouTube', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
-    fetchApi('/podcast-admin/sync')
-      .then(r => ({ source: '播客', success: !!r.ok, inserted: r.inserted || 0, error: r.error })),
+    })()] : []),
+    ...(s.wechat?.enabled !== false ? [fetchApi('/wechat-admin/refresh')
+      .then(r => ({ source: '公众号', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
+    ...(s.bilibili?.enabled !== false ? [fetchApi('/bilibili-admin/refresh')
+      .then(r => ({ source: 'B站', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error }))] : []),
+    ...(s.twitter?.enabled !== false ? [fetchApi('/twitter-admin/refresh')
+      .then(r => ({ source: 'X/推特', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
+    ...(s.youtube?.enabled !== false ? [fetchApi('/youtube-admin/refresh')
+      .then(r => ({ source: 'YouTube', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
+    ...(s.podcast?.enabled !== false ? [fetchApi('/podcast-admin/sync')
+      .then(r => ({ source: '播客', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
   ];
 
   // RSS: query enabled sources, then fetch each
@@ -620,6 +623,55 @@ function buildReport(
   return lines.join('\n');
 }
 
+// ============ Collection Settings ============
+
+interface CollectionSettings {
+  dailyTime: string;
+  sources: Record<string, { name: string; enabled: boolean }>;
+}
+
+const DEFAULT_SETTINGS: CollectionSettings = {
+  dailyTime: '22:00',
+  sources: {
+    wechat: { name: '微信公众号', enabled: true },
+    rss: { name: 'RSS 订阅', enabled: true },
+    bilibili: { name: '哔哩哔哩', enabled: true },
+    youtube: { name: 'YouTube', enabled: true },
+    newspaper: { name: '报刊杂志', enabled: true },
+    podcast: { name: '播客', enabled: true },
+    twitter: { name: 'Twitter/X', enabled: true },
+    xwlb: { name: '新闻联播', enabled: true },
+    penti: { name: '喷嚏图卦', enabled: true },
+    rmrb: { name: '人民日报', enabled: true },
+    wechat_group: { name: '微信群聊', enabled: false },
+  },
+};
+
+async function loadCollectionSettings(sql: Sql): Promise<CollectionSettings> {
+  try {
+    const [row] = await sql`SELECT config FROM sources WHERE type = 'system' AND name = 'collection_settings' LIMIT 1`;
+    if (row?.config) {
+      return { ...JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), ...row.config };
+    }
+  } catch { /* ignore */ }
+  return JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
+}
+
+async function saveCollectionSettingsToDb(sql: Sql, settings: CollectionSettings): Promise<void> {
+  const existing = await sql`SELECT id FROM sources WHERE type = 'system' AND name = 'collection_settings' LIMIT 1`;
+  if (existing.length > 0) {
+    await sql`UPDATE sources SET config = ${sql.json(settings)} WHERE id = ${existing[0].id}`;
+  } else {
+    await sql`INSERT INTO sources (name, type, config, enabled) VALUES ('collection_settings', 'system', ${sql.json(settings)}, true)`;
+  }
+}
+
+/** Check if a source module is enabled */
+async function isSourceEnabled(sql: Sql, key: string): Promise<boolean> {
+  const settings = await loadCollectionSettings(sql);
+  return settings.sources[key]?.enabled !== false;
+}
+
 // ============ Main Entry Point ============
 export async function runDailyFetch(sql: Sql): Promise<string> {
   // Auto-reset stuck flag after 10 minutes
@@ -695,11 +747,32 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
   }
 }
 
-// ============ Routes ============
+// ==// ============ Routes ============
 export function createSchedulerRoutes(sql: Sql): Hono {
   const router = new Hono();
 
-  // POST /run — trigger daily fetch (admin auth required)
+  // GET /settings -- load collection settings
+  router.get('/settings', async (c) => {
+    try {
+      const settings = await loadCollectionSettings(sql);
+      return c.json(settings);
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // POST /settings -- save collection settings
+  router.post('/settings', async (c) => {
+    try {
+      const body = await c.req.json();
+      await saveCollectionSettingsToDb(sql, body);
+      return c.json({ ok: true });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
+  // POST /run -- trigger daily fetch (admin auth required)
   router.post('/run', async (c) => {
     // Basic admin auth check
     const adminToken = process.env.ADMIN_TOKEN || '';

@@ -1282,7 +1282,18 @@ const DEFAULT_COLLECTION_SETTINGS = {
   }
 };
 
-function getCollectionSettings() {
+let CACHED_SETTINGS = null;
+
+async function getCollectionSettings() {
+  if (CACHED_SETTINGS) return CACHED_SETTINGS;
+  try {
+    const data = await api('/scheduler/settings');
+    if (data && data.sources) {
+      CACHED_SETTINGS = data;
+      return data;
+    }
+  } catch (e) { /* ignore */ }
+  // Fallback to localStorage
   try {
     const saved = localStorage.getItem('collectionSettings');
     if (saved) return { ...DEFAULT_COLLECTION_SETTINGS, ...JSON.parse(saved) };
@@ -1290,8 +1301,14 @@ function getCollectionSettings() {
   return JSON.parse(JSON.stringify(DEFAULT_COLLECTION_SETTINGS));
 }
 
-function saveCollectionSettings(settings) {
-  localStorage.setItem('collectionSettings', JSON.stringify(settings));
+async function saveCollectionSettings(settings) {
+  try {
+    await api('/scheduler/settings', { method: 'POST', body: JSON.stringify(settings) });
+    CACHED_SETTINGS = settings;
+  } catch (e) {
+    console.warn('Failed to save to server, saving locally:', e.message);
+    localStorage.setItem('collectionSettings', JSON.stringify(settings));
+  }
 }
 
 // ===== API 客户端 =====
@@ -1553,8 +1570,8 @@ function renderSourceCards() {
 }
 
 
-function showCollectionSettingsModal() {
-  const settings = getCollectionSettings();
+async function showCollectionSettingsModal() {
+  const settings = await getCollectionSettings();
   document.getElementById('collectionTime').value = settings.dailyTime || '22:00';
   
   const container = document.getElementById('collectionSourceToggles');
@@ -1581,8 +1598,8 @@ function closeCollectionSettingsModal() {
   document.getElementById('collectionSettingsModal').classList.remove('flex');
 }
 
-function applyCollectionSettings() {
-  const settings = getCollectionSettings();
+async function applyCollectionSettings() {
+  const settings = await getCollectionSettings();
   settings.dailyTime = document.getElementById('collectionTime').value;
   
   document.querySelectorAll('.collection-toggle').forEach(toggle => {
@@ -1592,7 +1609,7 @@ function applyCollectionSettings() {
     }
   });
   
-  saveCollectionSettings(settings);
+  await saveCollectionSettings(settings);
   
   // Update SCHEDULES[0] cron based on time
   const [h, m] = settings.dailyTime.split(':');
