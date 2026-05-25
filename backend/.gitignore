@@ -1,0 +1,6 @@
+
+# Backup files
+*.bak-modernize
+
+# WeFlow cache
+weflow-cache/

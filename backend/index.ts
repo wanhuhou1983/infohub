@@ -214,9 +214,8 @@ app.get('/', (c) => {
   return c.text('InfoHub frontend not found', 404);
 });
 
-// 管理后台页面（云端模式禁用）
+// Admin page (accessible in cloud mode, write ops still guarded)
 app.get('/admin', (c) => {
-  if (IS_CLOUD) return c.text('Admin panel is disabled in cloud mode', 403);
   const adminPath = join(FRONTEND_DIR, 'infohub-admin.html');
   if (existsSync(adminPath)) {
     const html = readFileSync(adminPath, 'utf-8');

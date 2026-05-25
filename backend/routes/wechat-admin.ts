@@ -67,81 +67,38 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
 
   // ============ 获取所有公众号列表（WeFlow + DB 状态合并） ============
 
+  // 获取公众号列表（PG 静态数据，scheduler 每日同步 WeFlow 写入）
   router.get('/accounts', async (c) => {
     try {
-      const [wechatSource] = await sql`SELECT id, config FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
+      const [wechatSource] = await sql`SELECT id FROM sources WHERE type = 'wechat' AND parent_id IS NULL LIMIT 1`;
       if (!wechatSource) return c.json({ error: '微信公众号信息源未配置' }, 400);
 
-      const config = wechatSource.config || {};
-      const weflowUrl = (config.weflow_url || process.env.WEFLOW_URL || 'http://127.0.0.1:5031').replace(/\/+$/, '');
-      const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN;
-      if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置' }, 400);
-
-      const headers = { 'Authorization': `Bearer ${weflowToken}` };
-
-      const sessionsResp = await fetch(`${weflowUrl}/api/v1/sessions?limit=500`, { headers });
-      if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
-      const sessionsData = await sessionsResp.json() as any;
-      const allSessions: any[] = (sessionsData.sessions || [])
-        .filter((s: any) => s.sessionType === 'channel' && s.username?.length > 0);
-
-      const dbSources = await sql`
-        SELECT id, name, enabled, config->>'gh_id' AS gh_id
-        FROM sources
-        WHERE type = 'wechat' AND parent_id = ${wechatSource.id}
-      `;
-      const dbByGhId = new Map<string, any>();
-      for (const s of dbSources) {
-        if (s.gh_id) dbByGhId.set(s.gh_id, s);
-      }
-
-      let newlyCreated = 0;
-      for (const session of allSessions) {
-        const existing = dbByGhId.get(session.username);
-        if (!existing) {
-          await sql`
-            INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-            VALUES (${session.displayName}, 'wechat', ${wechatSource.id}, ${sql.json({ gh_id: session.username })}, false, NOW())
-          `;
-          newlyCreated++;
-        }
-      }
-
-      const updatedSources = await sql`
-        SELECT s.id, s.name, s.enabled, s.config->>'gh_id' AS gh_id,
-               (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_article_at
+      const accounts = await sql`
+        SELECT 
+          s.id as db_id, s.name as display_name, s.enabled,
+          s.config->>'gh_id' as gh_id,
+          (SELECT count(*)::int FROM articles WHERE source_id = s.id) as article_count,
+          (SELECT max(published_at) FROM articles WHERE source_id = s.id) as last_article_at
         FROM sources s
         WHERE s.type = 'wechat' AND s.parent_id = ${wechatSource.id}
+        ORDER BY s.name
       `;
-      const updatedByGhId = new Map<string, any>();
-      for (const s of updatedSources) {
-        if (s.gh_id) updatedByGhId.set(s.gh_id, s);
-      }
 
-      let accounts = allSessions.map((s: any) => {
-        const db = updatedByGhId.get(s.username);
-        return {
-          gh_id: s.username,
-          displayName: s.displayName,
-          enabled: !!db?.enabled,
-          db_id: db?.id || null,
-          latest_article_at: db?.latest_article_at || null,
-        };
+      return c.json({
+        accounts: accounts.map(a => ({
+          db_id: a.db_id,
+          displayName: a.display_name,
+          gh_id: a.gh_id || '',
+          enabled: a.enabled,
+          articleCount: a.article_count || 0,
+          lastArticle: a.last_article_at,
+        }))
       });
-
-      accounts.sort((a, b) => {
-        if (!a.latest_article_at) return 1;
-        if (!b.latest_article_at) return -1;
-        return new Date(b.latest_article_at).getTime() - new Date(a.latest_article_at).getTime();
-      });
-
-      return c.json({ accounts, total: accounts.length, newlyCreated });
     } catch (e: any) {
-      return c.json({ error: e.message }, 500);
+      console.error('[WeChat] Failed to load accounts:', e.message);
+      return c.json({ error: '加载公众号列表失败: ' + e.message }, 500);
     }
   });
-
-  // ============ 切换单个公众号启用 / 禁用 ============
 
   router.patch('/accounts/:id/toggle', async (c) => {
     const id = Number(c.req.param('id'));

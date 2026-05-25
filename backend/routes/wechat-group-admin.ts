@@ -84,73 +84,39 @@ export function createWechatGroupAdminRoutes(sql: Sql): Hono {
   }
 
   // ============ 获取所有群聊列表（WeFlow + DB 状态合并） ============
+  // 获取群聊列表（PG 静态数据，scheduler 每日同步 WeFlow 写入）
   router.get('/groups', async (c) => {
     try {
-      const groupSource = await getGroupSource();
+      const [groupSource] = await sql`SELECT id FROM sources WHERE type = 'wechat_group' AND parent_id IS NULL LIMIT 1`;
       if (!groupSource) return c.json({ error: '微信群聊信息源未配置' }, 400);
 
-      const { weflowUrl, weflowToken } = await getWeflowConfig();
-      if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置' }, 400);
-
-      const headers = { 'Authorization': `Bearer ${weflowToken}` };
-
-      const sessionsResp = await fetch(`${weflowUrl}/api/v1/sessions?limit=500`, { headers });
-      if (!sessionsResp.ok) throw new Error(`WeFlow sessions API 返回 ${sessionsResp.status}`);
-      const sessionsData = await sessionsResp.json() as any;
-      const allGroups: any[] = (sessionsData.sessions || [])
-        .filter((s: any) => s.username?.endsWith('@chatroom'));
-
-      const dbSources = await sql`
-        SELECT id, name, enabled, config->>'chatroom_id' AS chatroom_id
-        FROM sources
-        WHERE type = 'wechat_group' AND parent_id = ${groupSource.id}
-      `;
-      const dbByChatroomId = new Map<string, any>();
-      for (const s of dbSources) {
-        if (s.chatroom_id) dbByChatroomId.set(s.chatroom_id, s);
-      }
-
-      let newlyCreated = 0;
-      for (const session of allGroups) {
-        const existing = dbByChatroomId.get(session.username);
-        if (!existing) {
-          await sql`
-            INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-            VALUES (${session.displayName}, 'wechat_group', ${groupSource.id}, ${sql.json({ chatroom_id: session.username })}, false, NOW())
-          `;
-          newlyCreated++;
-        }
-      }
-
-      const updatedSources = await sql`
-        SELECT s.id, s.name, s.enabled, s.config->>'chatroom_id' AS chatroom_id
+      const groups = await sql`
+        SELECT 
+          s.id as db_id, s.name, s.enabled,
+          s.config->>'chatroom' as chatroom,
+          (SELECT count(*)::int FROM articles WHERE source_id = s.id) as article_count,
+          (SELECT max(published_at) FROM articles WHERE source_id = s.id) as last_article_at
         FROM sources s
         WHERE s.type = 'wechat_group' AND s.parent_id = ${groupSource.id}
+        ORDER BY s.name
       `;
-      const updatedByChatroomId = new Map<string, any>();
-      for (const s of updatedSources) {
-        if (s.chatroom_id) updatedByChatroomId.set(s.chatroom_id, s);
-      }
 
-      let groups = allGroups.map((s: any) => {
-        const db = updatedByChatroomId.get(s.username);
-        return {
-          chatroom_id: s.username,
-          displayName: s.displayName,
-          enabled: !!db?.enabled,
-          db_id: db?.id || null,
-        };
+      return c.json({
+        groups: groups.map(g => ({
+          db_id: g.db_id,
+          displayName: g.name,
+          chatroom_id: g.chatroom || '',
+          enabled: g.enabled,
+          articleCount: g.article_count || 0,
+          lastArticle: g.last_article_at,
+        }))
       });
-
-      groups.sort((a, b) => a.displayName.localeCompare(b.displayName, 'zh-CN'));
-
-      return c.json({ groups, total: groups.length, newlyCreated });
     } catch (e: any) {
-      return c.json({ error: e.message }, 500);
+      console.error('[WeChat-Group] Failed to load groups:', e.message);
+      return c.json({ error: '加载群聊列表失败: ' + e.message }, 500);
     }
   });
 
-  // ============ 切换单个群聊启用 / 禁用 ============
   router.patch('/groups/:id/toggle', async (c) => {
     const id = Number(c.req.param('id'));
     if (isNaN(id) || id <= 0) return c.json({ error: 'Invalid id' }, 400);
