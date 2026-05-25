@@ -53,8 +53,8 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
       } else {
         const parent = nodeMap.get(s.parent_id);
         if (parent) {
-          // 微信公众号/群聊：只显示 enabled=true 的子源
-          if ((parent.type === 'wechat' || parent.type === 'wechat_group') && node.enabled === false) {
+          // 只显示 enabled=true 的子源（公众号/群聊/B站/YouTube等）
+          if (node.enabled === false) {
             return; // 跳过
           }
           parent.children.push(node);
