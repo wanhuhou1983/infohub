@@ -53,10 +53,19 @@ export function stripCommentSection(content: string): string {
 export async function crawlArticleContent(articleUrl: string): Promise<string | null> {
   return new Promise((resolve) => {
     const args = [MINERU_SCRIPT, articleUrl, '--model', 'MinerU-HTML', '--print'];
-    const proc = spawn('python3', args, {
-      cwd: path.dirname(MINERU_SCRIPT),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    let proc: any;
+    try {
+      proc = spawn('python3', args, {
+        cwd: path.dirname(MINERU_SCRIPT),
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+
+    // Handle async spawn errors (Bun emits error event for missing executables)
+    proc.on('error', () => { resolve(null); });
 
     let stdout = '';
     let stderr = '';
