@@ -1862,8 +1862,22 @@ async function runSourceFetch(id) {
   alert('立即采集 ' + source.name + '（功能开发中）');
 }
 
-function runScheduleNow(id) {
-  alert('立即执行任务 ' + id + '（样稿演示）');
+async function runScheduleNow(id) {
+  const btn = document.querySelector(`[data-schedule-id="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = '执行中...'; }
+  try {
+    const data = await api('/scheduler/run', { method: 'POST' });
+    if (data.ok) {
+      alert('全量采集完成！正在刷新数据...');
+      location.reload();
+    } else {
+      alert('采集失败: ' + (data.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '立即执行'; }
+  }
 }
 
 function removeSource(id) {

@@ -694,6 +694,18 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
     console.log('[scheduler] Phase 1: Parallel fetch...');
     const fetchResults = await phase1ParallelFetch(sql);
 
+    // Write fetch logs
+    try {
+      const now = new Date();
+      for (const fr of fetchResults) {
+        const detail = fr.error ? fr.error.slice(0, 500) : (fr.success ? 'ok' : 'fail');
+        await sql`INSERT INTO fetch_logs (action, status, articles_count, detail, started_at, duration_ms)
+          VALUES ('daily_fetch', ${fr.success ? 'success' : 'error'}, ${fr.fetched || fr.inserted || 0}, ${detail}, ${now.toISOString()}, 0)`;
+      }
+    } catch (e: any) {
+      console.error('[scheduler] Failed to write fetch_logs:', e.message);
+    }
+
     // Phase 2: Post-processing (translation, transcription, subtitles)
     console.log('[scheduler] Phase 2: Post-processing...');
     const postProcessStats = await phase2PostProcess(sql);

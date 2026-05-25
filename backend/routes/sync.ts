@@ -294,14 +294,14 @@ export function createSyncRoutes(sql: Sql): Hono {
 
   router.get('/stats', async (c) => {
     const [totalResult] = await sql`SELECT COUNT(*)::int AS total FROM articles`;
-    const [todayResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE published_at >= CURRENT_DATE`;
+    const [todayResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE fetched_at >= CURRENT_DATE`;
     const [unreadResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE is_read = FALSE`;
     const [starredResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE is_starred = TRUE`;
 
     const sourceStats = await sql`
       SELECT s.id, s.name, s.icon, s.type, s.enabled, s.last_fetch, s.parent_id,
              COUNT(a.id)::int AS article_count,
-             COUNT(CASE WHEN a.published_at >= CURRENT_DATE THEN 1 END)::int AS today_count,
+             COUNT(CASE WHEN a.fetched_at >= CURRENT_DATE THEN 1 END)::int AS today_count,
              COUNT(CASE WHEN a.is_read = FALSE THEN 1 END)::int AS unread_count
       FROM sources s
       LEFT JOIN articles a ON a.source_id = s.id
