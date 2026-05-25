@@ -420,6 +420,63 @@ if (!IS_CLOUD) {
   }
 }
 
+// ============ 内建定时调度器 + 云端同步 ============
+if (!IS_CLOUD) {
+  const DAILY_MS = 24 * 60 * 60 * 1000;
+  const CLOUD_HOST = '101.35.250.154';
+  const CLOUD_USER = 'ubuntu';
+  const CLOUD_PASS = 'Linhu50115';
+  const LOCAL_PG = 'postgres://infohub:infohub123@quant-postgres:5432/infohub';
+
+  async function pushToCloud() {
+    console.log('[cloud-sync] 开始推送数据到云...');
+    try {
+      const dumpCmd = 'pg_dump --dbname "' + LOCAL_PG + '" --data-only --column-inserts --table sources --table articles -f /tmp/infohub_daily_sync.sql';
+      execSync(dumpCmd, { timeout: 120000 });
+      const pushCmd = 'cat /tmp/infohub_daily_sync.sql | sshpass -p "' + CLOUD_PASS + '" ssh -o StrictHostKeyChecking=no ' + CLOUD_USER + '@' + CLOUD_HOST + ' "sudo -u ubuntu psql -h localhost -p 5432 -U infohub -d infohub 2>/dev/null"';
+      execSync(pushCmd, { timeout: 180000, shell: '/bin/bash' });
+      console.log('[cloud-sync] OK');
+    } catch (e: any) {
+      console.error('[cloud-sync] FAIL:', e.message);
+    }
+  }
+
+  async function scheduleNextRun() {
+    try {
+      const [row] = await sql`SELECT config FROM sources WHERE type='system' AND name='collection_settings' LIMIT 1`;
+      const cfg = (row && row.config) || {};
+      const dailyTime = cfg.dailyTime || '00:10';
+      const parts = dailyTime.split(':');
+      const hour = Math.min(23, Math.max(0, parseInt(parts[0]) || 0));
+      const min = Math.min(59, Math.max(0, parseInt(parts[1]) || 10));
+      const now = new Date();
+      const target = new Date(now);
+      target.setHours(hour, min, 0, 0);
+      let delayMs = target.getTime() - now.getTime();
+      if (delayMs <= 0) delayMs += DAILY_MS;
+      console.log('[scheduler] next run: ' + target.toISOString() + ' (' + Math.round(delayMs / 60000) + 'min)');
+      setTimeout(async () => {
+        console.log('[scheduler] === triggering ===');
+        try {
+          const report = await runDailyFetch(sql);
+          console.log('[scheduler] done');
+        } catch (e: any) {
+          console.error('[scheduler] error:', e.message);
+        }
+        await pushToCloud();
+        await scheduleNextRun();
+      }, delayMs);
+    } catch (e: any) {
+      console.error('[scheduler] init error:', e.message);
+      setTimeout(scheduleNextRun, 3600000);
+    }
+  }
+
+  scheduleNextRun();
+  setTimeout(function() { pushToCloud(); }, 30000);
+}
+
+
 // 全局未捕获异常/拒绝处理，防止进程静默崩溃
 process.on('uncaughtException', (err, origin) => {
   console.error(`[致命] uncaughtException (${origin}):`, err);
