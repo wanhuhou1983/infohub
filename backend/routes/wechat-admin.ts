@@ -177,10 +177,14 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         if (s.gh_id) sourceByGhId.set(s.gh_id, s);
       }
 
-      // Step 5: 筛选已启用的公众号
+      // Step 5: 筛选已启用和未启用的公众号
       const enabledAccounts = allSessions.filter((s: any) => {
         const db = sourceByGhId.get(s.username);
         return !!db?.enabled;
+      });
+      const disabledAccounts = allSessions.filter((s: any) => {
+        const db = sourceByGhId.get(s.username);
+        return db && !db.enabled;
       });
 
       // ======== Step 6: 采集文章（API + Cache 合并） ========
@@ -287,6 +291,63 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         }
       }
 
+      // ======== Step 6b: 采集未关注公众号的文章 URL（仅索引，不入 OB） ========
+      let disabledIndexed = 0;
+      for (const session of disabledAccounts) {
+        const ghId = session.username;
+        const displayName = session.displayName;
+        const dbSource = sourceByGhId.get(session.username)!;
+
+        try {
+          // 6b-1: 从 cache 提取文章 URL
+          const cached = weflowCache[ghId];
+          const cacheMessages: any[] = cached?.messages || [];
+          const cacheArticles = extractArticleUrls(cacheMessages);
+
+          // Also try API
+          let apiArticles: Array<{ url: string; title: string; createTime: number }> = [];
+          try {
+            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
+            if (msgsResp.ok) {
+              const msgsData = await msgsResp.json() as any;
+              apiArticles = extractArticleUrls(msgsData.messages || []);
+            }
+          } catch (e: any) { /* ignore API failure for disabled */ }
+
+          // Merge
+          const allUrls = new Map<string, { url: string; title: string; createTime: number }>();
+          for (const a of cacheArticles) allUrls.set(a.url, a);
+          for (const a of apiArticles) { if (!allUrls.has(a.url)) allUrls.set(a.url, a); }
+
+          // 6b-2: 存简化记录（仅 URL 索引，不抓取内容）
+          for (const article of allUrls.values()) {
+            try {
+              const contentHash = hashString(article.url);
+              const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+              if (existing) continue;
+
+              const title = article.title || displayName;
+              const publishedAt = article.createTime ? new Date(article.createTime * 1000).toISOString() : new Date().toISOString();
+
+              await sql`
+                INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
+                VALUES (${dbSource.id}, ${title}, '', ${title.slice(0, 150)}, ${article.url}, ${publishedAt}, 'wechat', ARRAY['未关注索引']::text[], ${contentHash}, NOW(), ${displayName})
+                ON CONFLICT (content_hash) DO NOTHING
+              `;
+              disabledIndexed++;
+            } catch (e: any) {
+              if (e.code !== '23505') { /* ignore dupes */ }
+            }
+          }
+        } catch (e: any) {
+          // Don't add to errors for disabled accounts - silent failure
+          console.warn(`[WeChat] Disabled account index failed for ${displayName}: ${e.message}`);
+        }
+      }
+      if (disabledIndexed > 0) {
+        console.log(`[WeChat] Indexed ${disabledIndexed} articles from ${disabledAccounts.length} disabled accounts`);
+      }
+
       // ======== Step 7: OB 补写（对已入库但缺少 OB 文件的文章） ========
       let obResynced = 0;
       try {
@@ -346,7 +407,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
         VALUES (${wechatSource.id}, '公众号管理刷新', 'success', ${inserted},
-          ${`同步 ${allSessions.length} 个公众号（新增 ${newlyAdded} 个），已启用 ${enabledAccounts.length} 个，获取 ${totalFetched} 条，入库 ${inserted} 条，OB补写 ${obResynced} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
+          ${`同步 ${allSessions.length} 个公众号（新增 ${newlyAdded} 个），已启用 ${enabledAccounts.length} 个，获取 ${totalFetched} 条，入库 ${inserted} 条，未关注索引 ${disabledIndexed} 条，OB补写 ${obResynced} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
           ${durationMs})
       `;
 
@@ -357,6 +418,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         totalAccounts: allSessions.length,
         fetched: totalFetched,
         inserted,
+        disabledIndexed,
         obResynced,
         errors: errors.length ? errors : undefined,
       });
