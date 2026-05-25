@@ -1364,6 +1364,79 @@ function switchPage(page, navEl) {
   if (page === 'logs') {
     loadLogsFromAPI();
   }
+  // 首页来源卡片：从 API 更新实时统计
+  if (page === 'sources') {
+    updateSourceStats();
+  }
+}
+
+// 从 API 获取实时统计并更新 SOURCE_CONFIGS
+async function updateSourceStats() {
+  try {
+    const stats = await api('/sync/stats');
+    if (!stats || !stats.sources) return;
+    
+    // 按 id 映射 API 返回的 source 统计
+    const srcMap = {};
+    for (const s of stats.sources) {
+      srcMap[s.id] = s;
+    }
+    
+    // 更新 SOURCE_CONFIGS 中的 articleCount / todayCount / lastFetch
+    // 按 sourceType/name 匹配：bilibili, wechat, youtube, rss, podcast, twitter 等
+    for (const sc of SOURCE_CONFIGS) {
+      // 尝试直接按 id 匹配
+      if (srcMap[sc.id]) {
+        sc.articleCount = srcMap[sc.id].article_count;
+        sc.todayCount = srcMap[sc.id].today_count;
+        sc.lastFetch = srcMap[sc.id].last_fetch ? new Date(srcMap[sc.id].last_fetch).toLocaleString('zh-CN') : '-';
+        continue;
+      }
+      // 按 sourceType 匹配（bilibili → bilibili-updates 的子来源求和）
+      if (sc.sourceType) {
+        let totalArticles = 0;
+        let todayArticles = 0;
+        let latestFetch = null;
+        for (const s of stats.sources) {
+          if (s.type === sc.sourceType || (sc.sourceType === 'rss' && s.type === 'rss')) {
+            totalArticles += s.article_count;
+            todayArticles += s.today_count;
+            if (!latestFetch || (s.last_fetch && s.last_fetch > latestFetch)) {
+              latestFetch = s.last_fetch;
+            }
+          }
+        }
+        // bilibili 特殊处理：子来源是 bilibili-updates 等
+        if (sc.sourceType === 'bilibili') {
+          totalArticles = 0; todayArticles = 0; latestFetch = null;
+          for (const s of stats.sources) {
+            if (s.type && s.type.startsWith('bilibili')) {
+              totalArticles += s.article_count;
+              todayArticles += s.today_count;
+              if (!latestFetch || (s.last_fetch && s.last_fetch > latestFetch)) {
+                latestFetch = s.last_fetch;
+              }
+            }
+          }
+        }
+        if (totalArticles > 0) {
+          sc.articleCount = totalArticles;
+          sc.todayCount = todayArticles;
+          sc.lastFetch = latestFetch ? new Date(latestFetch).toLocaleString('zh-CN') : '-';
+        }
+      }
+    }
+    
+    // 更新顶部的总文章数
+    if (stats.totalArticles !== undefined) {
+      document.getElementById('summaryArticles').textContent = stats.totalArticles;
+    }
+    
+    // 重新渲染卡片
+    renderSourceCards();
+  } catch (e) {
+    console.error('更新来源统计失败:', e);
+  }
 }
 
 // ===== 系统设置 =====
