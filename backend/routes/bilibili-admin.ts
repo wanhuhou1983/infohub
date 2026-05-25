@@ -33,11 +33,15 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       const [bilibiliSource] = await sql`SELECT id, config FROM sources WHERE type = 'bilibili' AND parent_id IS NULL LIMIT 1`;
       if (!bilibiliSource) return c.json({ error: 'B站信息源未配置' }, 400);
 
+      // Find updates source
+      const [updatesSource] = await sql`SELECT id FROM sources WHERE type = 'bilibili-updates' AND parent_id = ${bilibiliSource.id} LIMIT 1`;
+      if (!updatesSource) return c.json({ error: 'B站更新源未配置' }, 400);
+
       const accounts = await sql`
         SELECT s.id, s.name, s.enabled, s.config->>'mid' AS mid,
                (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_video_at
         FROM sources s
-        WHERE s.type = 'bilibili' AND s.parent_id = ${bilibiliSource.id}
+        WHERE s.type = 'bilibili-updates' AND s.parent_id = ${updatesSource.id}
         ORDER BY s.enabled DESC, s.name ASC
       `;
 
@@ -229,6 +233,9 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       let inserted = 0;
       const errors: string[] = [];
 
+      // 获取 SESSDATA 传递给 bili-service
+      const sessdata = (bilibiliSource.config as any)?.sessdata || '';
+
       // 延迟一秒后再请求空间 API，避免紧接 nav 校验后被限流
       await new Promise(r => setTimeout(r, 1000));
 
@@ -237,29 +244,27 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
         const name = account.name;
 
         try {
-          // 使用 Playwright 浏览器调用 B 站 WBI 签名 API（绕过 412 反爬）
-          const scriptPath = BILIBILI_FETCH_SCRIPT;
-          let stdout: string;
-          try {
-            stdout = execSync(`python3 "${scriptPath}" ${mid} 1`, {
-              timeout: 60000,
-              encoding: 'utf-8',
-            }).trim();
-          } catch (execErr: any) {
-            errors.push(`${name}: Playwright 采集失败 (${execErr.message})`);
-            continue;
-          }
-
+          // 使用 bili-service HTTP API（Playwright 浏览器绕过 412 反爬）
           let videos: any[];
           try {
-            const parsed = JSON.parse(stdout);
-            if (!Array.isArray(parsed)) {
-              errors.push(`${name}: 脚本返回非数组格式`);
+            const resp = await fetch('http://bili-service:8979/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mid, max_pages: 1, sessdata }),
+              signal: AbortSignal.timeout(55000),
+            });
+            if (!resp.ok) {
+              errors.push(`${name}: bili-service HTTP ${resp.status}`);
               continue;
             }
-            videos = parsed;
-          } catch {
-            errors.push(`${name}: 脚本输出解析失败`);
+            const data = await resp.json() as any;
+            if (!data.ok) {
+              errors.push(`${name}: bili-service 返回错误: ${data.error || 'unknown'}`);
+              continue;
+            }
+            videos = data.videos || [];
+          } catch (fetchErr: any) {
+            errors.push(`${name}: bili-service 调用失败 (${fetchErr.message})`);
             continue;
           }
 
