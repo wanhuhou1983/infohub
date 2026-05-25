@@ -743,6 +743,64 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
     }
   });
 
+
+  // POST /sync-following — 从 B站同步关注列表到 PG (不重复插入，默认禁用)
+  router.post('/sync-following', async (c) => {
+    try {
+      const [bilibiliSource] = await sql`SELECT id, config FROM sources WHERE type = 'bilibili' AND parent_id IS NULL LIMIT 1`;
+      if (!bilibiliSource) return c.json({ error: 'B站源未配置' }, 400);
+      const sessdata = (bilibiliSource.config as any)?.sessdata || '';
+      if (!sessdata) return c.json({ error: '未配置 SESSDATA，请先配置 B站 Cookie' }, 400);
+
+      // 获取 updates 父节点
+      const [updatesSource] = await sql`SELECT id FROM sources WHERE type = 'bilibili-updates' AND parent_id = ${bilibiliSource.id} LIMIT 1`;
+      if (!updatesSource) return c.json({ error: 'B站更新源子节点未配置' }, 400);
+
+      // 调用 bili-service 获取关注列表
+      const resp = await fetch('http://bili-service:8979/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'followings', sessdata }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!resp.ok) return c.json({ error: 'bili-service 调用失败' }, 502);
+      const data = await resp.json() as any;
+      if (!data.ok) return c.json({ error: data.error || 'bili-service 返回失败' }, 502);
+      const followings = data.followings || [];
+      if (followings.length === 0) return c.json({ ok: true, message: '关注列表为空', total: 0, added: 0, skipped: 0 });
+
+      let added = 0;
+      let skipped = 0;
+
+      // 查询 PG 中已有的 mid 列表
+      const existingMids = new Set<string>();
+      const existingRows = await sql`SELECT config->>'mid' AS mid FROM sources WHERE type = 'bilibili-updates' AND parent_id = ${updatesSource.id}`;
+      for (const row of existingRows) {
+        const mid = (row as any).mid;
+        if (mid) existingMids.add(mid);
+      }
+
+      // 批量插入不重复的 UP 主
+      for (const f of followings) {
+        if (existingMids.has(f.mid)) {
+          skipped++;
+          continue;
+        }
+        await sql`INSERT INTO sources (name, type, parent_id, config, enabled, created_at) VALUES (${f.name}, 'bilibili-updates', ${updatesSource.id}, ${sql.json({ mid: f.mid })}, false, NOW())`;
+        added++;
+      }
+
+      return c.json({
+        ok: true,
+        total: followings.length,
+        added,
+        skipped,
+        message: added > 0 ? `新增 ${added} 个 UP 主，已在 Admin 页面搜索启用` : '关注列表已是最新',
+      });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
   return router;
 }
 
