@@ -991,17 +991,10 @@ async function loadSources() {
     const hasChildren = s.children && s.children.length > 0;
     const isExpanded = expandedSources.has(s.id);
     
-    // 计算文章数
-    const stat = statsMap.get(s.id);
-    let articleCount = stat?.article_count || 0;
-    let unreadCount = stat?.unread_count || 0;
-    if (hasChildren) {
-      for (const child of s.children) {
-        const cs = statsMap.get(child.id);
-        articleCount += cs?.article_count || 0;
-        unreadCount += cs?.unread_count || 0;
-      }
-    }
+    // 计算文章数（递归统计子节点）
+    const counts = calcTreeCounts(s, statsMap);
+    let articleCount = counts.article;
+    let unreadCount = counts.unread;
     
     let html = `
     <div class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-surface2 transition ${active}" onclick="filterBySource(${s.id})">
@@ -1017,26 +1010,65 @@ async function loadSources() {
       <span class="text-xs text-muted">${articleCount}</span>
     </div>`;
     
-    // 展开的子源
+    // 展开的子源（支持多层嵌套）
     if (hasChildren && isExpanded) {
       html += `<div class="ml-5 border-l border-border pl-2 space-y-0.5">`;
       for (const child of s.children) {
-        const childActive = currentSourceId === child.id ? 'bg-surface2' : '';
-        const cs = statsMap.get(child.id);
-        const cCount = cs?.article_count || 0;
-        const cUnread = cs?.unread_count || 0;
-        // B站子源不再显示设置按钮（设置已移到admin页面）
-        const settingsBtn = '';
-        html += `
-        <div class="flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer hover:bg-surface2 transition text-xs ${childActive}" onclick="filterBySource(${child.id})">
-          <span class="text-muted flex-1 truncate">${child.name}</span>
-          ${settingsBtn}
-          ${cUnread > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1 py-0 rounded">${cUnread}</span>` : ''}
-          <span class="text-muted">${cCount}</span>
-        </div>`;
+        html += renderTreeNode(child, statsMap, 3);
       }
       html += `</div>`;
     }
+    
+    return html;
+  }).join('');
+}
+
+// 递归渲染树节点（支持任意层级嵌套）
+function calcTreeCounts(node, statsMap) {
+  let article = statsMap.get(node.id)?.article_count || 0;
+  let unread = statsMap.get(node.id)?.unread_count || 0;
+  if (node.children && node.children.length > 0) {
+    for (const c of node.children) {
+      const sub = calcTreeCounts(c, statsMap);
+      article += sub.article;
+      unread += sub.unread;
+    }
+  }
+  return { article, unread };
+}
+
+function renderTreeNode(node, statsMap, depth = 2) {
+  const hasSubChildren = node.children && node.children.length > 0;
+  const subExpanded = expandedSources.has(node.id);
+  const nodeActive = currentSourceId === node.id ? 'bg-surface2' : '';
+  // B站和YouTube子源跳过设置按钮
+  const settingsBtn = '';
+  // 统计数据：递归求和
+  const counts = calcTreeCounts(node, statsMap);
+  const cCount = counts.article;
+  const cUnread = counts.unread;
+  const textSize = depth >= 3 ? 'text-xs' : 'text-xs';
+  const indent = depth >= 3 ? 'ml-4' : '';
+  
+  let html = `
+    <div class="flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer hover:bg-surface2 transition ${textSize} ${nodeActive} ${indent}" onclick="filterBySource(${node.id})">
+      ${hasSubChildren ? `<span class="text-xs text-muted w-3 cursor-pointer select-none" onclick="event.stopPropagation(); toggleSourceExpand(${node.id})">${subExpanded ? '▼' : '▶'}</span>` : '<span class="w-3"></span>'}
+      <span class="text-muted flex-1 truncate">${node.name}</span>
+      ${settingsBtn}
+      ${cUnread > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1 py-0 rounded">${cUnread}</span>` : ''}
+      <span class="text-muted">${cCount}</span>
+    </div>`;
+  
+  if (hasSubChildren && subExpanded) {
+    html += `<div class="${depth >= 3 ? 'ml-5' : 'ml-3'} border-l border-border pl-2 space-y-0.5">`;
+    for (const sub of node.children) {
+      html += renderTreeNode(sub, statsMap, depth + 1);
+    }
+    html += `</div>`;
+  }
+  
+  return html;
+}
     
     return html;
   }).join('');
