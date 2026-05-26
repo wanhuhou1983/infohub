@@ -12,9 +12,7 @@ import { writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { saveArticleFile, hashString } from '../../file-storage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const PENTI_SCRIPT_DIR = path.join(
-  process.env.HOME || '/root', '.workbuddy/skills/penti-tugua/scripts'
-);
+const PENTI_SCRIPT_DIR = path.resolve(__dirname, '../../skills/penti-tugua/scripts');
 
 export function createPentiRoutes(sql: Sql): Hono {
   const router = new Hono();
