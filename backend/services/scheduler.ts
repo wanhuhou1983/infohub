@@ -229,12 +229,15 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
       SELECT a.id, a.title, a.content, s.name, s.type
       FROM articles a JOIN sources s ON a.source_id = s.id
       WHERE a.fetched_at::date = ${today}
-        AND (s.type IN ('twitter', 'twitter-updates', 'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
-             OR (s.type = 'rss' AND a.content ~ '[a-zA-Z]{20,}'))
-        AND (a.title ~ '[a-zA-Z]{10,}' OR a.content ~ '[a-zA-Z]{50,}')
+        AND (
+          s.type IN ('twitter', 'twitter-updates', 'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
+          OR (s.type = 'rss' AND a.content ~ '[a-zA-Z]{20,}')
+        )
+        AND (a.title ~ '[a-zA-Z]{5,}' OR a.content ~ '[a-zA-Z]{20,}')
         AND a.content NOT LIKE '%【中文翻译】%'
+        AND length(coalesce(a.content, '')) > 10
       ORDER BY a.id
-      LIMIT 30
+      LIMIT 200
     `;
 
     if (engArticles.length > 0) {
@@ -243,7 +246,10 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
       const translationResults = await Promise.allSettled(
         engArticles.map((article: any) => translationLimit(async () => {
           const content = article.content || '';
-          if (!isEnglish(content)) return;
+          // Skip only if content is purely non-English (Chinese/empty)
+          if (content.length < 10) return;
+          const enChars = (content.match(/[a-zA-Z]/g) || []).length;
+          if (enChars < 5) return;
           const translated = await translateToChinese(content);
           if (!translated || translated === content) return;
 
