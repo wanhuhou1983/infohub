@@ -19,8 +19,8 @@ import { classifyByFeed, extractTags } from '../services/classifier.js';
 import RssParser from 'rss-parser';
 
 /** VPS Worker 配置 */
-const VPS_WORKER_URL = process.env.VPS_WORKER_URL || 'http://107.175.49.215:3100';
-const WORKER_TOKEN = process.env.WORKER_TOKEN || 'linhu50115';
+const BILI_SERVICE_URL = process.env.BILI_SERVICE_URL || 'http://bili-service:8979';
+const TWITTER_COOKIES = process.env.TWITTER_COOKIES || '';  // Format: "ct0=xxx; auth_token=xxx"
 
 /** Nitter 实例列表，用于容错回退 */
 const NITTER_INSTANCES = [
@@ -60,29 +60,32 @@ function decodeHtml(str: string): string {
  * 通过 VPS Playwright 浏览器采集 x.com 推文
  */
 async function fetchPlaywrightTweets(handle: string): Promise<any[]> {
-  const resp = await fetch(`${VPS_WORKER_URL}/worker/twitter/scrape`, {
+  // 调用本地 bili-service 的 Playwright Twitter 采集端点
+  const resp = await fetch(`${BILI_SERVICE_URL}/`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${WORKER_TOKEN}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ handle, maxTweets: 20 }),
-    signal: AbortSignal.timeout(60000),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'twitter',
+      handle,
+      max_tweets: 20,
+      cookies: TWITTER_COOKIES,
+    }),
+    signal: AbortSignal.timeout(90000),
   });
 
-  if (!resp.ok) throw new Error(`Playwright 采集返回 ${resp.status}`);
+  if (!resp.ok) throw new Error(`本地 Playwright 采集返回 ${resp.status}`);
 
   const data: any = await resp.json();
   if (!data.ok || !data.tweets || data.tweets.length === 0) {
-    throw new Error('Playwright 采集无结果');
+    throw new Error('本地 Playwright 采集无结果');
   }
 
-  // 将 Playwright 格式转换为 Nitter RSS item 格式
+  // 将采集格式转换为内部格式（与旧格式兼容）
   return data.tweets.map((t: any) => {
     const text = t.text || '';
     const statsStr = [
       t.stats?.replies ? `${t.stats.replies} replies` : '',
-      t.stats?.reposts ? `${t.stats.reposts} reposts` : '',
+      t.stats?.retweets ? `${t.stats.retweets} retweets` : '',
       t.stats?.likes ? `${t.stats.likes} likes` : '',
       t.stats?.views ? `${t.stats.views} views` : '',
     ].filter(Boolean).join(' | ');
@@ -91,11 +94,11 @@ async function fetchPlaywrightTweets(handle: string): Promise<any[]> {
 
     const content = [text, statsStr, imgHtml].filter(Boolean).join('\n\n');
 
-    const tweetId = t.url?.split('/status/').pop() || '';
+    const tweetId = t.id || t.url?.split('/status/').pop() || '';
 
     return {
       title: text.slice(0, 100),
-      link: t.url || '',
+      link: t.url || `https://x.com/${handle}/status/${tweetId}`,
       pubDate: t.timestamp || new Date().toISOString(),
       content,
       contentSnippet: text.slice(0, 200),
@@ -130,8 +133,8 @@ async function fetchNitterFeed(handle: string): Promise<any[]> {
 
   // ── 第二阶：VPS Worker Nitter RSS 代理 ──
   try {
-    const resp = await fetch(`${VPS_WORKER_URL}/worker/twitter/rss/${encodeURIComponent(handle)}`, {
-      headers: { 'Authorization': `Bearer ${WORKER_TOKEN}` },
+    const resp = await fetch(`${BILI_SERVICE_URL}/twitter/rss/${encodeURIComponent(handle)}`, {
+      headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(25000),
     });
     if (resp.ok) {
@@ -174,8 +177,8 @@ async function fetchNitterFeed(handle: string): Promise<any[]> {
 async function inferUserName(handle: string): Promise<string | null> {
   // ── 优先：VPS Worker ──
   try {
-    const resp = await fetch(`${VPS_WORKER_URL}/worker/twitter/user-info/${encodeURIComponent(handle)}`, {
-      headers: { 'Authorization': `Bearer ${WORKER_TOKEN}` },
+    const resp = await fetch(`${BILI_SERVICE_URL}/twitter/user-info/${encodeURIComponent(handle)}`, {
+      headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(15000),
     });
     if (resp.ok) {

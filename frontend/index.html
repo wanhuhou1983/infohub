@@ -122,16 +122,7 @@ tailwind.config = {
   /* contain: paint 可能会导致显示异常，暂不添加特殊 CSS */
 
   /* ===== 桌面端侧边栏折叠动画 ===== */
-  .sidebar-collapsed {
-    width: 0 !important;
-    min-width: 0 !important;
-    overflow: hidden !important;
-    padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
-    opacity: 0;
-    pointer-events: none;
-  }
+  /* .sidebar-collapsed removed - sidebar always visible */
 
   /* ===== 底部迷你播放条 ===== */
   .mini-player {
@@ -295,6 +286,14 @@ tailwind.config = {
           </button>
         </div>
         <div class="flex items-center gap-2 mt-3">
+          <input id="bilibiliSessdata" type="text" placeholder="SESSDATA（登录 B站后从 Cookie 获取，用于高清播放）"
+            class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent placeholder-muted font-mono text-xs"
+            onchange="saveBilibiliSessdata(this.value)">
+          <button class="bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs px-3 py-1.5 rounded-lg transition border border-green-500/20" onclick="document.getElementById('bilibiliSessdata').value=''; saveBilibiliSessdata('')">
+            清除
+          </button>
+        </div>
+        <div class="flex items-center gap-2 mt-2">
           <input id="bilibiliSearchInput" type="text" placeholder="搜索 UP 主名称..."
             class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent placeholder-muted"
             oninput="searchBilibiliUppers(this.value)">
@@ -684,73 +683,35 @@ tailwind.config = {
     </div>
   </aside>
 
-  <!-- 桌面端侧边栏折叠按钮 -->
-  <button id="sidebarToggle" onclick="toggleDesktopSidebar()"
-    class="hidden md:flex items-center justify-center w-5 shrink-0 cursor-pointer text-muted hover:text-accent hover:bg-surface/50 rounded transition-all duration-200 ease-in-out self-start mt-3 ml-2 mr-4"
-    title="折叠侧边栏" style="min-width: 20px;">
-    <svg id="sidebarToggleIcon" class="w-3.5 h-3.5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-  </button>
 
-  <!-- 主内容区 -->
-  <main id="mainContent" class="flex-1 min-w-0 max-w-4xl">
-    <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
-      <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
-      <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
-      <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
-      <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
-      <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
-    </div>
-    <div id="articleList" class="space-y-1"></div>
-    <div id="loadMore" class="text-center py-4 hidden">
-      <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
-    </div>
-  </main>
+  <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
+  <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
+    <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
+      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
+        <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
+        <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
+        <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
+        <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
+        <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
+      </div>
+      <div id="articleList" class="space-y-1"></div>
+      <div id="loadMore" class="text-center py-4 hidden">
+        <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
+      </div>
+    </main>
 
-  <!-- 文章阅读覆盖层：点击文章后全屏弹出，遮住信息源侧边栏和标题栏 -->
-  <div id="articleOverlay" class="fixed inset-0 z-[100] hidden" style="background: #0f1117;">
-    <div class="flex flex-col h-full">
-      <!-- 顶栏：字体缩放 + 关闭 -->
-      <header class="h-14 border-b border-border flex items-center justify-between px-4 md:px-6 shrink-0 bg-surface">
-        <div class="flex items-center gap-2">
-          <span class="text-xs text-muted select-none">文章详情</span>
-        </div>
-        <div class="flex items-center gap-2">
-          <button class="text-muted hover:text-fg transition p-1" onclick="adjustFontSize(-1)" title="缩小字体">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 12H4"/></svg>
-          </button>
-          <span id="detailFontIndicator" class="text-xs text-muted w-8 text-center select-none">130%</span>
-          <button class="text-muted hover:text-fg transition p-1" onclick="adjustFontSize(1)" title="放大字体">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          </button>
-          <div class="w-px h-5 bg-border mx-1"></div>
-          <button class="text-muted hover:text-fg transition p-1" onclick="closeDetail()" title="关闭 (Esc)">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          </button>
-        </div>
-      </header>
-      <!-- 正文（移动端单栏，桌面端三栏） -->
-      <div class="flex flex-col md:flex-row flex-1 overflow-hidden">
-        <!-- TOC 导航栏 -->
-        <div id="tocPanel" class="hidden md:hidden w-56 shrink-0 border-r border-border overflow-y-auto bg-surface">
-          <div class="p-3 border-b border-border sticky top-0 bg-surface z-10">
-            <h3 class="text-sm font-medium text-muted select-none">📑 目录</h3>
-          </div>
-          <nav id="tocNav" class="p-2 space-y-0.5"></nav>
-        </div>
-        <!-- 正文栏 -->
-        <div id="detailPanel" class="flex-1 overflow-y-auto p-4 md:p-6 min-w-0">
-          <div id="detailContent"></div>
-        </div>
-        <!-- AI 解读栏（移动端自动排在正文下方） -->
-        <div id="aiPanel" class="md:flex-1 min-w-0 md:border-l border-t md:border-t-0 border-border overflow-y-auto bg-surface">
-          <div class="p-4 border-b border-border">
-            <h3 class="text-sm font-medium text-muted select-none">AI 解读</h3>
-          </div>
-          <div id="aiPanelContent" class="p-3 space-y-3"></div>
+    <!-- 文章详情列（始终可见） -->
+    <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
+      <div id="detailColumnContent" class="p-4 md:p-6">
+        <div class="flex flex-col items-center justify-center h-full text-center text-muted py-32">
+          <div class="text-4xl mb-4">📖</div>
+          <p class="text-sm">点击左侧文章查看详情</p>
         </div>
       </div>
     </div>
   </div>
+
+
 </div>
 
 <script>
@@ -766,7 +727,7 @@ let selectedArticleId = null;
 let offset = 0;
 const PAGE_SIZE = 30;
 let detailFontSize = 130; // 详情正文字号百分比
-let sidebarCollapsed = false; // 桌面端侧边栏是否折叠
+// sidebarCollapsed removed
 // 移动端侧边栏
 function toggleMobileSidebar() {
   const overlay = document.getElementById('mobileSidebarOverlay');
@@ -833,33 +794,6 @@ function mobileToggleExpand(id) {
 }
 function ms(sourceId) { filterBySource(sourceId); hideMobileSidebar(); }
 function mc(category) { filterByCategory(category); hideMobileSidebar(); }
-
-// 桌面端侧边栏折叠
-function toggleDesktopSidebar() {
-  sidebarCollapsed = !sidebarCollapsed;
-  applySidebarState();
-}
-function collapseDesktopSidebar() {
-  if (!sidebarCollapsed) {
-    sidebarCollapsed = true;
-    applySidebarState();
-  }
-}
-function applySidebarState() {
-  const sidebar = document.getElementById('desktopSidebar');
-  const toggleIcon = document.getElementById('sidebarToggleIcon');
-  const toggle = document.getElementById('sidebarToggle');
-  if (!sidebar) return;
-  if (sidebarCollapsed) {
-    sidebar.classList.add('sidebar-collapsed');
-    if (toggle) toggle.title = '展开侧边栏';
-    if (toggleIcon) toggleIcon.style.transform = 'rotate(180deg)';
-  } else {
-    sidebar.classList.remove('sidebar-collapsed');
-    if (toggle) toggle.title = '折叠侧边栏';
-    if (toggleIcon) toggleIcon.style.transform = '';
-  }
-}
 
 function toggleMobileSearch() {
   const bar = document.getElementById('mobileSearchBar');
@@ -991,17 +925,10 @@ async function loadSources() {
     const hasChildren = s.children && s.children.length > 0;
     const isExpanded = expandedSources.has(s.id);
     
-    // 计算文章数
-    const stat = statsMap.get(s.id);
-    let articleCount = stat?.article_count || 0;
-    let unreadCount = stat?.unread_count || 0;
-    if (hasChildren) {
-      for (const child of s.children) {
-        const cs = statsMap.get(child.id);
-        articleCount += cs?.article_count || 0;
-        unreadCount += cs?.unread_count || 0;
-      }
-    }
+    // 计算文章数（递归统计子节点）
+    const counts = calcTreeCounts(s, statsMap);
+    let articleCount = counts.article;
+    let unreadCount = counts.unread;
     
     let html = `
     <div class="flex items-center gap-2 p-2 rounded-lg cursor-pointer hover:bg-surface2 transition ${active}" onclick="filterBySource(${s.id})">
@@ -1017,29 +944,64 @@ async function loadSources() {
       <span class="text-xs text-muted">${articleCount}</span>
     </div>`;
     
-    // 展开的子源
+    // 展开的子源（支持多层嵌套）
     if (hasChildren && isExpanded) {
       html += `<div class="ml-5 border-l border-border pl-2 space-y-0.5">`;
       for (const child of s.children) {
-        const childActive = currentSourceId === child.id ? 'bg-surface2' : '';
-        const cs = statsMap.get(child.id);
-        const cCount = cs?.article_count || 0;
-        const cUnread = cs?.unread_count || 0;
-        // B站子源不再显示设置按钮（设置已移到admin页面）
-        const settingsBtn = '';
-        html += `
-        <div class="flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer hover:bg-surface2 transition text-xs ${childActive}" onclick="filterBySource(${child.id})">
-          <span class="text-muted flex-1 truncate">${child.name}</span>
-          ${settingsBtn}
-          ${cUnread > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1 py-0 rounded">${cUnread}</span>` : ''}
-          <span class="text-muted">${cCount}</span>
-        </div>`;
+        html += renderTreeNode(child, statsMap, 3);
       }
       html += `</div>`;
     }
     
     return html;
   }).join('');
+}
+
+// 递归渲染树节点（支持任意层级嵌套）
+function calcTreeCounts(node, statsMap) {
+  let article = statsMap.get(node.id)?.article_count || 0;
+  let unread = statsMap.get(node.id)?.unread_count || 0;
+  if (node.children && node.children.length > 0) {
+    for (const c of node.children) {
+      const sub = calcTreeCounts(c, statsMap);
+      article += sub.article;
+      unread += sub.unread;
+    }
+  }
+  return { article, unread };
+}
+
+function renderTreeNode(node, statsMap, depth = 2) {
+  const hasSubChildren = node.children && node.children.length > 0;
+  const subExpanded = expandedSources.has(node.id);
+  const nodeActive = currentSourceId === node.id ? 'bg-surface2' : '';
+  // B站和YouTube子源跳过设置按钮
+  const settingsBtn = '';
+  // 统计数据：递归求和
+  const counts = calcTreeCounts(node, statsMap);
+  const cCount = counts.article;
+  const cUnread = counts.unread;
+  const textSize = depth >= 3 ? 'text-xs' : 'text-xs';
+  const indent = depth >= 3 ? 'ml-4' : '';
+  
+  let html = `
+    <div class="flex items-center gap-2 py-1.5 px-2 rounded-md cursor-pointer hover:bg-surface2 transition ${textSize} ${nodeActive} ${indent}" onclick="filterBySource(${node.id})">
+      ${hasSubChildren ? `<span class="text-xs text-muted w-3 cursor-pointer select-none" onclick="event.stopPropagation(); toggleSourceExpand(${node.id})">${subExpanded ? '▼' : '▶'}</span>` : '<span class="w-3"></span>'}
+      <span class="text-muted flex-1 truncate">${node.name}</span>
+      ${settingsBtn}
+      ${cUnread > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1 py-0 rounded">${cUnread}</span>` : ''}
+      <span class="text-muted">${cCount}</span>
+    </div>`;
+  
+  if (hasSubChildren && subExpanded) {
+    html += `<div class="${depth >= 3 ? 'ml-5' : 'ml-3'} border-l border-border pl-2 space-y-0.5">`;
+    for (const sub of node.children) {
+      html += renderTreeNode(sub, statsMap, depth + 1);
+    }
+    html += `</div>`;
+  }
+  
+  return html;
 }
 
 function toggleSourceExpand(id) {
@@ -1570,7 +1532,7 @@ function renderGroupDailyDetail(day) {
     `;
   }).join('');
 
-  document.getElementById('detailContent').innerHTML = `
+  document.getElementById('detailColumnContent').innerHTML = `
     <div class="mb-4">
       <div class="flex items-center gap-2 mb-3">
         <span class="source-badge bg-green-500/20 text-green-400">💬 ${day.groupName || '群聊'}</span>
@@ -1591,7 +1553,7 @@ function renderGroupDailyDetail(day) {
       ${msgList || '<div class="text-muted text-sm">暂无消息</div>'}
     </div>
   `;
-  document.getElementById('detailContent').scrollTop = 0;
+  document.getElementById('detailColumnContent').scrollTop = 0;
 }
 
 // ===== 统计 =====
@@ -1611,9 +1573,8 @@ async function selectArticle(id) {
   // 运行时校验：如果返回了错误或缺少关键字段，显示错误信息
   if (!article || article.error || !article.id) {
     console.warn('[selectArticle] /articles/' + id + ' 返回异常', article);
-    const el = document.getElementById('detailContent');
+    const el = document.getElementById('detailColumnContent');
     if (el) el.innerHTML = '<div class="text-center text-muted py-16"><p class="text-lg mb-2">😵 文章加载失败</p><p class="text-xs">' + ((article && article.error) || '未知错误，请检查后端日志') + '</p></div>';
-    document.getElementById('articleOverlay').classList.remove('hidden');
     return;
   }
 
@@ -1627,7 +1588,7 @@ async function selectArticle(id) {
   }
 
   const color = SOURCE_COLORS[article.source_type] || 'bg-gray-500/20 text-gray-400';
-  document.getElementById('articleOverlay').classList.remove('hidden');
+  // detailColumn always visible
 
   // 判断是否显示 AI 按钮
   const MAGAZINE_TYPES = ['xwlb', 'rmrb', 'magazine', 'tencent', 'ai'];
@@ -1656,8 +1617,9 @@ async function selectArticle(id) {
   const prevTitle = hasPrev ? currentArticleList[currentArticleIndex - 1].title : '';
   const nextTitle = hasNext ? currentArticleList[currentArticleIndex + 1].title : '';
 
-  document.getElementById('detailContent').innerHTML = `
-    <div class="mb-4">
+  document.getElementById('detailColumnContent').innerHTML = `
+    <div class="bg-surface rounded-xl border border-border p-4">
+<div class="mb-4">
       <!-- 上一篇/下一篇导航 -->
       <div class="flex items-center justify-between mb-3 pb-3 border-b border-border">
         <button onclick="navigateArticle(-1)" class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md ${hasPrev ? 'text-accent2 hover:bg-accent/10 cursor-pointer' : 'text-border cursor-not-allowed'} transition" ${hasPrev ? '' : 'disabled'}>
@@ -1670,11 +1632,69 @@ async function selectArticle(id) {
           <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </button>
       </div>
-      <div class="flex items-center gap-2 mb-3">
+      <!-- AI 解读/语音转录区域（默认空，点击按钮后填充） -->
+      <div id="aiArea-${id}" class="mb-3"></div>
+      <div class="flex items-center gap-2 mb-2">
         <span class="source-badge ${color}">${article.source_icon || '📄'} ${article.source_name || ''}</span>
         <span class="text-xs text-muted">${article.category || ''}</span>
         <span class="text-xs text-muted">${formatTime(article.published_at)}</span>
         ${article.extra?.duration ? `<span class="text-xs text-muted">⏱ ${article.extra.duration}</span>` : ''}
+      </div>
+      <!-- AI/翻译按钮 -->
+      <div class="flex items-center gap-2 flex-wrap mb-3">
+        ${showAiBtn ? `<button onclick="triggerAiAnalysis(${id})" id="aiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI解读
+        </button>` : ''}
+        ${showTranslateBtn ? `<button onclick="triggerAiTranslation(${id})" id="translateBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 transition border border-sky-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
+          翻译
+        </button>` : ''}
+        ${isBilibili || isPodcast || isYoutube ? `<button onclick="showSubtitleAnalysis(${id})" id="subtitleBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          转录
+        </button>` : ''}
+        ${isBilibili ? `<button onclick="playBiliVideo('${article.url || ''}', ${id})" id="biliPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-pink-500/10 text-pink-400 hover:bg-pink-500/20 transition border border-pink-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          播放
+        </button>
+        <button onclick="triggerBilibiliSubtitle(${id})" id="biliSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          ${hasSubtitle ? '刷新字幕' : '下载字幕'}
+        </button>
+        ${hasSubtitle ? `<button onclick="triggerBilibiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 解读字幕
+        </button>` : ''}
+        <button onclick="uploadBiliToNetdisk(${id})" id="biliNetdiskBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition border border-blue-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          收藏到网盘
+        </button>` : ''}
+        ${isYoutube ? `<button onclick="playYoutubeVideo('${article.url || ''}', ${id})" id="ytPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition border border-red-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          播放
+        </button>
+        <button onclick="triggerYoutubeSubtitle(${id})" id="ytSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          ${hasSubtitle ? '刷新字幕' : '下载字幕'}
+        </button>
+        ${hasSubtitle ? `<button onclick="triggerYoutubeSubtitleAnalysis(${id})" id="ytSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 解读字幕
+        </button>` : ''}` : ''}
+        ${isPodcast ? `<button onclick="playPodcast(${id})" id="podcastPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          播放
+        </button>
+        <button onclick="triggerPodcastTranscribe(${id})" id="podcastSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition border border-indigo-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          ${hasSubtitle ? '刷新字幕' : '转录文字'}
+        </button>
+        ${hasSubtitle ? `<button onclick="triggerPodcastSubtitleAnalysis(${id})" id="podcastSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          AI 解读字幕
+        </button>` : ''}` : ''}
+        ${showAiBtn || isPodcast ? '<span id="aiStatus-' + id + '" class="text-xs text-muted hidden"></span>' : ''}
       </div>
       <h2 class="text-base font-semibold leading-relaxed mb-3">${highlightText(getDisplayTitle(article.title), currentSearchQuery)}</h2>
     </div>
@@ -1736,136 +1756,10 @@ async function selectArticle(id) {
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
         原文链接
       </a>` : ''}
-    </div>
+    </div></div>
+
   `;
 
-  // ====== AI 栏渲染 ======
-  document.getElementById('aiPanelContent').innerHTML = `
-    ${showAiBtn || showTranslateBtn || isBilibili || isYoutube || isPodcast ? `
-    <div class="flex items-center gap-2 flex-wrap">
-      ${showAiBtn ? `<button onclick="triggerAiAnalysis(${id})" id="aiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        AI解读
-      </button>` : ''}
-      ${showTranslateBtn ? `<button onclick="triggerAiTranslation(${id})" id="translateBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 transition border border-sky-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
-        翻译
-      </button>` : ''}
-      ${isBilibili ? `<button onclick="playBiliVideo('${article.url || ''}', ${id})" id="biliPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-pink-500/10 text-pink-400 hover:bg-pink-500/20 transition border border-pink-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        播放
-      </button>
-      <button onclick="triggerBilibiliSubtitle(${id})" id="biliSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        ${hasSubtitle ? '刷新字幕' : '下载字幕'}
-      </button>
-      ${hasSubtitle ? `<button onclick="triggerBiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        AI 解读字幕
-      </button>` : ''}
-      <button onclick="uploadBiliToNetdisk(${id})" id="biliNetdiskBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition border border-blue-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        收藏到网盘
-      </button>` : ''}
-      ${isYoutube ? `<button onclick="playYoutubeVideo('${article.url || ''}', ${id})" id="ytPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-red-500/10 text-red-400 hover:bg-red-500/20 transition border border-red-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        播放
-      </button>
-      <button onclick="triggerYoutubeSubtitle(${id})" id="ytSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        ${hasSubtitle ? '刷新字幕' : '下载字幕'}
-      </button>
-      ${hasSubtitle ? `<button onclick="triggerYoutubeSubtitleAnalysis(${id})" id="ytSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        AI 解读字幕
-      </button>` : ''}` : ''}
-      ${isPodcast ? `<button onclick="playPodcast(${id})" id="podcastPlayBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        播放
-      </button>
-      <button onclick="triggerPodcastTranscribe(${id})" id="podcastSubBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition border border-indigo-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        ${hasSubtitle ? '刷新字幕' : '转录文字'}
-      </button>
-      ${hasSubtitle ? `<button onclick="triggerPodcastSubtitleAnalysis(${id})" id="podcastSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        AI 解读字幕
-      </button>` : ''}` : ''}
-      ${showAiBtn || isPodcast ? '<span id="aiStatus-' + id + '" class="text-xs text-muted hidden"></span>' : ''}
-    </div>` : ''}
-
-    <!-- 全文 AI 解读 -->
-    <div id="aiContent-${id}" class="bg-accent/10 border border-accent/20 rounded-lg p-3 ${hasAiContent ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-accent2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span id="aiLabel-${id}" class="text-sm font-medium text-accent2">${aiLabelText}</span>
-      </div>
-      <p id="aiText-${id}" class="text-fg/80 leading-relaxed whitespace-pre-wrap" style="font-size: 130%">${showTranslationContent ? existingTranslation : existingAnalysis || ''}</p>
-    </div>
-
-    <!-- B站字幕 -->
-    <div id="biliSubContent-${id}" class="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 ${(isBilibili && hasSubtitle) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        <span id="biliSubLabel-${id}" class="text-sm font-medium text-purple-400">字幕</span>
-        <span id="biliSubStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="biliSubText-${id}" class="text-sm text-fg/80 leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">${hasSubtitle ? existingSubtitle : ''}</div>
-    </div>
-
-    <!-- B站字幕 AI 解读 -->
-    <div id="biliSubAiContent-${id}" class="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 ${(isBilibili && hasSubtitleAnalysis) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span id="biliSubAiLabel-${id}" class="text-sm font-medium text-amber-400">AI 字幕解读</span>
-        <span id="biliSubAiStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="biliSubAiText-${id}" class="text-fg/80 leading-relaxed whitespace-pre-wrap" style="font-size: 130%">${hasSubtitleAnalysis ? subtitleAnalysis : ''}</div>
-    </div>
-
-    <!-- YouTube 字幕 -->
-    <div id="ytSubContent-${id}" class="bg-purple-500/5 border border-purple-500/20 rounded-lg p-3 ${(isYoutube && hasSubtitle) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        <span id="ytSubLabel-${id}" class="text-sm font-medium text-purple-400">字幕</span>
-        <span id="ytSubStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="ytSubText-${id}" class="text-sm text-fg/80 leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">${hasSubtitle ? existingSubtitle : ''}</div>
-    </div>
-
-    <!-- YouTube 字幕 AI 解读 -->
-    <div id="ytSubAiContent-${id}" class="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 ${(isYoutube && hasSubtitleAnalysis) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span id="ytSubAiLabel-${id}" class="text-sm font-medium text-amber-400">AI 字幕解读</span>
-        <span id="ytSubAiStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="ytSubAiText-${id}" class="text-fg/80 leading-relaxed whitespace-pre-wrap" style="font-size: 130%">${hasSubtitleAnalysis ? subtitleAnalysis : ''}</div>
-    </div>
-
-    <!-- 播客字幕 -->
-    <div id="podcastSubContent-${id}" class="bg-indigo-500/5 border border-indigo-500/20 rounded-lg p-3 ${(isPodcast && hasSubtitle) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
-        <span id="podcastSubLabel-${id}" class="text-sm font-medium text-indigo-400">播客字幕</span>
-        <span id="podcastSubStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="podcastSubText-${id}" class="text-sm text-fg/80 leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">${hasSubtitle ? existingSubtitle : ''}</div>
-    </div>
-
-    <!-- 播客字幕 AI 解读 -->
-    <div id="podcastSubAiContent-${id}" class="bg-amber-500/5 border border-amber-500/20 rounded-lg p-3 ${(isPodcast && hasSubtitleAnalysis) ? '' : 'hidden'}">
-      <div class="flex items-center gap-1.5 mb-1.5">
-        <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        <span id="podcastSubAiLabel-${id}" class="text-sm font-medium text-amber-400">AI 字幕解读</span>
-        <span id="podcastSubAiStatus-${id}" class="text-sm text-muted hidden"></span>
-      </div>
-      <div id="podcastSubAiText-${id}" class="text-fg/80 leading-relaxed whitespace-pre-wrap" style="font-size: 130%">${hasSubtitleAnalysis ? subtitleAnalysis : ''}</div>
-    </div>
-
-    <!-- 章节解读汇总区 -->
-    <div id="sectionAnalysisArea-${id}" class="space-y-2"></div>
-  `;
 
 
   // ====== TOC 导航渲染 ======
@@ -2099,16 +1993,11 @@ async function analyzeSection(btnEl, event) {
 // ===== AI 解读 =====
 async function triggerAiAnalysis(articleId) {
   const btn = document.getElementById(`aiBtn-${articleId}`);
-  const container = document.getElementById(`aiContent-${articleId}`);
-  const label = document.getElementById(`aiLabel-${articleId}`);
-  const text = document.getElementById(`aiText-${articleId}`);
-  const status = document.getElementById(`aiStatus-${articleId}`);
+  const area = document.getElementById(`aiArea-${articleId}`);
 
-  if (btn) { btn.disabled = true; btn.textContent = '生成中...'; }
-  container.classList.remove('hidden');
-  label.textContent = 'AI 摘要';
-  text.textContent = '正在生成分析结果...';
-  if (status) status.textContent = '分析中...';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="text-xs">生成中...</span>'; }
+
+  area.innerHTML = '<div class="bg-accent/5 rounded-lg p-3 border border-accent/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-accent2">🤖 AI 解读</span><span class="text-xs text-muted">生成中...</span></div><div class="text-xs text-muted">正在分析...</div></div>';
 
   try {
     const result = await api('/ai/analyze', {
@@ -2116,27 +2005,22 @@ async function triggerAiAnalysis(articleId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ article_id: articleId }),
     });
-    text.textContent = result.analysis || '（无结果）';
-    if (status) status.textContent = '';
+    area.innerHTML = '<div class="bg-accent/5 rounded-lg p-3 border border-accent/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-accent2">🤖 AI 解读</span><span class="text-xs text-muted"></span></div><div class="text-xs leading-relaxed text-fg/80">' + (result.analysis || '（无结果）') + '</div></div>';
   } catch (e) {
-    text.textContent = '分析失败: ' + (e.message || '未知错误');
-    if (status) status.textContent = '失败';
+    area.innerHTML = '<div class="bg-red-500/5 rounded-lg p-3 border border-red-500/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-red-400">🤖 AI 解读失败</span></div><div class="text-xs text-red-400">' + (e.message || '未知错误') + '</div></div>';
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> AI解读`; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> AI解读'; }
   }
 }
 
 // ===== AI 翻译 =====
 async function triggerAiTranslation(articleId) {
   const btn = document.getElementById(`translateBtn-${articleId}`);
-  const container = document.getElementById(`aiContent-${articleId}`);
-  const label = document.getElementById(`aiLabel-${articleId}`);
-  const text = document.getElementById(`aiText-${articleId}`);
+  const area = document.getElementById(`aiArea-${articleId}`);
 
-  if (btn) { btn.disabled = true; btn.textContent = '翻译中...'; }
-  container.classList.remove('hidden');
-  label.textContent = '翻译';
-  text.textContent = '正在翻译...';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="text-xs">翻译中...</span>'; }
+
+  area.innerHTML = '<div class="bg-sky-500/5 rounded-lg p-3 border border-sky-500/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-sky-400">🌐 翻译</span><span class="text-xs text-muted">翻译中...</span></div><div class="text-xs text-muted">正在翻译...</div></div>';
 
   try {
     const result = await api('/ai/translate', {
@@ -2144,11 +2028,11 @@ async function triggerAiTranslation(articleId) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ article_id: articleId }),
     });
-    text.textContent = result.translation || '（无结果）';
+    area.innerHTML = '<div class="bg-sky-500/5 rounded-lg p-3 border border-sky-500/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-sky-400">🌐 翻译</span><span class="text-xs text-muted"></span></div><div class="text-xs leading-relaxed text-fg/80">' + (result.translation || '（无结果）') + '</div></div>';
   } catch (e) {
-    text.textContent = '翻译失败: ' + (e.message || '未知错误');
+    area.innerHTML = '<div class="bg-red-500/5 rounded-lg p-3 border border-red-500/10 mb-3"><div class="flex items-center gap-2 mb-2"><span class="text-xs font-medium text-red-400">🌐 翻译失败</span></div><div class="text-xs text-red-400">' + (e.message || '未知错误') + '</div></div>';
   } finally {
-    if (btn) { btn.disabled = false; btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg> 翻译`; }
+    if (btn) { btn.disabled = false; btn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg> 翻译'; }
   }
 }
 
@@ -2516,7 +2400,8 @@ const MediaPlayer = {
     this.state = 'playing';
     this.title = title || 'B站视频';
     this.coverUrl = '';
-    this.biliUrl = `https://player.bilibili.com/player.html?bvid=${bvid}&autoplay=1`;
+    const sess = localStorage.getItem('bilibiliSessdata') || '';
+  this.biliUrl = `https://player.bilibili.com/player.html?bvid=${bvid}&autoplay=1${sess ? '&sessdata=' + sess : ''}`;
 
     // 显示迷你条
     this.show();
@@ -2940,14 +2825,15 @@ function hideBiliPlayer() {
 
 function closeDetail() {
   selectedArticleId = null;
-  document.getElementById('articleOverlay').classList.add('hidden');
+  // Clear detail content back to placeholder
+  document.getElementById('detailColumnContent').innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center text-muted py-32"><div class="text-4xl mb-4">📖</div><p class="text-sm">点击左侧文章查看详情</p></div>';
   loadArticles();
 }
 
 // Esc 键关闭覆盖层
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
-    if (!document.getElementById('articleOverlay').classList.contains('hidden')) {
+    if (selectedArticleId !== null) {
       closeDetail();
     } else if (!document.getElementById('biliPlayerModal').classList.contains('hidden')) {
       hideBiliPlayer(); // 最小化，不停止
@@ -3610,6 +3496,7 @@ let _bilibiliSettingsLoaded = false;
 
 async function showBilibiliAdmin() {
   document.getElementById('bilibiliAdminModal').classList.remove('hidden');
+  loadBilibiliSessdata();
   document.getElementById('bilibiliAdminStatus').textContent = '';
   document.getElementById('bilibiliSettingsArea').classList.add('hidden');
   document.getElementById('bilibiliSettingsBtn').innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg> 设置';
@@ -3618,6 +3505,21 @@ async function showBilibiliAdmin() {
 
 function hideBilibiliAdmin() {
   document.getElementById('bilibiliAdminModal').classList.add('hidden');
+}
+
+// B站 SESSDATA 保存/加载
+function saveBilibiliSessdata(value) {
+  if (value) {
+    localStorage.setItem('bilibiliSessdata', value);
+    showToast('SESSDATA 已保存');
+  } else {
+    localStorage.removeItem('bilibiliSessdata');
+    showToast('SESSDATA 已清除');
+  }
+}
+function loadBilibiliSessdata() {
+  const el = document.getElementById('bilibiliSessdata');
+  if (el) el.value = localStorage.getItem('bilibiliSessdata') || '';
 }
 
 function toggleBilibiliSettings() {

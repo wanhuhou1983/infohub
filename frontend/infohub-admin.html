@@ -170,10 +170,12 @@ tailwind.config = {
         <h1 class="text-xl font-semibold">定时任务</h1>
         <p class="text-sm text-muted mt-1">配置自动采集的时间和频率</p>
       </div>
-      <button class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showAddScheduleModal()">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        新建任务
-      </button>
+      <div class="flex items-center gap-2">
+        <button class="bg-surface2 hover:bg-border text-fg text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showCollectionSettingsModal()">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          采集设置
+        </button>
+      </div>
     </div>
 
     <div id="scheduleList" class="space-y-3"></div>
@@ -284,15 +286,6 @@ tailwind.config = {
           <label class="text-sm text-muted mb-1.5 block">WeFlow Token</label>
           <input type="password" id="weflow-token" placeholder="WeFlow API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
         </div>
-        <div>
-          <label class="text-sm text-muted mb-1.5 block">Miniflux URL</label>
-          <input type="text" id="miniflux-url" placeholder="http://localhost:8080" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-        </div>
-        <div>
-          <label class="text-sm text-muted mb-1.5 block">Miniflux 用户名</label>
-          <input type="text" id="miniflux-user" placeholder="Miniflux 用户名" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-        </div>
-      </div>
       <div class="mt-4 flex justify-end">
         <button onclick="saveApiConfig()" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
           保存配置
@@ -482,7 +475,7 @@ tailwind.config = {
             </select>
           </div>
           <div>
-            <label class="text-sm text-muted mb-1.5 block">Miniflux 分类</label>
+            <label class="text-sm text-muted mb-1.5 block">RSS 分类</label>
             <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
               <option>默认分类</option><option>技术</option><option>新闻</option><option>AI</option>
             </select>
@@ -575,6 +568,48 @@ tailwind.config = {
   </div>
 </div>
 
+
+<!-- ====== 采集设置弹窗 ====== -->
+<div id="collectionSettingsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
+  <div class="bg-surface rounded-xl border border-border w-full max-w-lg max-h-[80vh] fade-in flex flex-col">
+    <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <h2 class="font-semibold">采集设置</h2>
+      <button onclick="closeCollectionSettingsModal()" class="text-muted hover:text-fg transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-4 overflow-y-auto flex-1 space-y-5">
+      <!-- 每日执行时间 -->
+      <div>
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          全量采集时间
+        </h3>
+        <div class="flex items-center gap-3">
+          <label class="text-sm text-muted">每日</label>
+          <input type="time" id="collectionTime" value="22:00" class="bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+          <label class="text-sm text-muted">执行全量采集</label>
+        </div>
+      </div>
+
+      <!-- 各板块采集开关 -->
+      <div>
+        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          采集板块
+        </h3>
+        <div class="space-y-2" id="collectionSourceToggles">
+          <!-- JS 动态填充 -->
+        </div>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-border flex justify-end gap-3 shrink-0">
+      <button onclick="closeCollectionSettingsModal()" class="px-4 py-2 text-sm text-muted hover:text-fg rounded-lg transition">取消</button>
+      <button onclick="applyCollectionSettings()" class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium">保存设置</button>
+    </div>
+  </div>
+</div>
+
 <!-- ====== 新建定时任务弹窗 ====== -->
 <div id="addScheduleModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
   <div class="bg-surface rounded-xl border border-border w-full max-w-lg max-h-[90vh] overflow-y-auto fade-in">
@@ -639,7 +674,7 @@ tailwind.config = {
     <div class="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
       <div>
         <h2 class="font-semibold">RSS 配置</h2>
-        <p class="text-xs text-muted mt-0.5">配置 Miniflux 连接，管理订阅源</p>
+        <p class="text-xs text-muted mt-0.5">管理 RSS 订阅源，启用或禁用采集</p>
       </div>
       <button class="text-muted hover:text-fg" onclick="closeRssSettingsModal()">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -647,28 +682,7 @@ tailwind.config = {
     </div>
     
     <div class="flex-1 overflow-y-auto p-6 space-y-6">
-      <!-- Miniflux 连接配置 -->
-      <div>
-        <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg>
-          Miniflux 连接
-        </h3>
-        <div class="space-y-3">
-          <div>
-            <label class="text-xs text-muted mb-1 block">URL 地址</label>
-            <input type="text" id="rss-miniflux-url" placeholder="http://localhost:8084" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-xs text-muted mb-1 block">用户名</label>
-            <input type="text" id="rss-miniflux-user" placeholder="Miniflux 用户名" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-xs text-muted mb-1 block">API Token</label>
-            <input type="password" id="rss-miniflux-token" placeholder="Miniflux API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-        </div>
-      </div>
-      
+
       <!-- 订阅源列表 -->
       <div>
         <div class="flex items-center justify-between mb-3">
@@ -689,7 +703,7 @@ tailwind.config = {
     
     <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
       <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeRssSettingsModal()">取消</button>
-      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="saveRssSettings()">保存配置</button>
+      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="closeRssSettingsModal()">关闭</button>
     </div>
   </div>
 </div>
@@ -1147,10 +1161,10 @@ tailwind.config = {
 const SOURCE_CONFIGS = [
 
   {
-    id: 'rss', name: 'RSS 订阅', icon: '📡', type: 'miniflux',
+    id: 'rss', name: 'RSS 订阅', icon: '📡', type: 'api',
     color: 'bg-orange-500/20 text-orange-400',
-    description: '通过 Miniflux 管理 RSS 订阅源，点击右侧设置按钮配置',
-    config: { minifluxUrl: 'http://localhost:8084', totalFeeds: 28 },
+    description: '管理 RSS 订阅源，点击右侧设置按钮配置',
+    config: { method: 'RSS Parser' },
     enabled: true, articleCount: 523, todayCount: 18,
     lastFetch: '2026-04-22 17:00', status: 'success',
     feeds: [], // 通过设置弹窗管理，不在卡片显示
@@ -1242,13 +1256,60 @@ const SOURCE_CONFIGS = [
 ];
 
 const SCHEDULES = [
+  { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'active', lastResult: 'success' },
   { id: 1, name: '新闻联播每日采集', sources: ['📺 新闻联播'], cron: '0 20 * * *', lastRun: '2026-04-22 20:01', nextRun: '2026-04-23 20:00', status: 'active', lastResult: 'success' },
   { id: 2, name: 'RSS 定时同步', sources: ['📡 RSS'], cron: '0 */6 * * *', lastRun: '2026-04-22 18:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
   { id: 3, name: '公众号同步', sources: ['💬 公众号'], cron: '0 */4 * * *', lastRun: '2026-04-22 16:00', nextRun: '2026-04-23 00:00', status: 'active', lastResult: 'success' },
   { id: 4, name: 'AI 新闻早报', sources: ['🤖 AI资讯'], cron: '0 9 * * *', lastRun: '2026-04-22 09:15', nextRun: '2026-04-23 09:00', status: 'active', lastResult: 'success' },
   { id: 5, name: '腾讯新闻同步', sources: ['📰 腾讯新闻'], cron: '0 8,14,20 * * *', lastRun: '2026-04-22 20:00', nextRun: '2026-04-23 08:00', status: 'active', lastResult: 'success' },
-  { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'paused', lastResult: 'success' },
 ];
+
+// ===== 采集设置（存 localStorage） =====
+const DEFAULT_COLLECTION_SETTINGS = {
+  dailyTime: '22:00',
+  sources: {
+    wechat: { name: '微信公众号', enabled: true },
+    rss: { name: 'RSS 订阅', enabled: true },
+    bilibili: { name: '哔哩哔哩', enabled: true },
+    youtube: { name: 'YouTube', enabled: true },
+    newspaper: { name: '报刊杂志', enabled: true },
+    podcast: { name: '播客', enabled: true },
+    twitter: { name: 'Twitter/X', enabled: true },
+    xwlb: { name: '新闻联播', enabled: true },
+    penti: { name: '喷嚏图卦', enabled: true },
+    rmrb: { name: '人民日报', enabled: true },
+    wechat_group: { name: '微信群聊', enabled: false },
+  }
+};
+
+let CACHED_SETTINGS = null;
+
+async function getCollectionSettings() {
+  if (CACHED_SETTINGS) return CACHED_SETTINGS;
+  try {
+    const data = await api('/scheduler/settings');
+    if (data && data.sources) {
+      CACHED_SETTINGS = data;
+      return data;
+    }
+  } catch (e) { /* ignore */ }
+  // Fallback to localStorage
+  try {
+    const saved = localStorage.getItem('collectionSettings');
+    if (saved) return { ...DEFAULT_COLLECTION_SETTINGS, ...JSON.parse(saved) };
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_COLLECTION_SETTINGS));
+}
+
+async function saveCollectionSettings(settings) {
+  try {
+    await api('/scheduler/settings', { method: 'POST', body: JSON.stringify(settings) });
+    CACHED_SETTINGS = settings;
+  } catch (e) {
+    console.warn('Failed to save to server, saving locally:', e.message);
+    localStorage.setItem('collectionSettings', JSON.stringify(settings));
+  }
+}
 
 // ===== API 客户端 =====
 const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
@@ -1303,6 +1364,79 @@ function switchPage(page, navEl) {
   if (page === 'logs') {
     loadLogsFromAPI();
   }
+  // 首页来源卡片：从 API 更新实时统计
+  if (page === 'sources') {
+    updateSourceStats();
+  }
+}
+
+// 从 API 获取实时统计并更新 SOURCE_CONFIGS
+async function updateSourceStats() {
+  try {
+    const stats = await api('/sync/stats');
+    if (!stats || !stats.sources) return;
+    
+    // 按 id 映射 API 返回的 source 统计
+    const srcMap = {};
+    for (const s of stats.sources) {
+      srcMap[s.id] = s;
+    }
+    
+    // 更新 SOURCE_CONFIGS 中的 articleCount / todayCount / lastFetch
+    // 按 sourceType/name 匹配：bilibili, wechat, youtube, rss, podcast, twitter 等
+    for (const sc of SOURCE_CONFIGS) {
+      // 尝试直接按 id 匹配
+      if (srcMap[sc.id]) {
+        sc.articleCount = srcMap[sc.id].article_count;
+        sc.todayCount = srcMap[sc.id].today_count;
+        sc.lastFetch = srcMap[sc.id].last_fetch ? new Date(srcMap[sc.id].last_fetch).toLocaleString('zh-CN') : '-';
+        continue;
+      }
+      // 按 sourceType 匹配（bilibili → bilibili-updates 的子来源求和）
+      if (sc.sourceType) {
+        let totalArticles = 0;
+        let todayArticles = 0;
+        let latestFetch = null;
+        for (const s of stats.sources) {
+          if (s.type === sc.sourceType || (sc.sourceType === 'rss' && s.type === 'rss')) {
+            totalArticles += s.article_count;
+            todayArticles += s.today_count;
+            if (!latestFetch || (s.last_fetch && s.last_fetch > latestFetch)) {
+              latestFetch = s.last_fetch;
+            }
+          }
+        }
+        // bilibili 特殊处理：子来源是 bilibili-updates 等
+        if (sc.sourceType === 'bilibili') {
+          totalArticles = 0; todayArticles = 0; latestFetch = null;
+          for (const s of stats.sources) {
+            if (s.type && s.type.startsWith('bilibili')) {
+              totalArticles += s.article_count;
+              todayArticles += s.today_count;
+              if (!latestFetch || (s.last_fetch && s.last_fetch > latestFetch)) {
+                latestFetch = s.last_fetch;
+              }
+            }
+          }
+        }
+        if (totalArticles > 0) {
+          sc.articleCount = totalArticles;
+          sc.todayCount = todayArticles;
+          sc.lastFetch = latestFetch ? new Date(latestFetch).toLocaleString('zh-CN') : '-';
+        }
+      }
+    }
+    
+    // 更新顶部的总文章数
+    if (stats.totalArticles !== undefined) {
+      document.getElementById('summaryArticles').textContent = stats.totalArticles;
+    }
+    
+    // 重新渲染卡片
+    renderSourceCards();
+  } catch (e) {
+    console.error('更新来源统计失败:', e);
+  }
 }
 
 // ===== 系统设置 =====
@@ -1316,10 +1450,7 @@ async function loadApiConfig() {
     if (imageStorageEl && data.image_storage) {
       // 已在 HTML 中硬编码显示"本地存储"
     }
-    document.getElementById('weflow-url').value = data.weflow_url || '';
-    document.getElementById('miniflux-url').value = data.miniflux_url || '';
-    document.getElementById('miniflux-user').value = data.miniflux_user || '';
-    // 翻译 API 配置
+    document.getElementById('weflow-url').value = data.weflow_url || '';    // 翻译 API 配置
     document.getElementById('google-translate-key').value = data.google_translate_key || '';
     document.getElementById('azure-translate-key').value = data.azure_translate_key || '';
     document.getElementById('azure-translate-region').value = data.azure_translate_region || 'eastasia';
@@ -1357,8 +1488,6 @@ async function saveApiConfig() {
     weflow_url: document.getElementById('weflow-url').value,
     weflow_token: document.getElementById('weflow-token').value,
     weflow_token: document.getElementById('weflow-token').value,
-    miniflux_url: document.getElementById('miniflux-url').value,
-    miniflux_user: document.getElementById('miniflux-user').value,
     // 翻译 API 配置
     google_translate_key: document.getElementById('google-translate-key').value,
     azure_translate_key: document.getElementById('azure-translate-key').value,
@@ -1408,7 +1537,7 @@ function renderSourceCards() {
   el.innerHTML = sortedSources.map(s => {
     const statusDot = s.status === 'success' ? 'bg-success' : s.status === 'paused' ? 'bg-muted' : 'bg-danger';
     const statusText = s.status === 'success' ? '运行中' : s.status === 'paused' ? '已暂停' : '异常';
-    const typeLabel = { builtin: '内置', miniflux: 'Miniflux', spider: '爬虫', api: 'API', aggregation: '聚合', import: '导入' }[s.type];
+    const typeLabel = { builtin: '内置', spider: '爬虫', api: 'API', aggregation: '聚合', import: '导入', rss: 'RSS', wechat: '微信', bilibili: 'B站', youtube: 'YouTube', podcast: '播客', twitter: 'Twitter', magazine: '报刊', wechat_group: '群聊' }[s.sourceType] || s.sourceType || '其他';
 
     return `
     <div class="bg-surface rounded-xl border border-border p-4 hover:border-accent/30 transition">
@@ -1511,6 +1640,56 @@ function renderSourceCards() {
       </div>
     </div>`;
   }).join('');
+}
+
+
+async function showCollectionSettingsModal() {
+  const settings = await getCollectionSettings();
+  document.getElementById('collectionTime').value = settings.dailyTime || '22:00';
+  
+  const container = document.getElementById('collectionSourceToggles');
+  container.innerHTML = '';
+  for (const [key, src] of Object.entries(settings.sources)) {
+    const row = document.createElement('div');
+    row.className = 'flex items-center justify-between p-3 bg-surface2 rounded-lg';
+    row.innerHTML = `
+      <span class="text-sm font-medium">${src.name}</span>
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="checkbox" data-source-key="${key}" class="sr-only peer collection-toggle" ${src.enabled ? 'checked' : ''}>
+        <div class="w-9 h-5 bg-border rounded-full peer peer-checked:bg-accent transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-fg after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full"></div>
+      </label>
+    `;
+    container.appendChild(row);
+  }
+  
+  document.getElementById('collectionSettingsModal').classList.remove('hidden');
+  document.getElementById('collectionSettingsModal').classList.add('flex');
+}
+
+function closeCollectionSettingsModal() {
+  document.getElementById('collectionSettingsModal').classList.add('hidden');
+  document.getElementById('collectionSettingsModal').classList.remove('flex');
+}
+
+async function applyCollectionSettings() {
+  const settings = await getCollectionSettings();
+  settings.dailyTime = document.getElementById('collectionTime').value;
+  
+  document.querySelectorAll('.collection-toggle').forEach(toggle => {
+    const key = toggle.dataset.sourceKey;
+    if (settings.sources[key]) {
+      settings.sources[key].enabled = toggle.checked;
+    }
+  });
+  
+  await saveCollectionSettings(settings);
+  
+  // Update SCHEDULES[0] cron based on time
+  const [h, m] = settings.dailyTime.split(':');
+  SCHEDULES[0].cron = `${m} ${h} * * *`;
+  renderSchedules();
+  
+  closeCollectionSettingsModal();
 }
 
 function renderSchedules() {
@@ -1756,8 +1935,22 @@ async function runSourceFetch(id) {
   alert('立即采集 ' + source.name + '（功能开发中）');
 }
 
-function runScheduleNow(id) {
-  alert('立即执行任务 ' + id + '（样稿演示）');
+async function runScheduleNow(id) {
+  const btn = document.querySelector(`[data-schedule-id="${id}"]`);
+  if (btn) { btn.disabled = true; btn.textContent = '执行中...'; }
+  try {
+    const data = await api('/scheduler/run', { method: 'POST' });
+    if (data.ok) {
+      alert('全量采集完成！正在刷新数据...');
+      location.reload();
+    } else {
+      alert('采集失败: ' + (data.error || '未知错误'));
+    }
+  } catch (e) {
+    alert('请求失败: ' + e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '立即执行'; }
+  }
 }
 
 function removeSource(id) {
@@ -1805,9 +1998,6 @@ async function loadRssSettings() {
     // 加载环境配置
     const data = await api('/sources/config/env');
     
-    document.getElementById('rss-miniflux-url').value = data.miniflux_url || '';
-    document.getElementById('rss-miniflux-user').value = data.miniflux_user || '';
-    document.getElementById('rss-miniflux-token').value = data.miniflux_token || '';
     
     // 加载订阅源列表
     await loadRssFeeds();
@@ -1828,7 +2018,7 @@ async function loadRssFeeds() {
       return;
     }
     
-    const sources = (Array.isArray(data) ? data : data.sources || []).filter(s => s.type === 'rss');
+    const sources = (Array.isArray(data) ? data : data.sources || []).filter(s => s.type === 'rss' && s.parent_id);
     if (sources.length === 0) {
       listEl.innerHTML = '<div class="text-center text-muted py-4">暂无订阅源</div>';
       return;
@@ -1857,7 +2047,7 @@ function renderRssFeeds() {
       </label>
       <div class="flex-1 min-w-0">
         <div class="text-sm font-medium truncate">${s.name}</div>
-        <div class="text-xs text-muted truncate">${s.url || '无 URL'}</div>
+        <div class="text-xs text-muted truncate">${s.config?.feed_url || s.url || '无 URL'}</div>
       </div>
       <span class="text-xs ${s.enabled ? 'text-success' : 'text-muted'}">
         ${s.enabled ? '已启用' : '已禁用'}
@@ -1891,47 +2081,29 @@ async function toggleRssFeed(feedId, enabled) {
 }
 
 async function refreshRssFeeds() {
-  const listEl = document.getElementById('rssFeedsList');
-  listEl.innerHTML = '<div class="text-center text-muted py-4">刷新中，请稍候...</div>';
+  const enabledFeeds = rssFeedsData.filter(s => s.enabled && s.config?.feed_url);
+  if (enabledFeeds.length === 0) { alert('没有已启用的订阅源'); return; }
   
-  try {
-    const data = await api('/sync/rss', { method: 'POST' });
-    
-    if (data.error) {
-      listEl.innerHTML = `<div class="text-center text-danger py-4">${data.error}</div>`;
-      return;
-    }
-    
-    // 重新加载
-    await loadRssFeeds();
-  } catch (e) {
-    listEl.innerHTML = `<div class="text-center text-danger py-4">刷新失败: ${e.message}</div>`;
+  const listEl = document.getElementById('rssFeedsList');
+  listEl.innerHTML = '<div class="text-center text-muted py-4">正在采集 ' + enabledFeeds.length + ' 个订阅源...</div>';
+  
+  let totalInserted = 0;
+  for (const source of enabledFeeds) {
+    try {
+      const data = await api('/fetch/rss', {
+        method: 'POST',
+        body: JSON.stringify({ feedUrl: source.config.feed_url, sourceName: source.name })
+      });
+      if (data.inserted) totalInserted += data.inserted;
+    } catch (e) { console.error('RSS fetch error:', source.name, e); }
   }
+  
+  await loadRssFeeds();
+  alert('采集完成，新增 ' + totalInserted + ' 篇文章');
 }
 
 async function saveRssSettings() {
-  const config = {
-    miniflux_url: document.getElementById('rss-miniflux-url').value,
-    miniflux_user: document.getElementById('rss-miniflux-user').value,
-    miniflux_token: document.getElementById('rss-miniflux-token').value,
-  };
-  
-  try {
-    const data = await api('/sources/config/env', {
-      method: 'PATCH',
-      body: JSON.stringify(config)
-    });
-    
-    if (data.error) {
-      alert('保存失败: ' + data.error);
-      return;
-    }
-    
-    alert('保存成功！');
-    closeRssSettingsModal();
-  } catch (e) {
-    alert('保存失败: ' + e.message);
-  }
+  closeRssSettingsModal();
 }
 
 // ===== 公众号配置弹窗 =====
@@ -3218,7 +3390,7 @@ function getIconByType(type) {
 function getTypeBySourceType(type) {
   const types = {
     xwlb: 'builtin',
-    rss: 'miniflux',
+    rss: 'rss',
     wechat: 'spider',
     bilibili: 'spider',
     magazine: 'import',

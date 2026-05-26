@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-B站 UP 主视频列表采集 + 关注列表同步 - HTTP 服务
-使用 Playwright 绕过 412 反爬 + WBI 签名
+媒体采集 Playwright 服务
+支持：B站视频/字幕/音频 + Twitter/X 推文采集
 """
 import json
 import sys
 import os
+import re
+import time
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from playwright.sync_api import sync_playwright
 
 PORT = int(os.environ.get('PORT', '8979'))
+
+# ═══════════════════════════════════════════
+# B站采集
+# ═══════════════════════════════════════════
 
 def fetch_videos(mid: str, max_pages: int = 1, sessdata: str = '') -> list[dict]:
     """Use Playwright to fetch UP主 video list"""
@@ -87,30 +93,25 @@ def _bili_get(path: str, sessdata: str) -> dict:
         return json.loads(resp.read().decode('utf-8'))
 
 
-
 def fetch_subtitle(bvid: str, sessdata: str = '') -> dict:
     """Fetch B站 video subtitle via direct HTTP API."""
     try:
-        # Step 1: Get video info (cid)
         view = _bili_get(f'/x/web-interface/view?bvid={bvid}', sessdata)
         vdata = view.get('data', {})
         cid = vdata.get('cid', '')
         if not cid:
-            # try first page
             pages = vdata.get('pages', [])
             if pages:
                 cid = pages[0].get('cid', '')
         if not cid:
             return {'ok': False, 'error': 'no cid found'}
 
-        # Step 2: Get player info (subtitle list)
         player = _bili_get(f'/x/player/v2?bvid={bvid}&cid={cid}', sessdata)
         subtitle_info = player.get('data', {}).get('subtitle', {})
         subtitles = subtitle_info.get('subtitles', [])
         if not subtitles:
             return {'ok': False, 'error': 'no subtitles available', 'cid': cid}
 
-        # Try to get Chinese subtitle first, then English, then any
         preferred = ['zh-CN', 'zh-Hans', 'zh-cn', 'zh-CHS', 'en-US', 'en']
         selected = None
         for lang in preferred:
@@ -130,18 +131,15 @@ def fetch_subtitle(bvid: str, sessdata: str = '') -> dict:
         if sub_url.startswith('//'):
             sub_url = 'https:' + sub_url
 
-        # Step 3: Download subtitle JSON
         req = urllib.request.Request(sub_url)
         req.add_header('User-Agent', 'Mozilla/5.0')
         with urllib.request.urlopen(req, timeout=15) as resp:
             sub_data = json.loads(resp.read().decode('utf-8'))
 
-        # Extract text from subtitle body
         bodies = sub_data.get('body', [])
         if not bodies:
             return {'ok': False, 'error': 'subtitle body is empty', 'cid': cid}
 
-        # Concatenate subtitle text
         text_parts = []
         for item in bodies:
             content = item.get('content', '')
@@ -165,7 +163,6 @@ def fetch_subtitle(bvid: str, sessdata: str = '') -> dict:
 def fetch_audio_url(bvid: str, sessdata: str = '') -> dict:
     """Get B站 video audio stream URL."""
     try:
-        # Step 1: Get video info (cid)
         view = _bili_get(f'/x/web-interface/view?bvid={bvid}', sessdata)
         vdata = view.get('data', {})
         cid = vdata.get('cid', '')
@@ -176,7 +173,6 @@ def fetch_audio_url(bvid: str, sessdata: str = '') -> dict:
         if not cid:
             return {'ok': False, 'error': 'no cid found'}
 
-        # Step 2: Get play URL
         play = _bili_get(f'/x/player/playurl?bvid={bvid}&cid={cid}&qn=0&type=mp4', sessdata)
         durl = play.get('data', {}).get('durl', [])
         if durl:
@@ -184,7 +180,6 @@ def fetch_audio_url(bvid: str, sessdata: str = '') -> dict:
             if audio_url:
                 return {'ok': True, 'audio_url': audio_url, 'cid': cid, 'bvid': bvid}
 
-        # Try dash format
         dash = play.get('data', {}).get('dash', {})
         audios = dash.get('audio', [])
         if audios:
@@ -195,9 +190,10 @@ def fetch_audio_url(bvid: str, sessdata: str = '') -> dict:
         return {'ok': False, 'error': 'no audio URL found', 'cid': cid}
     except Exception as e:
         return {'ok': False, 'error': str(e), 'bvid': bvid}
+
+
 def fetch_followings(sessdata: str) -> list[dict]:
     """Fetch the current user's following list via B站 direct HTTP API."""
-    # First get current user's mid
     nav = _bili_get('/x/web-interface/nav', sessdata)
     my_mid = str(nav.get('data', {}).get('mid', ''))
     if not my_mid:
@@ -207,7 +203,7 @@ def fetch_followings(sessdata: str) -> list[dict]:
     print(f"[BiliService] Fetching followings for mid={my_mid}", flush=True)
     all_items = []
 
-    for pn in range(1, 20):  # max 20 pages * 50 = 1000
+    for pn in range(1, 20):
         try:
             data = _bili_get(f'/x/relation/followings?vmid={my_mid}&pn={pn}&ps=50', sessdata)
             if data.get('code') != 0:
@@ -229,6 +225,235 @@ def fetch_followings(sessdata: str) -> list[dict]:
 
     return all_items
 
+
+# ═══════════════════════════════════════════
+# Twitter/X 推文采集
+# ═══════════════════════════════════════════
+
+def fetch_twitter(handle: str, max_tweets: int = 20, cookies: str = '') -> list[dict]:
+    """
+    用 Playwright 打开 X.com 用户主页，拦截 UserTweets API 响应，抓取推文。
+    
+    cookies: 可选，格式为 "ct0=xxx; auth_token=xxx" 或完整 cookie 字符串。
+             提供登录 cookie 可获取更多推文（包括隐藏内容）。
+    """
+    tweets = []
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context_args = {
+            'user_agent': (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/137.0.0.0 Safari/537.36"
+            ),
+            'viewport': {'width': 1280, 'height': 900},
+        }
+        if cookies:
+            # 支持多种 cookie 格式
+            cookie_list = []
+            for pair in cookies.split(';'):
+                pair = pair.strip()
+                if '=' in pair:
+                    k, v = pair.split('=', 1)
+                    k = k.strip()
+                    v = v.strip()
+                    if k and v:
+                        cookie_list.append({
+                            'name': k,
+                            'value': v,
+                            'domain': '.x.com',
+                            'path': '/',
+                        })
+                        # 也设置 .twitter.com 域名
+                        cookie_list.append({
+                            'name': k,
+                            'value': v,
+                            'domain': '.twitter.com',
+                            'path': '/',
+                        })
+            if cookie_list:
+                context_args['extra_http_headers'] = {
+                    'Cookie': cookies
+                }
+                # 也通过 add_cookies 设置（某些场景更可靠）
+                browser_context = browser.new_context(**{k: v for k, v in context_args.items() if k != 'extra_http_headers'})
+                browser_context.add_cookies(cookie_list)
+                context = browser_context
+                if 'extra_http_headers' in context_args:
+                    context = browser.new_context(**context_args)
+                    context.add_cookies(cookie_list)
+            else:
+                context = browser.new_context(**context_args)
+        else:
+            context = browser.new_context(**context_args)
+
+        page = context.new_page()
+        
+        # 拦截 UserTweets / UserByScreenName API
+        captured_tweets = []
+        captured_user = {}
+        
+        def intercept_response(response):
+            url = response.url
+            try:
+                # 拦截 UserTweets API（包含推文列表）
+                if ('UserTweets' in url or 'UserMedia' in url or 'UserLikes' in url) and response.status == 200:
+                    body = response.body()
+                    data = json.loads(body)
+                    # 解析 tweets
+                    _extract_tweets(data, captured_tweets)
+                    
+                # 拦截 UserByScreenName（获取用户信息）
+                if 'UserByScreenName' in url and response.status == 200:
+                    body = response.body()
+                    data = json.loads(body)
+                    user_result = (data.get('data', {})
+                                     .get('user', {})
+                                     .get('result', {}))
+                    captured_user['name'] = user_result.get('legacy', {}).get('name', '')
+                    captured_user['screen_name'] = user_result.get('legacy', {}).get('screen_name', '')
+            except Exception as e:
+                pass  # 忽略解析错误
+
+        page.on("response", intercept_response)
+
+        # 访问用户主页
+        profile_url = f"https://x.com/{handle}"
+        print(f"[Twitter] Navigating to {profile_url}", flush=True)
+        
+        try:
+            page.goto(profile_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(3000)
+            
+            # 等待推文加载
+            try:
+                page.wait_for_selector('[data-testid="tweetText"], article', timeout=15000)
+            except:
+                print("[Twitter] No tweet elements found, trying scroll...", flush=True)
+            
+            # 滚动加载更多推文
+            scrolls = 0
+            max_scrolls = min(max_tweets // 5 + 2, 10)  # 动态滚动次数
+            while len(captured_tweets) < max_tweets and scrolls < max_scrolls:
+                page.evaluate("window.scrollBy(0, 800)")
+                page.wait_for_timeout(2000)
+                scrolls += 1
+                print(f"[Twitter] Scroll {scrolls}, captured {len(captured_tweets)} tweets", flush=True)
+            
+        except Exception as e:
+            print(f"[Twitter] Error loading profile: {e}", flush=True)
+        
+        browser.close()
+    
+    # 去重（按 tweetId）
+    seen = set()
+    unique = []
+    for t in captured_tweets:
+        tid = t.get('id', '')
+        if tid and tid not in seen:
+            seen.add(tid)
+            unique.append(t)
+    
+    # 限制数量
+    tweets = unique[:max_tweets]
+    
+    print(f"[Twitter] Captured {len(captured_tweets)} total, {len(tweets)} unique for @{handle}", flush=True)
+    return tweets
+
+
+def _extract_tweets(data: dict, out: list):
+    """从 Twitter API JSON 响应中提取推文"""
+    try:
+        instructions = (data.get('data', {})
+                           .get('user', {})
+                           .get('result', {})
+                           .get('timeline_v2', {})
+                           .get('timeline', {})
+                           .get('instructions', []))
+        
+        for inst in instructions:
+            entries = inst.get('entries', [])
+            for entry in entries:
+                content = entry.get('content', {})
+                item = content.get('itemContent', {})
+                tweet_results = item.get('tweet_results', {}).get('result', {})
+                
+                if not tweet_results:
+                    # 可能嵌套在 timeline 的其他位置
+                    continue
+                
+                # 处理 retweeted_status
+                legacy = tweet_results.get('legacy', {})
+                retweeted = tweet_results.get('retweeted_status_result', {}).get('result', {})
+                if retweeted:
+                    actual_tweet = retweeted
+                    actual_legacy = retweeted.get('legacy', {})
+                    is_retweet = True
+                else:
+                    actual_tweet = tweet_results
+                    actual_legacy = legacy
+                    is_retweet = False
+                
+                tweet_id = actual_legacy.get('id_str', '') or actual_tweet.get('rest_id', '')
+                if not tweet_id:
+                    continue
+                
+                text = actual_legacy.get('full_text', '')
+                created_at = actual_legacy.get('created_at', '')
+                user = actual_legacy.get('user', {})
+                screen_name = user.get('screen_name', '')
+                user_name = user.get('name', '')
+                
+                # 统计
+                stats = {
+                    'replies': str(actual_legacy.get('reply_count', 0)),
+                    'retweets': str(actual_legacy.get('retweet_count', 0)),
+                    'likes': str(actual_legacy.get('favorite_count', 0)),
+                    'views': str(actual_tweet.get('views', {}).get('count', '')),
+                }
+                
+                # 图片
+                media = actual_legacy.get('extended_entities', {}).get('media', [])
+                images = [m.get('media_url_https', '') for m in media if m.get('type') == 'photo']
+                video_urls = []
+                for m in media:
+                    if m.get('type') in ('video', 'animated_gif'):
+                        variants = m.get('video_info', {}).get('variants', [])
+                        mp4 = [v for v in variants if v.get('content_type') == 'video/mp4']
+                        if mp4:
+                            best = max(mp4, key=lambda v: v.get('bitrate', 0))
+                            video_urls.append(best.get('url', ''))
+                
+                # 转换 created_at 格式
+                timestamp = created_at
+                if created_at:
+                    try:
+                        from datetime import datetime
+                        dt = datetime.strptime(created_at, '%a %b %d %H:%M:%S %z %Y')
+                        timestamp = dt.isoformat()
+                    except:
+                        pass
+                
+                tweet = {
+                    'id': tweet_id,
+                    'text': text,
+                    'url': f"https://x.com/{screen_name}/status/{tweet_id}",
+                    'timestamp': timestamp,
+                    'author': user_name,
+                    'screen_name': screen_name,
+                    'is_retweet': is_retweet,
+                    'stats': stats,
+                    'images': images,
+                    'videos': video_urls,
+                }
+                out.append(tweet)
+    except Exception as e:
+        print(f"[Twitter] Extract error: {e}", flush=True)
+
+
+# ═══════════════════════════════════════════
+# HTTP Handler
+# ═══════════════════════════════════════════
 
 class BiliHandler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -288,12 +513,25 @@ class BiliHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json(500, {'error': str(e)})
         
+        elif action == 'twitter':
+            handle = req.get('handle', '')
+            if not handle:
+                self._json(400, {'error': 'handle is required for action=twitter'})
+                return
+            max_tweets = int(req.get('max_tweets', 20))
+            cookies = req.get('cookies', '')
+            try:
+                tweets = fetch_twitter(handle, max_tweets, cookies)
+                self._json(200, {'ok': True, 'handle': handle, 'tweets': tweets, 'count': len(tweets)})
+            except Exception as e:
+                self._json(500, {'error': str(e), 'handle': handle})
+        
         else:
             self._json(400, {'error': f'Unknown action: {action}'})
     
     def do_GET(self):
         if self.path == '/health':
-            self._json(200, {'status': 'ok', 'service': 'bili-fetch'})
+            self._json(200, {'status': 'ok', 'service': 'media-fetch'})
         else:
             self._json(404, {'error': 'Not found. POST /'})
     
@@ -305,10 +543,10 @@ class BiliHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
     
     def log_message(self, format, *args):
-        print(f"[BiliService] {args[0]} {args[1]} {args[2]}")
+        print(f"[MediaService] {args[0]} {args[1]} {args[2]}")
 
 
 if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', PORT), BiliHandler)
-    print(f"B站 Playwright service running on port {PORT}")
+    print(f"Media Playwright service running on port {PORT}", flush=True)
     server.serve_forever()
