@@ -438,31 +438,41 @@ if (!IS_CLOUD) {
         return;
       }
       const [srcCount] = await sql`SELECT COUNT(*)::int AS c FROM sources`;
-      const articles = await sql`
-        SELECT a.source_id, a.title, a.content, a.summary, a.url, a.author,
-               a.published_at, a.fetched_at, a.category, a.tags, a.content_hash
-        FROM articles a
-        WHERE a.fetched_at > NOW() - interval '24 hours'
-        ORDER BY a.id DESC LIMIT 50
-      `;
-      if (articles.length === 0) {
-        console.log('[cloud-sync] 24h内无新文章');
-        return;
+      // Batch push all 24h articles (50 per batch)
+      const total24h = await sql`SELECT count(*)::int as c FROM articles WHERE fetched_at > NOW() - interval '24 hours'`;
+      const total = total24h[0]?.c || 0;
+      console.log('[cloud-sync] 24h articles to sync: ' + total);
+      let totalUpserted = 0;
+      const batchSize = 50;
+      for (let offset = 0; offset < total; offset += batchSize) {
+        const batch = await sql`
+          SELECT a.source_id, a.title, a.content, a.summary, a.url, a.author,
+                 a.published_at, a.fetched_at, a.category, a.tags, a.content_hash
+          FROM articles a
+          WHERE a.fetched_at > NOW() - interval '24 hours'
+          ORDER BY a.id DESC
+          OFFSET ${offset} LIMIT ${batchSize}
+        `;
+        if (batch.length === 0) break;
+        const cloudUrl = 'https://info.wuflux.cn/api/cloud-sync/push';
+        try {
+          const resp = await fetch(cloudUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SYNC_TOKEN },
+            body: JSON.stringify({ articles: batch }),
+            signal: AbortSignal.timeout(30000),
+          });
+          if (resp.ok) {
+            const result = await resp.json();
+            totalUpserted += (result.articles_upserted || 0);
+          } else {
+            console.error('[cloud-sync] Batch offset=' + offset + ' API ' + resp.status);
+          }
+        } catch (e: any) {
+          console.error('[cloud-sync] Batch offset=' + offset + ' error: ' + e.message);
+        }
       }
-      const cloudUrl = 'https://info.wuflux.cn/api/cloud-sync/push';
-      const resp = await fetch(cloudUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SYNC_TOKEN },
-        body: JSON.stringify({ articles }),
-        signal: AbortSignal.timeout(30000),
-      });
-      if (resp.ok) {
-        const result = await resp.json();
-        console.log('[cloud-sync] OK: ' + JSON.stringify(result));
-      } else {
-        const errText = (await resp.text()).slice(0, 100);
-        console.error('[cloud-sync] API ' + resp.status + ': ' + errText);
-      }
+      console.log('[cloud-sync] OK: ' + totalUpserted + '/' + total + ' articles synced');
     } catch (e: any) {
       console.error('[cloud-sync] FAIL:', e.message);
     }
