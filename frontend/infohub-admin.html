@@ -716,12 +716,7 @@ tailwind.config = {
         <h2 class="font-semibold">公众号配置</h2>
         <p class="text-xs text-muted mt-0.5">勾选要显示的公众号，按最新文章时间排序</p>
       </div>
-      <div class="flex items-center gap-3">
-        <button onclick="refreshWechatAccounts()" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          同步
-        </button>
-        <button class="text-muted hover:text-fg" onclick="closeWechatAccountsModal()">
+      <button class="text-muted hover:text-fg" onclick="closeWechatAccountsModal()">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -734,7 +729,10 @@ tailwind.config = {
         刷新列表
       </button>
       <div class="flex-1"></div>
-      <!-- 搜索框 -->
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="wechat-select-all" class="accent-accent" onchange="toggleSelectAllWechat()">
+        <span id="wechatSelectAllText">全选</span>
+      </label>
       <div class="relative">
         <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input type="text" id="wechat-search-input" placeholder="搜索公众号..." 
@@ -775,12 +773,7 @@ tailwind.config = {
         <h2 class="font-semibold">群聊配置</h2>
         <p class="text-xs text-muted mt-0.5">勾选要监控的微信群聊，启用后自动采集消息</p>
       </div>
-      <div class="flex items-center gap-3">
-        <button onclick="refreshWechatGroups()" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          同步
-        </button>
-        <button class="text-muted hover:text-fg" onclick="closeWechatGroupModal()">
+      <button class="text-muted hover:text-fg" onclick="closeWechatGroupModal()">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -792,6 +785,10 @@ tailwind.config = {
         刷新列表
       </button>
       <div class="flex-1"></div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="wechat-group-select-all" class="accent-accent" onchange="toggleSelectAllWechatGroups()">
+        <span id="wechatGroupSelectAllText">全选</span>
+      </label>
       <div class="relative">
         <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input type="text" id="wechat-group-search-input" placeholder="搜索群聊..." 
@@ -832,15 +829,9 @@ tailwind.config = {
         <h2 class="font-semibold">B站 UP 主配置</h2>
         <p class="text-xs text-muted mt-0.5">勾选要显示的 UP 主，按最新视频时间排序</p>
       </div>
-      <div class="flex items-center gap-3">
-        <button onclick="refreshBilibiliUppers()" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          同步
-        </button>
-        <button class="text-muted hover:text-fg" onclick="closeBilibiliUppersModal()">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
+      <button class="text-muted hover:text-fg" onclick="closeBilibiliUppersModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
     <!-- SESSDATA 配置栏 -->
     <div class="px-6 py-2.5 border-b border-border shrink-0 bg-surface2/30">
@@ -857,20 +848,28 @@ tailwind.config = {
         <button id="bilibili-sessdata-edit-btn" onclick="showEditSessdata()" class="text-xs text-accent hover:text-accent2 transition">更新</button>
       </div>
     </div>
-    <!-- 顶部操作栏 -->
+    <!-- 工具栏 -->
     <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
       <button onclick="refreshBilibiliUppers()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
         刷新列表
       </button>
-      <button onclick="refreshBilibiliUppers()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        刷新列表
-      </button>
-      <button class="text-xs bg-accent/20 text-accent px-2.5 py-1 rounded transition" onclick="openBilibiliUpperModal()">
-        + 添加 UP 主
-      </button>
       <div class="flex-1"></div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="bilibili-select-all" class="accent-accent" onchange="toggleSelectAllBilibili()">
+        <span id="bilibiliSelectAllText">全选</span>
+      </label>
+      <div class="relative">
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="bilibili-search-input" placeholder="搜索 UP 主..." 
+          class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
+          oninput="renderBilibiliUppers()">
+      </div>
+      <label class="flex items-center gap-2 text-xs text-muted">
+        <input type="checkbox" id="bilibili-show-enabled-only" class="accent-accent" onchange="renderBilibiliUppers()">
+        只显示已启用
+      </label>
+    </div>
       <!-- 搜索框 -->
       <div class="relative">
         <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -916,45 +915,23 @@ tailwind.config = {
         <h2 class="font-semibold">YouTube 频道配置</h2>
         <p class="text-xs text-muted mt-0.5">勾选要显示的频道，按最新视频时间排序</p>
       </div>
-      <div class="flex items-center gap-3">
-        <button onclick="refreshYoutubeUppers()" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          同步
-        </button>
-        <button class="text-muted hover:text-fg" onclick="closeYoutubeUppersModal()">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
+      <button class="text-muted hover:text-fg" onclick="closeYoutubeUppersModal()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
+    <!-- 工具栏 -->
     <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
-      <!-- Google 授权状态显示 -->
-      <div id="googleAuthStatus" class="flex items-center gap-2 text-xs">
-        <span class="text-muted">Google 账号:</span>
-        <span id="googleAuthUser" class="text-muted">未授权</span>
-        <button id="googleLoginBtn" class="text-xs bg-red-600/20 text-red-400 px-2.5 py-1 rounded transition hover:bg-red-600/30" onclick="googleLogin()">
-          登录 Google
-        </button>
-        <button id="googleLogoutBtn" class="hidden text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="googleLogout()">
-          退出
-        </button>
-      </div>
-      <button id="importSubscriptionsBtn" class="hidden text-xs bg-accent/20 text-accent px-2.5 py-1 rounded transition hover:bg-accent/30" onclick="showImportSubscriptionsModal()">
-        📥 导入关注
+      <button onclick="refreshYoutubeUppers()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        刷新列表
       </button>
       <div class="flex-1"></div>
-      <button onclick="refreshYoutubeUppers()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        刷新列表
-      </button>
-      <button onclick="refreshYoutubeUppers()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        刷新列表
-      </button>
-      <button class="text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="openYoutubeUpperModal()">
-        + 手动添加
-      </button>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="youtube-select-all" class="accent-accent" onchange="toggleSelectAllYoutubeUppers()">
+        <span id="youtubeSelectAllText">全选</span>
+      </label>
       <div class="relative">
-        <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <svg class="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input type="text" id="youtube-search-input" placeholder="搜索频道..."
           class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
           oninput="renderYoutubeUppers()">
@@ -1079,12 +1056,7 @@ tailwind.config = {
         <h2 class="font-semibold">🐦 X (Twitter) 账号配置</h2>
         <p class="text-xs text-muted mt-0.5">添加要关注的 X 账号，开启后自动采集推文（数据来源：Nitter RSS）</p>
       </div>
-      <div class="flex items-center gap-3">
-        <button onclick="refreshTwitterAccounts()" class="bg-accent hover:bg-accent2 text-white text-xs px-3 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          同步
-        </button>
-        <button class="text-muted hover:text-fg" onclick="hideTwitterAccountsModal()">
+      <button class="text-muted hover:text-fg" onclick="hideTwitterAccountsModal()">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
       </div>
@@ -1106,14 +1078,11 @@ tailwind.config = {
       </div>
     </div>
     <div class="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0">
-      <button onclick="refreshTwitterAccounts()" class="text-xs text-accent2 hover:text-accent flex items-center gap-1.5 transition">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-        刷新列表
-      </button>
-      <button class="text-xs bg-surface2 text-muted px-2.5 py-1 rounded transition hover:text-fg" onclick="openAddTwitterAccount()">
-        + 手动添加
-      </button>
       <div class="flex-1"></div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="twitter-select-all" class="accent-accent" onchange="toggleSelectAllTwitter()">
+        <span id="twitterSelectAllText">全选</span>
+      </label>
       <div class="relative">
         <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
         <input type="text" id="twitter-search-input" placeholder="搜索账号..."
@@ -1540,8 +1509,8 @@ async function saveApiConfig() {
 // ===== 信息源管理 =====
 // 判断是否为聚合源（通过设置弹窗管理子源）
 function isAggSource(s) {
-  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili' || s.id === 'wechat_group' || s.id === 'youtube' || s.id === 'magazine'
-    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili' || s.sourceType === 'wechat_group' || s.sourceType === 'youtube' || s.sourceType === 'magazine'
+  return s.id === 'rss' || s.id === 'wechat' || s.id === 'bilibili' || s.id === 'wechat_group' || s.id === 'youtube' || s.id === 'twitter' || s.id === 'magazine'
+    || s.sourceType === 'rss' || s.sourceType === 'wechat' || s.sourceType === 'bilibili' || s.sourceType === 'wechat_group' || s.sourceType === 'youtube' || s.sourceType === 'twitter' || s.sourceType === 'magazine'
     || s.sourceType === 'podcast' || s.sourceType === 'xueqiu' || s.sourceType === 'jisilu';
 }
 
