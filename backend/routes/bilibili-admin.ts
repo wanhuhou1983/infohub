@@ -326,6 +326,55 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
         }
       }
 
+      // 处理 disabled UP 主：只存 URL + title（不抓内容）
+      try {
+        const disabledAccounts = await sql`
+          SELECT id, name, config->>'mid' AS mid
+          FROM sources
+          WHERE type = 'bilibili-updates' AND parent_id = ${updatesSource[0]!.id} AND enabled = false
+        `;
+        let disabledInserted = 0;
+        for (const account of disabledAccounts) {
+          const mid = account.mid;
+          if (!mid) continue;
+          try {
+            const resp = await fetch('http://bili-service:8979/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ mid, max_pages: 1, sessdata }),
+              signal: AbortSignal.timeout(30000),
+            });
+            if (!resp.ok) continue;
+            const data = await resp.json() as any;
+            if (!data.ok || !data.videos) continue;
+
+            for (const video of (data.videos || [])) {
+              const bvid = video.bvid;
+              const title = video.title;
+              const videoUrl = `https://www.bilibili.com/video/${bvid}`;
+              const contentHash = hashString(videoUrl + '_disabled');
+
+              const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+              if (existing) continue;
+
+              const publishedAt = new Date(video.created * 1000).toISOString();
+              await sql`
+                INSERT INTO articles (source_id, title, content, url, published_at, category, tags, content_hash, fetched_at, author, extra)
+                VALUES (${account.id}, ${title}, '', ${videoUrl}, ${publishedAt}, '未订阅', ${['未订阅索引']}, ${contentHash}, NOW(), ${account.name}, '{}'::jsonb)
+                ON CONFLICT (content_hash) DO NOTHING
+              `;
+              disabledInserted++;
+            }
+          } catch (e) {
+            // Silence errors for disabled sources
+          }
+        }
+        if (disabledInserted > 0) {
+          console.log(`[B站] 已索引 ${disabledInserted} 个未订阅 UP 主视频 URL`);
+        }
+      } catch (e) {
+        // Silently continue
+      }
       await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${bilibiliSource.id}`;
       const durationMs = Date.now() - startMs;
       await sql`

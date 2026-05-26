@@ -7,6 +7,34 @@ import { translateToChinese, isEnglish, createConcurrencyPool } from './translat
 import { whisperWindowsTranscribe } from './transcribe.js';
 import { saveArticleFile } from '../file-storage.js';
 
+// ============ DeepSeek 重断句（播客转录/B站字幕后处理） ============
+async function deepseekReparagraph(text: string, context: string): Promise<string | null> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) return null;
+  try {
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(300000),
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: '你是一个专业的文字整理助手。以下是一段语音识别/字幕转写的原始文本，可能没有段落划分、有重复、有断句错误。请：1. 按内容主题分成段落，每段加小标题 2. 修正明显的同音错字 3. 删除重复内容 4. 保持原意，不增删观点。输出只包含整理后的文本。' },
+          { role: 'user', content: `来源：${context}\n\n原始文本：\n${text.slice(0, 30000)}` },
+        ],
+        max_tokens: 16384,
+        temperature: 0,
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as any;
+    return (data.choices?.[0]?.message?.content || '').trim() || null;
+  } catch (e: any) {
+    console.error('[DeepSeek] 重断句失败:', e.message);
+    return null;
+  }
+}
+
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
 const OB_DIR = process.env.OB_DIR || '/obsidian';
 
@@ -288,6 +316,133 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
     console.error('[scheduler] Phase 2b error:', e.message);
   }
 
+
+  // --- 2b-2: B站字幕下载 + Whisper 转录 + DeepSeek 重断句 ---
+  console.log('[scheduler] Phase 2b-2: Bilibili subtitle/audio processing...');
+  try {
+    const biliArticles = await sql`
+      SELECT a.id, a.title, a.url, a.extra, s.name AS source_name, s.type AS source_type
+      FROM articles a JOIN sources s ON a.source_id = s.id
+      WHERE a.fetched_at::date = ${today}
+        AND s.type LIKE 'bilibili%'
+        AND (a.content IS NULL OR a.content = '' OR a.content NOT LIKE '%字幕%')
+        AND a.content NOT LIKE '%音频转录%'
+        AND a.content NOT LIKE '%【整理后】%'
+      ORDER BY a.id
+      LIMIT 10
+    `;
+
+    if (biliArticles.length > 0) {
+      const sessdata = await sql`
+        SELECT config->>'sessdata' AS sessdata FROM sources
+        WHERE type = 'bilibili' LIMIT 1
+      `;
+      const sd = sessdata[0]?.sessdata || '';
+
+      for (const article of biliArticles) {
+        try {
+          const bvid = article.url?.match(/BV[a-zA-Z0-9]+/)?.[0];
+          if (!bvid) continue;
+
+          console.log(`[scheduler] Processing B站: ${article.title} (${bvid})`);
+
+          // Step 1: Try to get subtitle via bili-service
+          let subtitle = '';
+          try {
+            const subResp = await fetch('http://bili-service:8979/', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'subtitle', bvid, sessdata: sd }),
+              signal: AbortSignal.timeout(30000),
+            });
+            if (subResp.ok) {
+              const subData = await subResp.json() as any;
+              if (subData.text) subtitle = subData.text;
+            }
+          } catch (e: any) {
+            console.log(`[scheduler] B站字幕获取失败: ${e.message}`);
+          }
+
+          let processedContent = '';
+          let transcript = '';
+
+          if (subtitle) {
+            transcript = subtitle;
+            console.log(`[scheduler] Got subtitle for ${bvid}, calling DeepSeek...`);
+          } else {
+            // Step 2: No subtitle - try Whisper audio transcription
+            try {
+              const audioResp = await fetch('http://bili-service:8979/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'audio', bvid, sessdata: sd }),
+                signal: AbortSignal.timeout(30000),
+              });
+              if (audioResp.ok) {
+                const audioData = await audioResp.json() as any;
+                if (audioData.audio_url) {
+                  console.log(`[scheduler] Transcribing B站 audio for ${bvid}...`);
+                  const whisperResult = await whisperWindowsTranscribe(audioData.audio_url, 0);
+                  if (whisperResult) {
+                    transcript = whisperResult;
+                    console.log(`[scheduler] Whisper done for ${bvid}: ${transcript.length} chars`);
+                  }
+                }
+              }
+            } catch (e: any) {
+              console.log(`[scheduler] B站音频转录失败: ${e.message}`);
+            }
+          }
+
+          if (transcript) {
+            // DeepSeek re-paragraph
+            const reparagraphed = await deepseekReparagraph(transcript, article.title);
+            if (reparagraphed && reparagraphed !== transcript) {
+              processedContent = `【整理后】\n\n${reparagraphed}\n\n---\n\n【原始转录】\n${transcript}`;
+            } else {
+              processedContent = `【原始转录】\n\n${transcript}`;
+            }
+          } else if (subtitle) {
+            processedContent = `【字幕】\n\n${subtitle}`;
+          } else {
+            console.log(`[scheduler] No transcript or subtitle for ${bvid}`);
+            continue;
+          }
+
+          await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${article.id}`;
+
+          try {
+            const [updated] = await sql`
+              SELECT a.*, s.name AS source_name, s.type AS source_type
+              FROM articles a LEFT JOIN sources s ON a.source_id = s.id
+              WHERE a.id = ${article.id}
+            `;
+            if (updated) {
+              await saveArticleFile(article.id, processedContent, {
+                id: article.id, title: updated.title,
+                source_type: updated.source_type || 'unknown',
+                source_name: updated.source_name || '',
+                url: updated.url, published_at: updated.published_at,
+                category: updated.category, tags: updated.tags || [],
+                author: updated.author,
+                is_read: updated.is_read, is_starred: updated.is_starred,
+                content_hash: updated.content_hash, extra: updated.extra,
+              });
+            }
+          } catch (e: any) {
+            console.error(`[scheduler] OB update failed for B站 id=${article.id}:`, e.message);
+          }
+
+          stats.transcribed++;
+        } catch (e: any) {
+          console.error(`[scheduler] B站 processing failed for id=${article.id}:`, e.message);
+        }
+      }
+    }
+    console.log(`[scheduler] Phase 2b-2 complete`);
+  } catch (e: any) {
+    console.error('[scheduler] Phase 2b-2 error:', e.message);
+  }
   // --- 2c: Subtitle Download (Bilibili & YouTube) ---
   console.log('[scheduler] Phase 2c: Subtitle download...');
   try {

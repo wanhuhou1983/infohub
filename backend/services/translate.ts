@@ -204,6 +204,38 @@ async function googleTranslate(text: string, from: string = 'en', to: string = '
 
 // ============ Azure Translator API ============
 
+// ============ DeepSeek API 翻译 ============
+const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY || '';
+const DEEPSEEK_API_URL = process.env.DEEPSEEK_API_URL || 'https://api.deepseek.com/v1/chat/completions';
+
+async function deepseekTranslate(text: string, from: string = 'en', to: string = 'zh'): Promise<string | null> {
+  if (!DEEPSEEK_API_KEY) return null;
+  try {
+    const systemPrompt = 'You are a professional translator. Translate the following text from English to Chinese. Output ONLY the translation, no explanations, no notes, no original text. Preserve formatting like paragraphs and line breaks.';
+    const resp = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_API_KEY}` },
+      signal: AbortSignal.timeout(300000),
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: text },
+        ],
+        max_tokens: 16384,
+        temperature: 0,
+      }),
+    });
+    if (!resp.ok) return null;
+    const data = await resp.json() as any;
+    return (data.choices?.[0]?.message?.content || '').trim() || null;
+  } catch (e: any) {
+    console.error('[翻译] DeepSeek 翻译请求失败:', e.message);
+    return null;
+  }
+}
+
+
 /**
  * Azure Translator API (Microsoft)
  * 需要环境变量：
@@ -255,11 +287,15 @@ async function azureTranslate(text: string, from: string = 'en', to: string = 'z
  * 优先级：llama.cpp（本地 DeepSeek Coder，最快） > Ollama（本地 Gemma4） > 百度 > Azure > Google
  */
 export async function translateText(text: string, from: string = 'en', to: string = 'zh'): Promise<string | null> {
-  // 0. 最优使用 llama.cpp 本地翻译（DeepSeek Coder，最快，无需外部 API）
+  // 0. DeepSeek API 翻译（最快最准，首选）
+  const deepseekResult = await deepseekTranslate(text, from, to);
+  if (deepseekResult) return deepseekResult;
+
+  // 1. 最优使用 llama.cpp 本地翻译（DeepSeek Coder，最快，无需外部 API）
   const llamaResult = await llamaCppTranslate(text, from, to);
   if (llamaResult) return llamaResult;
 
-  // 1. Ollama 本地翻译（Gemma4）
+  // 2. Ollama 本地翻译（Gemma4）
   const ollamaResult = await ollamaTranslate(text, from, to);
   if (ollamaResult) return ollamaResult;
 
@@ -306,12 +342,13 @@ export async function translateToChinese(text: string): Promise<string> {
   if (!text || text.length < 10) return text;
 
   // 检查是否有任何翻译API可用
+  const hasDeepSeek = !!process.env.DEEPSEEK_API_KEY;
   const hasOllama = !!process.env.LLAMA_BASE_URL || !!process.env.OLLAMA_BASE_URL;
   const hasBaidu = getBaiduConfig() !== null;
   const hasAzure = !!process.env.AZURE_TRANSLATE_KEY;
   const hasGoogle = !!process.env.GOOGLE_TRANSLATE_KEY;
 
-  if (!hasOllama && !hasBaidu && !hasAzure && !hasGoogle) {
+  if (!hasDeepSeek && !hasOllama && !hasBaidu && !hasAzure && !hasGoogle) {
     console.log('[翻译] 没有任何翻译API配置，跳过翻译');
     return text;
   }

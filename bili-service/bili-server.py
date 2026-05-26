@@ -87,6 +87,114 @@ def _bili_get(path: str, sessdata: str) -> dict:
         return json.loads(resp.read().decode('utf-8'))
 
 
+
+def fetch_subtitle(bvid: str, sessdata: str = '') -> dict:
+    """Fetch B站 video subtitle via direct HTTP API."""
+    try:
+        # Step 1: Get video info (cid)
+        view = _bili_get(f'/x/web-interface/view?bvid={bvid}', sessdata)
+        vdata = view.get('data', {})
+        cid = vdata.get('cid', '')
+        if not cid:
+            # try first page
+            pages = vdata.get('pages', [])
+            if pages:
+                cid = pages[0].get('cid', '')
+        if not cid:
+            return {'ok': False, 'error': 'no cid found'}
+
+        # Step 2: Get player info (subtitle list)
+        player = _bili_get(f'/x/player/v2?bvid={bvid}&cid={cid}', sessdata)
+        subtitle_info = player.get('data', {}).get('subtitle', {})
+        subtitles = subtitle_info.get('subtitles', [])
+        if not subtitles:
+            return {'ok': False, 'error': 'no subtitles available', 'cid': cid}
+
+        # Try to get Chinese subtitle first, then English, then any
+        preferred = ['zh-CN', 'zh-Hans', 'zh-cn', 'zh-CHS', 'en-US', 'en']
+        selected = None
+        for lang in preferred:
+            for sub in subtitles:
+                if sub.get('lan_doc', '').startswith(lang) or sub.get('language', '').startswith(lang):
+                    selected = sub
+                    break
+            if selected:
+                break
+        if not selected:
+            selected = subtitles[0]
+
+        sub_url = selected.get('subtitle_url', '')
+        if not sub_url:
+            return {'ok': False, 'error': 'no subtitle URL', 'cid': cid}
+
+        if sub_url.startswith('//'):
+            sub_url = 'https:' + sub_url
+
+        # Step 3: Download subtitle JSON
+        req = urllib.request.Request(sub_url)
+        req.add_header('User-Agent', 'Mozilla/5.0')
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            sub_data = json.loads(resp.read().decode('utf-8'))
+
+        # Extract text from subtitle body
+        bodies = sub_data.get('body', [])
+        if not bodies:
+            return {'ok': False, 'error': 'subtitle body is empty', 'cid': cid}
+
+        # Concatenate subtitle text
+        text_parts = []
+        for item in bodies:
+            content = item.get('content', '')
+            if content:
+                text_parts.append(content)
+
+        text = '\n'.join(text_parts) if text_parts else ''
+        language = selected.get('lan_doc', 'unknown')
+
+        return {
+            'ok': True,
+            'text': text,
+            'language': language,
+            'cid': cid,
+            'bvid': bvid,
+        }
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'bvid': bvid}
+
+
+def fetch_audio_url(bvid: str, sessdata: str = '') -> dict:
+    """Get B站 video audio stream URL."""
+    try:
+        # Step 1: Get video info (cid)
+        view = _bili_get(f'/x/web-interface/view?bvid={bvid}', sessdata)
+        vdata = view.get('data', {})
+        cid = vdata.get('cid', '')
+        if not cid:
+            pages = vdata.get('pages', [])
+            if pages:
+                cid = pages[0].get('cid', '')
+        if not cid:
+            return {'ok': False, 'error': 'no cid found'}
+
+        # Step 2: Get play URL
+        play = _bili_get(f'/x/player/playurl?bvid={bvid}&cid={cid}&qn=0&type=mp4', sessdata)
+        durl = play.get('data', {}).get('durl', [])
+        if durl:
+            audio_url = durl[0].get('url', '')
+            if audio_url:
+                return {'ok': True, 'audio_url': audio_url, 'cid': cid, 'bvid': bvid}
+
+        # Try dash format
+        dash = play.get('data', {}).get('dash', {})
+        audios = dash.get('audio', [])
+        if audios:
+            audio_url = audios[0].get('base_url', '') or audios[0].get('baseUrl', '')
+            if audio_url:
+                return {'ok': True, 'audio_url': audio_url, 'cid': cid, 'bvid': bvid}
+
+        return {'ok': False, 'error': 'no audio URL found', 'cid': cid}
+    except Exception as e:
+        return {'ok': False, 'error': str(e), 'bvid': bvid}
 def fetch_followings(sessdata: str) -> list[dict]:
     """Fetch the current user's following list via B站 direct HTTP API."""
     # First get current user's mid
@@ -153,6 +261,30 @@ class BiliHandler(BaseHTTPRequestHandler):
             try:
                 followings = fetch_followings(sessdata)
                 self._json(200, {'ok': True, 'followings': followings, 'count': len(followings)})
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+        
+        elif action == 'subtitle':
+            bvid = req.get('bvid', '')
+            if not bvid:
+                self._json(400, {'error': 'bvid is required for action=subtitle'})
+                return
+            try:
+                result = fetch_subtitle(bvid, sessdata)
+                status = 200 if result.get('ok') else 404
+                self._json(status, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+        
+        elif action == 'audio':
+            bvid = req.get('bvid', '')
+            if not bvid:
+                self._json(400, {'error': 'bvid is required for action=audio'})
+                return
+            try:
+                result = fetch_audio_url(bvid, sessdata)
+                status = 200 if result.get('ok') else 404
+                self._json(status, result)
             except Exception as e:
                 self._json(500, {'error': str(e)})
         

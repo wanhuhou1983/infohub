@@ -14,23 +14,51 @@ export const WHISPER_TRANSCRIBE_PREVIEW_SEC = Number(process.env.WHISPER_TRANSCR
 const WHISPER_WINDOWS_API_URL = process.env.WHISPER_WINDOWS_API_URL || 'http://172.31.240.1:8768';
 
 export async function whisperWindowsTranscribe(audioUrl: string, durationSec: number = 600): Promise<string | null> {
-  try {
-    const resp = await fetch(`${WHISPER_WINDOWS_API_URL}/transcribe`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: audioUrl, duration: durationSec, language: 'en' }),
-      signal: AbortSignal.timeout(600_000),
-    });
-    if (!resp.ok) {
-      console.error(`[whisper] API error: HTTP ${resp.status}`);
+  // Try Windows whisper-server.exe first, then Docker whisper server as fallback
+  const windowsUrl = process.env.WHISPER_WINDOWS_API_URL || 'http://172.31.240.1:8768';
+  const dockerUrl = process.env.WHISPER_DOCKER_URL || 'http://whisper-server:8768';
+
+  async function tryServer(serverUrl: string, label: string): Promise<string | null> {
+    try {
+      console.log(`[whisper] ${label}: downloading ${audioUrl.slice(0, 80)}...`);
+      const audioResp = await fetch(audioUrl, { signal: AbortSignal.timeout(300_000) });
+      if (!audioResp.ok) {
+        console.error(`[whisper] ${label}: download failed HTTP ${audioResp.status}`);
+        return null;
+      }
+
+      // Use FormData for multipart upload (Bun supports this natively)
+      const formData = new FormData();
+      const audioBlob = await audioResp.blob();
+      formData.append('file', audioBlob, 'audio.wav');
+      formData.append('temperature', '0.0');
+      formData.append('response_format', 'json');
+
+      console.log(`[whisper] ${label}: sending ${audioBlob.size} bytes...`);
+      const resp = await fetch(`${serverUrl}/inference`, {
+        method: 'POST',
+        body: formData,
+        signal: AbortSignal.timeout(600_000),
+      });
+      if (!resp.ok) {
+        console.error(`[whisper] ${label}: API error HTTP ${resp.status}`);
+        return null;
+      }
+      const data = await resp.json() as any;
+      const text = data.text || '';
+      console.log(`[whisper] ${label}: got ${text.length} chars`);
+      return text || null;
+    } catch (e: any) {
+      console.error(`[whisper] ${label}: ${e.message}`);
       return null;
     }
-    const data = await resp.json() as any;
-    return data.text || null;
-  } catch (e: any) {
-    console.error(`[whisper] 转录请求失败: ${e.message}`);
-    return null;
   }
+
+  // Try Windows (GPU) first, then Docker (CPU)
+  let result = await tryServer(windowsUrl, 'Windows');
+  if (result) return result;
+  result = await tryServer(dockerUrl, 'Docker');
+  return result;
 }
 
 export function createTranscribeRoutes(sql: Sql): Hono {
