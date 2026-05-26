@@ -7,7 +7,7 @@ RUN bun install --frozen-lockfile --production
 
 FROM oven/bun:1.3-alpine
 
-RUN apk add --no-cache python3 py3-pip
+RUN apk add --no-cache python3 py3-pip py3-requests py3-beautifulsoup4
 
 WORKDIR /app
 
