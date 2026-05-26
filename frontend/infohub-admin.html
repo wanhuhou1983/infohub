@@ -2392,6 +2392,12 @@ function closeWechatGroupModal() {
   document.getElementById('wechatGroupModal').classList.remove('flex');
 }
 
+async function refreshWechatGroups() {
+  const listEl = document.getElementById('wechatGroupList');
+  listEl.innerHTML = '<div class="text-center text-muted py-8">刷新中，请稍候...</div>';
+  await loadWechatGroups();
+}
+
 async function loadWechatGroups() {
   const listEl = document.getElementById('wechatGroupList');
   listEl.innerHTML = '<div class="text-center text-muted py-8">加载中...</div>';
