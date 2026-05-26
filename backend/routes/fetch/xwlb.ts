@@ -128,7 +128,7 @@ export function createXwlbRoutes(sql: Sql): Hono {
       if (inserted.length > 0) {
         const artId = inserted[0].id;
         const { processedContent } = await saveArticleFile(artId, content, {
-          id: artId, title, source_type: 'xwlb', source_name: '新闻联播',
+          id: artId, title, source_type: 'magazine', source_name: '新闻联播',
           url: 'https://tv.cctv.com/lm/xwlb/', published_at: pubDate,
           category: '时政', tags: ['新闻联播', date.slice(0, 6)],
           author: '央视', is_read: false, is_starred: false,

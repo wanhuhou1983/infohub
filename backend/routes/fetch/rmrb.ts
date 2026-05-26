@@ -47,7 +47,7 @@ export function createRmrbRoutes(sql: Sql): Hono {
       let inserted = 0;
       if (rows.length > 0) {
         inserted = 1;
-        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'rmrb', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:pubDate, category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
+        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'magazine', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:pubDate, category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
       }
       const cnt = bodyContent.split('###').filter(l => l.trim()).length;
       return c.json({ ok: true, fetched: cnt, inserted, date });
