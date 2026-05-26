@@ -38,6 +38,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
           SELECT id FROM sources WHERE id = ${sid}
           UNION ALL
           SELECT s.id FROM sources s JOIN tree t ON s.parent_id = t.id
+          WHERE s.enabled = true
         )
         SELECT id FROM tree
       `;

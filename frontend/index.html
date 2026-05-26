@@ -743,25 +743,27 @@ tailwind.config = {
   </aside>
 
 
-  <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
-  <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
-    <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
-      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
-        <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
-        <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
-        <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
-        <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
-        <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
-      </div>
-      <div id="articleList" class="space-y-1"></div>
-      <div id="loadMore" class="text-center py-4 hidden">
-        <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
-      </div>
-    </main>
+  <!-- 主内容区（tab + 文章列表 + 文章详情并排） -->
+  <div class="flex-1 min-w-0 flex flex-col h-[calc(100vh-8rem)]">
+    <!-- tab 栏移到外层，不再被 overflow-y-auto 吃掉 sticky -->
+    <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
+      <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
+      <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
+      <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
+      <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
+      <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
+    </div>
+    <div class="flex flex-1 min-h-0">
+      <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
+        <div id="articleList" class="space-y-1"></div>
+        <div id="loadMore" class="text-center py-4 hidden">
+          <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
+        </div>
+      </main>
 
-    <!-- 文章详情列（始终可见） -->
-    <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
-      <div id="detailColumnContent" class="p-4 md:p-6">
+      <!-- 文章详情列（始终可见） -->
+      <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
+        <div id="detailColumnContent" class="p-4 md:p-6">
         <div class="flex flex-col items-center justify-center h-full text-center text-muted py-32">
           <div class="text-4xl mb-4">📖</div>
           <p class="text-sm">点击左侧文章查看详情</p>
