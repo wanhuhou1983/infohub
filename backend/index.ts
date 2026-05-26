@@ -40,7 +40,7 @@ import { createAiRoutes } from './routes/ai.js';
 import { createPodcastTranscribeRoutes } from './routes/podcast-transcribe.js';
 import { createTwitterAdminRoutes } from './routes/twitter-admin.js';
 import { createCaixinRoutes } from './routes/caixin.js';
-import { createSchedulerRoutes } from './services/scheduler.js';
+import { createSchedulerRoutes, runDailyFetch } from './services/scheduler.js';
 import { invalidateEnvCache, getImagesDir, getObDir } from './file-storage.js';
 import { fail } from './shared/response.js';
 
