@@ -918,6 +918,10 @@ tailwind.config = {
           class="bg-surface2 border border-border rounded-lg pl-8 pr-3 py-1.5 text-xs w-40 focus:outline-none focus:border-accent"
           oninput="renderYoutubeUppers()">
       </div>
+      <label class="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+        <input type="checkbox" id="youtube-show-enabled-only" class="accent-accent" onchange="renderYoutubeUppers()">
+        只显示已启用
+      </label>
     </div>
     <div class="flex-1 overflow-y-auto px-6 py-3">
       <div id="youtubeUppersList" class="space-y-2">
@@ -3602,8 +3606,14 @@ async function refreshTwitterAccounts() {
   const listEl = document.getElementById('twitterAccountsList');
   listEl.innerHTML = '<div class="text-center text-muted py-8">同步中，请稍候...</div>';
 
+  const ct0 = localStorage.getItem('twitterCt0') || '';
+  const authToken = localStorage.getItem('twitterAuthToken') || '';
+
   try {
-    const data = await api('/twitter-admin/refresh', { method: 'POST' });
+    const data = await api('/twitter-admin/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ ct0, auth_token: authToken }),
+    });
 
     if (data.error) {
       listEl.innerHTML = `<div class="text-center text-danger py-8">${data.error}</div>`;

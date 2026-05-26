@@ -339,6 +339,12 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
   router.post('/refresh', async (c) => {
     const startMs = Date.now();
 
+    // Accept cookies from frontend body (localStorage), override env
+    const _body = await c.req.json().catch(() => ({}));
+    if (_body.ct0 && _body.auth_token) {
+      process.env.TWITTER_COOKIES = 'ct0=' + _body.ct0 + '; auth_token=' + _body.auth_token;
+    }
+
     try {
       const [twitterSource] = await sql`
         SELECT id FROM sources WHERE type = 'twitter' AND parent_id IS NULL LIMIT 1
