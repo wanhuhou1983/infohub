@@ -251,6 +251,65 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- Twitter/X 账号管理模态框 -->
+<div id="twitterAdminModal" class="fixed inset-0 z-[300] hidden">
+  <div class="absolute inset-0 bg-black/60" onclick="hideTwitterAdmin()"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-2xl shadow-2xl w-[calc(100%-2rem)] max-w-[600px] max-h-[85vh] flex flex-col">
+    <div class="p-4 md:p-5 border-b border-border shrink-0">
+      <div class="flex items-center justify-between mb-1">
+        <h2 class="text-lg font-semibold flex items-center gap-2">🐦 X/Twitter 账号管理</h2>
+        <button class="text-muted hover:text-fg transition" onclick="hideTwitterAdmin()">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <p class="text-xs text-muted">管理关注的 X 账号和登录态。需要 <b>ct0</b> 和 <b>auth_token</b> Cookie 才能采集推文。</p>
+      <div class="flex items-center gap-3 mt-3">
+        <button id="twitterRefreshBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition font-medium flex items-center gap-1.5" onclick="twitterRefresh()">
+          <svg id="twitterRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          同步
+        </button>
+        <span id="twitterAdminStatus" class="text-xs text-muted"></span>
+      </div>
+    </div>
+    <!-- Cookie 设置区（始终可见） -->
+    <div class="px-5 py-3 border-b border-border shrink-0">
+      <div class="text-sm text-muted mb-2 font-medium">🔑 Twitter Cookie（从浏览器 DevTools 获取）</div>
+      <div class="space-y-2">
+        <div>
+          <label class="text-xs text-muted block mb-1">ct0</label>
+          <input id="twitterCt0" type="text" placeholder="ct0 Cookie 值（很长一串字母数字）"
+            class="w-full bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm font-mono text-xs focus:outline-none focus:border-accent placeholder-muted"
+            onchange="saveTwitterCookies()">
+        </div>
+        <div>
+          <label class="text-xs text-muted block mb-1">auth_token</label>
+          <input id="twitterAuthToken" type="password" placeholder="auth_token Cookie 值（很长一串字母数字）"
+            class="w-full bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm font-mono text-xs focus:outline-none focus:border-accent placeholder-muted"
+            onchange="saveTwitterCookies()">
+        </div>
+        <button class="bg-green-500/10 hover:bg-green-500/20 text-green-400 text-xs px-3 py-1 rounded-lg transition border border-green-500/20" onclick="clearTwitterCookies()">清除 Cookie</button>
+      </div>
+    </div>
+    <!-- 账号列表区 -->
+    <div class="flex-1 overflow-y-auto px-5 pb-5 pt-3">
+      <div class="flex items-center gap-2 mb-3">
+        <input id="twitterAddInput" type="text" placeholder="X 用户名 (如 @elonmusk)"
+          class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-accent placeholder-muted">
+        <button id="twitterAddBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition font-medium" onclick="addTwitterAccount()">
+          关注
+        </button>
+      </div>
+      <div class="text-sm text-muted mb-2 font-medium">📋 已关注的账号</div>
+      <div id="twitterAccountList" class="space-y-2">
+        <div class="text-center text-muted py-8 text-sm">加载中...</div>
+      </div>
+    </div>
+    <div class="p-3 border-t border-border text-center text-xs text-muted shrink-0">
+      <span>💡 点击侧边栏「同步」采集所有已启用账号的最新推文</span>
+    </div>
+  </div>
+</div>
+
 <!-- B站 UP 主管理模态框 -->
 <div id="bilibiliAdminModal" class="fixed inset-0 z-[300] hidden">
   <div class="absolute inset-0 bg-black/60" onclick="hideBilibiliAdmin()"></div>
@@ -935,11 +994,6 @@ async function loadSources() {
       ${hasChildren ? `<span class="text-xs text-muted w-3 cursor-pointer select-none" onclick="event.stopPropagation(); toggleSourceExpand(${s.id})">${isExpanded ? '▼' : '▶'}</span>` : '<span class="w-3"></span>'}
       <span class="text-base">${s.icon || '📄'}</span>
       <span class="text-sm flex-1 truncate">${s.name}</span>
-      ${s.type === 'bilibili' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showBilibiliAdmin()" title="管理 UP 主">⚙️</span>` : ''}
-      ${s.type === 'youtube' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showYoutubeAdmin()" title="管理频道">⚙️</span>` : ''}
-      ${s.type === 'podcast' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showPodcastAdmin()" title="管理播客">⚙️</span>` : ''}
-      ${s.type === 'twitter' ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showTwitterAdmin()" title="管理 X 账号">⚙️</span>` : ''}
-      ${s.type === 'wechat' && !s.parent_id ? `<span class="text-xs text-muted cursor-pointer hover:text-accent2" onclick="event.stopPropagation(); showWechatAdmin()" title="管理公众号">⚙️</span>` : ''}
       ${unreadCount > 0 ? `<span class="text-xs bg-accent/20 text-accent2 px-1.5 py-0.5 rounded">${unreadCount}</span>` : ''}
       <span class="text-xs text-muted">${articleCount}</span>
     </div>`;
@@ -3647,6 +3701,149 @@ async function showYoutubeAdmin() {
 
 function hideYoutubeAdmin() {
   document.getElementById('youtubeAdminModal').classList.add('hidden');
+}
+
+// ===== Twitter/X 管理 =====
+async function showTwitterAdmin() {
+  document.getElementById('twitterAdminModal').classList.remove('hidden');
+  document.getElementById('twitterAdminStatus').textContent = '';
+  loadTwitterCookies();
+  loadTwitterAccounts();
+}
+
+function hideTwitterAdmin() {
+  document.getElementById('twitterAdminModal').classList.add('hidden');
+}
+
+function saveTwitterCookies() {
+  const ct0 = document.getElementById('twitterCt0').value.trim();
+  const token = document.getElementById('twitterAuthToken').value.trim();
+  if (ct0) localStorage.setItem('twitterCt0', ct0);
+  else localStorage.removeItem('twitterCt0');
+  if (token) localStorage.setItem('twitterAuthToken', token);
+  else localStorage.removeItem('twitterAuthToken');
+  showToast(ct0 || token ? 'Twitter Cookie 已保存' : 'Twitter Cookie 已清除');
+}
+
+function clearTwitterCookies() {
+  document.getElementById('twitterCt0').value = '';
+  document.getElementById('twitterAuthToken').value = '';
+  localStorage.removeItem('twitterCt0');
+  localStorage.removeItem('twitterAuthToken');
+  showToast('Twitter Cookie 已清除');
+}
+
+function loadTwitterCookies() {
+  const ct0 = localStorage.getItem('twitterCt0') || '';
+  const token = localStorage.getItem('twitterAuthToken') || '';
+  document.getElementById('twitterCt0').value = ct0;
+  document.getElementById('twitterAuthToken').value = token;
+}
+
+async function loadTwitterAccounts() {
+  const el = document.getElementById('twitterAccountList');
+  el.innerHTML = '<div class="text-center text-muted py-8 text-sm">加载中...</div>';
+  try {
+    const tree = await api('/sources/tree');
+    // Find twitter source (type='twitter')
+    const twitterRoot = tree.find(s => s.type === 'twitter');
+    if (!twitterRoot || !twitterRoot.children) {
+      el.innerHTML = '<div class="text-center text-muted py-8 text-sm">❌ 未找到 Twitter 信息来源</div>';
+      return;
+    }
+    // Flatten all twitter children recursively to find accounts
+    const allAccounts = [];
+    function collect(node, depth) {
+      if (!node) return;
+      // Direct children of twitter root that are type 'twitter'
+      if (node.type === 'twitter' && node.parent_id && depth > 0) {
+        allAccounts.push(node);
+      }
+      if (node.children) {
+        for (const child of node.children) {
+          collect(child, depth + 1);
+        }
+      }
+    }
+    for (const child of twitterRoot.children) {
+      collect(child, 1);
+    }
+    if (allAccounts.length === 0) {
+      el.innerHTML = '<div class="text-center text-muted py-8 text-sm">📭 还没有关注的 X 账号</div>';
+      return;
+    }
+    el.innerHTML = allAccounts.map(a => {
+      const isEnabled = a.enabled !== false;
+      return `<div class="flex items-center gap-3 bg-surface2 rounded-lg px-3 py-2 border border-border">
+        <span class="text-sm flex-1 truncate">${a.icon || '🐦'} ${a.name}</span>
+        <label class="relative inline-flex items-center cursor-pointer" onclick="event.stopPropagation(); toggleTwitterAccount(${a.id}, ${!isEnabled})">
+          <input type="checkbox" class="sr-only peer" ${isEnabled ? 'checked' : ''}>
+          <div class="w-8 h-4 bg-border rounded-full peer peer-checked:bg-accent after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:after:translate-x-4"></div>
+        </label>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="text-center text-muted py-8 text-sm">❌ 加载失败: ' + (e.message || '未知错误') + '</div>';
+  }
+}
+
+async function toggleTwitterAccount(id, enabled) {
+  try {
+    await api('/sources/' + id, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    await loadTwitterAccounts();
+    await loadSources();
+  } catch (e) {
+    showToast('切换失败: ' + (e.message || '未知错误'), 'error');
+  }
+}
+
+async function addTwitterAccount() {
+  const input = document.getElementById('twitterAddInput');
+  const handle = input.value.trim().replace(/^@/, '');
+  if (!handle) { showToast('请输入 X 用户名', 'error'); return; }
+  const btn = document.getElementById('twitterAddBtn');
+  btn.disabled = true;
+  btn.textContent = '添加中...';
+  try {
+    const result = await api('/twitter-admin/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ handle, name: '@' + handle })
+    });
+    if (result.error) {
+      showToast(result.error, 'error');
+    } else {
+      showToast('✅ 已关注 @' + handle);
+      input.value = '';
+      await loadTwitterAccounts();
+      await loadSources();
+    }
+  } catch (e) {
+    showToast('添加失败: ' + (e.message || ''), 'error');
+  }
+  btn.disabled = false;
+  btn.textContent = '关注';
+}
+
+async function twitterRefresh() {
+  const btn = document.getElementById('twitterRefreshBtn');
+  const icon = document.getElementById('twitterRefreshIcon');
+  const status = document.getElementById('twitterAdminStatus');
+  btn.disabled = true;
+  icon.classList.add('animate-spin');
+  status.textContent = '同步中...';
+  try {
+    const result = await api('/twitter-admin/refresh', { method: 'POST' });
+    status.textContent = '✅ 同步完成，采集 ' + (result.count || 0) + ' 篇';
+  } catch (e) {
+    status.textContent = '❌ 同步失败: ' + (e.message || '');
+  }
+  icon.classList.remove('animate-spin');
+  btn.disabled = false;
 }
 
 function toggleYoutubeSettings() {
