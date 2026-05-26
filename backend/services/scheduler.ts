@@ -35,6 +35,55 @@ async function deepseekReparagraph(text: string, context: string): Promise<strin
   }
 }
 
+
+
+// ============ DeepSeek 批量标题翻译 ============
+async function deepseekTranslateTitles(titles: string[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey || titles.length === 0) return result;
+
+  // Filter: only translate English titles (no Chinese chars, length >= 5)
+  const englishTitles = titles.filter(t => t && t.length >= 5 && !/[\u4e00-\u9fff]/.test(t));
+  if (englishTitles.length === 0) return result;
+
+  try {
+    const systemPrompt = '你是一位专业翻译。将用户提供的每行英文标题翻译成简洁准确的中文。请按顺序逐行输出中文翻译，不要加编号、引号或额外文字。专有名词保持原样。';
+    const userContent = englishTitles.join('\n');
+    const resp = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(60000),
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        max_tokens: 4000,
+        temperature: 0,
+      }),
+    });
+    if (!resp.ok) {
+      console.error(`[DeepSeek] 标题翻译 API HTTP ${resp.status}`);
+      return result;
+    }
+    const data = await resp.json() as any;
+    const text = (data.choices?.[0]?.message?.content || '').trim();
+    const lines = text.split('\n').filter(l => l.trim());
+    englishTitles.forEach((title, i) => {
+      const translated = lines[i]?.trim();
+      if (translated && translated !== title) {
+        result.set(title, translated);
+      }
+    });
+    console.log(`[DeepSeek] 标题翻译: ${result.size}/${englishTitles.length} 成功`);
+  } catch (e: any) {
+    console.error('[DeepSeek] 标题翻译失败:', e.message);
+  }
+  return result;
+}
+
 const API_BASE = process.env.API_BASE || 'http://localhost:3001/api';
 const OB_DIR = process.env.OB_DIR || '/obsidian';
 
@@ -238,6 +287,60 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
         console.error(`[scheduler] Phase 2a: ${failed} translations failed`);
       }
     }
+
+    // --- 2a-title: 翻译英文标题为中文 ---
+    console.log('[scheduler] Phase 2a-title: translating titles...');
+    try {
+      const engTitleArticles = await sql`
+        SELECT a.id, a.title
+        FROM articles a JOIN sources s ON a.source_id = s.id
+        WHERE a.fetched_at::date = ${today}
+          AND (s.type IN ('twitter', 'twitter-updates', 'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
+               OR (s.type = 'rss' AND a.content ~ '[a-zA-Z]{20,}'))
+          AND a.title ~ '[a-zA-Z]{10,}'
+          AND a.title NOT LIKE '%[%'
+          AND a.title NOT LIKE '%】%'
+        ORDER BY a.id
+        LIMIT 100
+      `;
+      if (engTitleArticles.length > 0) {
+        const titles = engTitleArticles.map((r: any) => r.title);
+        const titleMap = await deepseekTranslateTitles(titles);
+        let titleCount = 0;
+        for (const article of engTitleArticles) {
+          const translated = titleMap.get(article.title);
+          if (translated) {
+            const newTitle = `${translated} [${article.title}]`;
+            await sql`UPDATE articles SET title = ${newTitle} WHERE id = ${article.id}`;
+            // Update OB file with new title
+            try {
+              const [updated] = await sql`
+                SELECT a.*, s.name AS source_name, s.type AS source_type
+                FROM articles a LEFT JOIN sources s ON a.source_id = s.id
+                WHERE a.id = ${article.id}
+              `;
+              if (updated) {
+                await saveArticleFile(article.id, updated.content, {
+                  id: article.id, title: newTitle,
+                  source_type: updated.source_type || 'unknown',
+                  source_name: updated.source_name || '',
+                  url: updated.url, published_at: updated.published_at,
+                  category: updated.category, tags: updated.tags || [],
+                  author: updated.author, is_read: updated.is_read,
+                  is_starred: updated.is_starred, content_hash: updated.content_hash,
+                  extra: updated.extra,
+                });
+              }
+            } catch (e: any) {}
+            titleCount++;
+          }
+        }
+        console.log(`[scheduler] Phase 2a-title: ${titleCount} titles translated`);
+      }
+    } catch (e: any) {
+      console.error('[scheduler] Phase 2a-title error:', e.message);
+    }
+
     console.log(`[scheduler] Phase 2a complete: ${stats.translated} articles translated`);
   } catch (e: any) {
     console.error('[scheduler] Phase 2a error:', e.message);
