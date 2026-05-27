@@ -251,7 +251,7 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ mid, max_pages: 1, sessdata }),
-              signal: AbortSignal.timeout(55000),
+              signal: AbortSignal.timeout(120000),
             });
             if (!resp.ok) {
               errors.push(`${name}: bili-service HTTP ${resp.status}`);

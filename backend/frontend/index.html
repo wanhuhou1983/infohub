@@ -3511,36 +3511,11 @@ async function toggleWechatAccount(dbId, enabled) {
 }
 
 async function wechatRefresh() {
-  const btn = document.getElementById('wechatRefreshBtn');
-  const icon = document.getElementById('wechatRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="wechatRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('wechatAdminStatus').textContent = '同步中...';
-
-  try {
-    const result = await api('/wechat-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (result.ok) {
-      showToast(`同步完成：新增 ${result.newlyAdded} 个，采集 ${result.inserted} 篇`, 'success');
-    } else {
-      showToast(`同步失败: ${result.error}`, 'error');
-    }
-    // 重新加载列表 + 刷新主界面
-    await loadWechatAccounts();
-    loadArticles();
-    loadStats();
-    loadSources();
-  } catch (e) {
-    showToast(`同步异常: ${e}`, 'error');
-    document.getElementById('wechatAdminStatus').textContent = '同步失败';
-  }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="wechatRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
+  await showSyncProgressForFn('公众号', '/wechat-admin/refresh');
+  await loadWechatAccounts();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 // ===== B站 UP 主管理 =====
@@ -3655,35 +3630,59 @@ function searchBilibiliUppers(query) {
 }
 
 async function bilibiliRefresh() {
-  const btn = document.getElementById('bilibiliRefreshBtn');
-  const icon = document.getElementById('bilibiliRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="bilibiliRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('bilibiliAdminStatus').textContent = '同步中...';
+  await showSyncProgressForFn('B站视频', '/api/bilibili-admin/refresh');
+  await loadBilibiliUppers();
+  loadArticles();
+  loadStats();
+  loadSources();
+}
 
+
+// ===== 同步进度弹窗 =====
+function showSyncProgress(sourceName) {
+  const modal = document.getElementById('syncProgressModal');
+  modal.classList.remove('hidden');
+  document.getElementById('syncProgressSpinner').classList.remove('hidden');
+  document.getElementById('syncProgressMessage').className = 'text-sm font-medium mb-1';
+  document.getElementById('syncProgressDetail').className = 'text-xs text-muted';
+  document.getElementById('syncProgressResult').className = 'hidden';
+  document.getElementById('syncProgressMessage').textContent = '正在采集' + sourceName + '...';
+  document.getElementById('syncProgressDetail').textContent = '请稍候...';
+}
+
+function updateSyncProgress(message, detail, isError) {
+  document.getElementById('syncProgressSpinner').classList.add('hidden');
+  document.getElementById('syncProgressMessage').textContent = message;
+  document.getElementById('syncProgressMessage').className = isError ? 'text-sm font-medium mb-1 text-red-400' : 'text-sm font-medium mb-1 text-green-400';
+  document.getElementById('syncProgressDetail').textContent = detail;
+  document.getElementById('syncProgressDetail').className = 'text-xs text-muted mb-3';
+  document.getElementById('syncProgressResult').className = '';
+}
+
+function closeSyncProgress() {
+  document.getElementById('syncProgressModal').classList.add('hidden');
+}
+
+async function showSyncProgressForFn(sourceName, apiPath, options) {
+  showSyncProgress(sourceName);
   try {
-    const result = await api('/api/bilibili-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const result = await api(apiPath, options || { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     if (result.ok) {
-      showToast('同步完成：获取 ' + result.fetched + ' 个视频，新增 ' + result.inserted + ' 篇', 'success');
+      const detail = [];
+      if (result.fetched !== undefined) detail.push('获取 ' + result.fetched + ' 条');
+      if (result.inserted !== undefined) detail.push('新增 ' + result.inserted + ' 篇');
+      if (result.newlyAdded !== undefined && result.newlyAdded > 0) detail.push('新发现 ' + result.newlyAdded + ' 个');
+      if (!detail.length && result.message) detail.push(result.message);
+      if (result.errors && result.errors.length) detail.push('❌ ' + result.errors.length + ' 个错误');
+      updateSyncProgress('✅ ' + sourceName + ' 采集完成', detail.join('，') || '完成');
     } else {
-      showToast('同步失败: ' + result.error, 'error');
+      updateSyncProgress('❌ 采集失败', result.error || '未知错误', true);
     }
-    await loadBilibiliUppers();
-    loadArticles();
-    loadStats();
-    loadSources();
+    setTimeout(closeSyncProgress, 5000);
   } catch (e) {
-    showToast('同步异常: ' + e, 'error');
-    document.getElementById('bilibiliAdminStatus').textContent = '同步失败';
+    updateSyncProgress('❌ 采集失败', e.message || '网络异常', true);
+    setTimeout(closeSyncProgress, 8000);
   }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="bilibiliRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
 }
 
 // ===== YouTube UP 主管理 =====
@@ -3830,20 +3829,11 @@ async function addTwitterAccount() {
 }
 
 async function twitterRefresh() {
-  const btn = document.getElementById('twitterRefreshBtn');
-  const icon = document.getElementById('twitterRefreshIcon');
-  const status = document.getElementById('twitterAdminStatus');
-  btn.disabled = true;
-  icon.classList.add('animate-spin');
-  status.textContent = '同步中...';
-  try {
-    const result = await api('/twitter-admin/refresh', { method: 'POST' });
-    status.textContent = '✅ 同步完成，采集 ' + (result.count || 0) + ' 篇';
-  } catch (e) {
-    status.textContent = '❌ 同步失败: ' + (e.message || '');
-  }
-  icon.classList.remove('animate-spin');
-  btn.disabled = false;
+  await showSyncProgressForFn('Twitter', '/twitter-admin/refresh', { method: 'POST' });
+  await loadTwitterAccounts();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 function toggleYoutubeSettings() {
@@ -3955,35 +3945,11 @@ function searchYoutubeUppers(query) {
 }
 
 async function youtubeRefresh() {
-  const btn = document.getElementById('youtubeRefreshBtn');
-  const icon = document.getElementById('youtubeRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('youtubeAdminStatus').textContent = '同步中...';
-
-  try {
-    const result = await api('/api/youtube-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (result.ok) {
-      showToast('同步完成：获取 ' + result.fetched + ' 个视频，新增 ' + result.inserted + ' 篇', 'success');
-    } else {
-      showToast('同步失败: ' + result.error, 'error');
-    }
-    await loadYoutubeUppers();
-    loadArticles();
-    loadStats();
-    loadSources();
-  } catch (e) {
-    showToast('同步异常: ' + e, 'error');
-    document.getElementById('youtubeAdminStatus').textContent = '同步失败';
-  }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
+  await showSyncProgressForFn('YouTube', '/api/youtube-admin/refresh');
+  await loadYoutubeUppers();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 // ===== 播客频道管理 =====
@@ -4391,5 +4357,22 @@ loadStats();
   </div>
 </div>
 
+
+<!-- ====== 同步进度弹窗 ====== -->
+<div id="syncProgressModal" class="fixed inset-0 z-[400] hidden">
+  <div class="absolute inset-0 bg-black/60"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl shadow-2xl p-6 w-80">
+    <div class="text-center">
+      <div id="syncProgressSpinner" class="mx-auto w-10 h-10 border-4 border-accent/30 border-t-accent rounded-full animate-spin mb-4"></div>
+      <p id="syncProgressMessage" class="text-sm font-medium mb-1">正在采集...</p>
+      <p id="syncProgressDetail" class="text-xs text-muted"></p>
+      <div id="syncProgressResult" class="hidden">
+        <p id="syncResultText" class="text-sm font-medium mb-2"></p>
+        <p id="syncResultDetail" class="text-xs text-muted mb-3"></p>
+        <button class="text-xs bg-surface2 hover:bg-border text-fg px-4 py-1.5 rounded-lg transition" onclick="closeSyncProgress()">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
