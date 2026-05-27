@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
     container_name: infohub-backend
     environment:
-      DATABASE_URL: postgres://infohub:infohub123@quant-postgres:5432/infohub
+      DATABASE_URL: ${DATABASE_URL}
       PORT: "3001"
       REQUIRE_AUTH: "true"
       ADMIN_TOKEN: ${ADMIN_TOKEN}
@@ -15,7 +15,7 @@ services:
       HOME: /root
       OB_DIR: /obsidian
       WEFLOW_URL: http://127.0.0.1:5031
-      WEFLOW_TOKEN: 86ec59e61b587f1b97ad227a1ec12476
+      WEFLOW_TOKEN: ${WEFLOW_TOKEN}
       OLLAMA_BASE_URL: http://172.18.0.1:11435
       OLLAMA_TRANSLATE_MODEL: gemma4:26b
       OB_ATTACHMENTS_DIR: /obsidian/附件

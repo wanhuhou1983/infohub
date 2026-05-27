@@ -424,10 +424,6 @@ if (!IS_CLOUD) {
 // ============ 内建定时调度器 + 云端同步 ============
 if (!IS_CLOUD) {
   const DAILY_MS = 24 * 60 * 60 * 1000;
-  const CLOUD_HOST = '101.35.250.154';
-  const CLOUD_USER = 'ubuntu';
-  const CLOUD_PASS = 'Linhu50115';
-  const LOCAL_PG = 'postgres://infohub:infohub123@quant-postgres:5432/infohub';
 
   async function pushToCloud() {
     console.log('[cloud-sync] 开始推送数据到云...');

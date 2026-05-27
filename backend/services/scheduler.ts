@@ -1,11 +1,13 @@
 // @ts-nocheck
 import { Hono } from 'hono';
 import type { Sql } from 'postgres';
+import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { translateToChinese, isEnglish, createConcurrencyPool } from './translate.js';
 import { whisperWindowsTranscribe } from './transcribe.js';
 import { saveArticleFile } from '../file-storage.js';
+import { fail } from '../shared/response.js';
 
 // ============ DeepSeek 重断句（播客转录/B站字幕后处理） ============
 async function deepseekReparagraph(text: string, context: string): Promise<string | null> {
@@ -1033,7 +1035,7 @@ export function createSchedulerRoutes(sql: Sql): Hono {
       const settings = await loadCollectionSettings(sql);
       return c.json(settings);
     } catch (e: any) {
-      return c.json({ error: e.message }, 500);
+      return fail(c, e.message, 500);
     }
   });
 
@@ -1044,27 +1046,28 @@ export function createSchedulerRoutes(sql: Sql): Hono {
       await saveCollectionSettingsToDb(sql, body);
       return c.json({ ok: true });
     } catch (e: any) {
-      return c.json({ error: e.message }, 500);
+      return fail(c, e.message, 500);
     }
   });
 
   // POST /run -- trigger daily fetch (admin auth required)
   router.post('/run', async (c) => {
-    // Basic admin auth check
+    // Admin auth check (timing-safe)
     const adminToken = process.env.ADMIN_TOKEN || '';
     if (adminToken) {
       const authHeader = c.req.header('Authorization');
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return c.json({ error: '缺少 Authorization 头' }, 401);
+        return fail(c, '缺少 Authorization 头', 401);
       }
-      const token = authHeader.slice(7);
-      if (token !== adminToken) {
-        return c.json({ error: '管理员 Token 无效' }, 403);
+      const token = Buffer.from(authHeader.slice(7));
+      const adminBuf = Buffer.from(adminToken);
+      if (token.length !== adminBuf.length || !timingSafeEqual(token, adminBuf)) {
+        return fail(c, '管理员 Token 无效', 403);
       }
     }
 
     if (_isRunning) {
-      return c.json({ error: 'Another fetch is already running', startedAt: _lastRunAt }, 409);
+      return c.json({ ok: false, error: 'Another fetch is already running', startedAt: _lastRunAt }, 409);
     }
 
     try {
@@ -1091,11 +1094,12 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     if (adminToken) {
       const authHeader = c.req.header('Authorization');
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return c.json({ error: '缺少 Authorization 头' }, 401);
+        return fail(c, '缺少 Authorization 头', 401);
       }
-      const token = authHeader.slice(7);
-      if (token !== adminToken) {
-        return c.json({ error: '管理员 Token 无效' }, 403);
+      const token = Buffer.from(authHeader.slice(7));
+      const adminBuf = Buffer.from(adminToken);
+      if (token.length !== adminBuf.length || !timingSafeEqual(token, adminBuf)) {
+        return fail(c, '管理员 Token 无效', 403);
       }
     }
     _isRunning = false;
