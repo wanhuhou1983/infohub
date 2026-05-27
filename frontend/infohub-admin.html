@@ -283,6 +283,7 @@ tailwind.config = {
           <label class="text-sm text-muted mb-1.5 block">WeFlow Token</label>
           <input type="password" id="weflow-token" placeholder="WeFlow API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
         </div>
+      </div>
       <div class="mt-4 flex justify-end">
         <button onclick="saveApiConfig()" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium">
           保存配置
@@ -333,93 +334,45 @@ tailwind.config = {
   <!-- ====== 页面4: 数据统计 ====== -->
   <div id="page-stats" class="page p-6 hidden">
     <div class="mb-6">
-      <h1 class="text-xl font-semibold">数据统计</h1>
-      <p class="text-sm text-muted mt-1">信息汇总系统的整体运行数据</p>
+      <h1 class="text-xl font-semibold">数据库信息源树</h1>
+      <p class="text-sm text-muted mt-1">PG 数据库中的信息源层级结构与文章数量</p>
     </div>
 
-    <!-- 统计卡片 -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    <!-- 汇总卡片 -->
+    <div id="statsSummaryCards" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
       <div class="bg-surface rounded-xl p-4 border border-border">
         <div class="text-xs text-muted mb-1">总文章数</div>
-        <div class="text-3xl font-bold">1,247</div>
-        <div class="text-xs text-success mt-1">↑ 12% 较上周</div>
+        <div id="statTotalArticles" class="text-3xl font-bold">-</div>
       </div>
       <div class="bg-surface rounded-xl p-4 border border-border">
         <div class="text-xs text-muted mb-1">信息源</div>
-        <div class="text-3xl font-bold">7</div>
-        <div class="text-xs text-muted mt-1">5 个活跃</div>
+        <div id="statTotalSources" class="text-3xl font-bold">-</div>
       </div>
       <div class="bg-surface rounded-xl p-4 border border-border">
-        <div class="text-xs text-muted mb-1">今日采集</div>
-        <div class="text-3xl font-bold text-accent">42</div>
-        <div class="text-xs text-success mt-1">全部成功</div>
+        <div class="text-xs text-muted mb-1">有文章的源</div>
+        <div id="statActiveSources" class="text-3xl font-bold text-accent">-</div>
       </div>
       <div class="bg-surface rounded-xl p-4 border border-border">
-        <div class="text-xs text-muted mb-1">存储占用</div>
-        <div class="text-3xl font-bold">2.3<span class="text-lg text-muted ml-0.5">GB</span></div>
-        <div class="text-xs text-muted mt-1">PostgreSQL</div>
+        <div class="text-xs text-muted mb-1">空源</div>
+        <div id="statEmptySources" class="text-3xl font-bold text-warn">-</div>
       </div>
     </div>
 
-    <!-- 各源统计 -->
-    <div class="bg-surface rounded-xl border border-border overflow-hidden">
-      <div class="px-4 py-3 border-b border-border">
-        <span class="text-sm font-medium">各信息源统计</span>
+    <!-- 树形视图 -->
+    <div class="bg-surface rounded-xl border border-border">
+      <div class="px-4 py-3 border-b border-border flex items-center justify-between">
+        <span class="text-sm font-medium">信息源树</span>
+        <div class="flex gap-2">
+          <button onclick="expandAllTreeNodes()" class="text-xs text-accent hover:text-accent2 transition">全部展开</button>
+          <span class="text-muted">|</span>
+          <button onclick="collapseAllTreeNodes()" class="text-xs text-accent hover:text-accent2 transition">全部折叠</button>
+        </div>
       </div>
-      <div class="overflow-x-auto">
-        <table class="w-full text-sm">
-          <thead>
-            <tr class="border-b border-border text-muted text-xs">
-              <th class="text-left px-4 py-2.5 font-medium">信息源</th>
-              <th class="text-right px-4 py-2.5 font-medium">总文章</th>
-              <th class="text-right px-4 py-2.5 font-medium">今日新增</th>
-              <th class="text-right px-4 py-2.5 font-medium">未读</th>
-              <th class="text-right px-4 py-2.5 font-medium">最近采集</th>
-              <th class="text-center px-4 py-2.5 font-medium">状态</th>
-            </tr>
-          </thead>
-          <tbody id="statsTable"></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- 采集趋势图占位 -->
-    <div class="bg-surface rounded-xl border border-border mt-4 p-6">
-      <span class="text-sm font-medium">近7日采集趋势</span>
-      <div class="mt-4 flex items-end gap-2 h-32">
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/60 rounded-t" style="height: 60%"></div>
-          <span class="text-xs text-muted">周一</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/60 rounded-t" style="height: 45%"></div>
-          <span class="text-xs text-muted">周二</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/60 rounded-t" style="height: 80%"></div>
-          <span class="text-xs text-muted">周三</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/60 rounded-t" style="height: 55%"></div>
-          <span class="text-xs text-muted">周四</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/60 rounded-t" style="height: 70%"></div>
-          <span class="text-xs text-muted">周五</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/40 rounded-t" style="height: 30%"></div>
-          <span class="text-xs text-muted">周六</span>
-        </div>
-        <div class="flex-1 flex flex-col items-center gap-1">
-          <div class="w-full bg-accent/40 rounded-t" style="height: 25%"></div>
-          <span class="text-xs text-muted">周日</span>
-        </div>
+      <div id="sourceTreeView" class="p-2 max-h-[65vh] overflow-y-auto">
+        <div class="text-sm text-muted p-4">加载中...</div>
       </div>
     </div>
   </div>
-</div>
-
 
 <!-- ====== 采集设置弹窗 ====== -->
 <div id="collectionSettingsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
@@ -1193,6 +1146,10 @@ function switchPage(page, navEl) {
   if (page === 'sources') {
     updateSourceStats();
   }
+  // 数据统计页：加载树
+  if (page === 'stats') {
+    loadSourceTree();
+  }
 }
 
 // 从 API 获取实时统计并更新 SOURCE_CONFIGS
@@ -1649,24 +1606,190 @@ function renderDailySummary() {
   `;
 }
 
+// ===== 数据库信息源树 =====
+let sourceTreeData = [];
+
+const TYPE_ICONS = {
+  magazine: '📰', rss: '📡', wechat: '💬', wechat_group: '👥',
+  bilibili: '🎬', youtube: '▶️', twitter: '🐦', podcast: '🎙️',
+  xueqiu: '📈', jisilu: '💰', xwlb: '📺', system: '⚙️'
+};
+
+const TYPE_ORDER = ['magazine', 'wechat', 'bilibili', 'youtube', 'podcast', 'twitter', 'wechat_group', 'xueqiu', 'jisilu', 'rss', 'xwlb'];
+
+async function loadSourceTree() {
+  try {
+    console.log('[Stats] Loading source tree...');
+    const data = await api('/sources/tree');
+    console.log('[Stats] Got', data.length, 'roots');
+    // Filter out system type
+    sourceTreeData = data.filter(s => s.type !== 'system');
+    // Sort by TYPE_ORDER
+    sourceTreeData.sort((a, b) => {
+      const ia = TYPE_ORDER.indexOf(a.type);
+      const ib = TYPE_ORDER.indexOf(b.type);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    });
+    renderSourceTree();
+    updateStatsSummary(sourceTreeData);
+  } catch (e) {
+    document.getElementById('sourceTreeView').innerHTML =
+      '<div class="text-sm text-danger p-4">加载失败: ' + e.message + '</div>';
+  }
+}
+
+function updateStatsSummary(roots) {
+  let totalArticles = 0, totalSources = 0, activeSources = 0;
+  function countAll(nodes) {
+    for (const n of nodes) {
+      totalSources++;
+      const nArticles = n.total_articles || 0;
+      if (nArticles > 0) activeSources++;
+      totalArticles += (n.type !== 'system' ? 0 : 0); // only count at root level
+      if (n.children && n.children.length > 0) countAll(n.children);
+    }
+  }
+  // totalArticles from root total_articles
+  totalArticles = roots.reduce((sum, r) => sum + (r.total_articles || 0), 0);
+  countAll(roots);
+  const emptySources = totalSources - activeSources;
+
+  document.getElementById('statTotalArticles').textContent = totalArticles.toLocaleString();
+  document.getElementById('statTotalSources').textContent = totalSources;
+  document.getElementById('statActiveSources').textContent = activeSources;
+  document.getElementById('statEmptySources').textContent = emptySources;
+}
+
+function renderSourceTree() {
+  const container = document.getElementById('sourceTreeView');
+  container.innerHTML = sourceTreeData.map(node => renderTreeNode(node, 0)).join('');
+}
+
+function renderTreeNode(node, depth) {
+  const icon = node.icon || TYPE_ICONS[node.type] || '📄';
+  const hasChildren = node.children && node.children.length > 0;
+  const articles = node.total_articles || 0;
+  const selfArticles = node.article_count || 0;
+  const enabled = node.enabled !== false;
+
+  let countColor = 'text-muted';
+  if (articles > 100) countColor = 'text-success';
+  else if (articles > 0) countColor = 'text-fg';
+  else countColor = 'text-danger';
+
+  const indent = depth * 20;
+  const nodeId = 'tree-node-' + node.id;
+  // Can expand: either has child sources, or has articles to show
+  const canExpand = hasChildren || articles > 0;
+
+  let html = '';
+  html += '<div class="select-none" id="' + nodeId + '" style="margin-left:' + indent + 'px">';
+
+  // Node row
+  html += '<div class="flex items-center gap-1.5 py-1 px-2 rounded hover:bg-surface2/50 cursor-pointer group" onclick="toggleTreeNode(this)" data-source-id="' + node.id + '" data-has-children="' + hasChildren + '" data-articles="' + articles + '">';
+
+  // Expand/collapse arrow
+  if (canExpand) {
+    html += '<svg class="w-3.5 h-3.5 text-muted shrink-0 transition-transform tree-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>';
+  } else {
+    html += '<span class="w-3.5 shrink-0"></span>';
+  }
+
+  html += '<span class="text-sm">' + icon + '</span>';
+  html += '<span class="text-sm truncate flex-1 ' + (enabled ? '' : 'text-muted line-through') + '">' + escapeHtml(node.name) + '</span>';
+  html += '<span class="text-[10px] px-1.5 py-0.5 rounded bg-surface2 text-muted hidden group-hover:inline">' + node.type + '</span>';
+  html += '<span class="text-xs tabular-nums ' + countColor + '">' + articles.toLocaleString() + '</span>';
+
+  if (hasChildren && selfArticles > 0) {
+    html += '<span class="text-[10px] text-muted">(自' + selfArticles + ')</span>';
+  }
+
+  html += '</div>';
+
+  // Children container (collapsed by default)
+  if (hasChildren) {
+    html += '<div class="tree-children hidden">';
+    const sortedChildren = [...node.children].sort((a, b) => {
+      if (a.enabled !== b.enabled) return a.enabled === false ? 1 : -1;
+      return (b.total_articles || 0) - (a.total_articles || 0);
+    });
+    for (const child of sortedChildren) {
+      html += renderTreeNode(child, depth + 1);
+    }
+    html += '</div>';
+  } else if (articles > 0) {
+    // Leaf node with articles: placeholder for lazy loading
+    html += '<div class="tree-children hidden" data-article-source="' + node.id + '"></div>';
+  }
+
+  html += '</div>';
+  return html;
+}
+
+function escapeHtml(text) {
+  const d = document.createElement('div');
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+function toggleTreeNode(rowEl) {
+  const wrapper = rowEl.parentElement;
+  const children = wrapper.querySelector('.tree-children');
+  if (!children) return;
+  const arrow = rowEl.querySelector('.tree-arrow');
+
+  if (children.classList.contains('hidden')) {
+    children.classList.remove('hidden');
+    if (arrow) arrow.style.transform = 'rotate(90deg)';
+    // Lazy load articles for leaf nodes
+    const sourceId = children.getAttribute('data-article-source');
+    if (sourceId && children.children.length === 0) {
+      loadSourceArticles(sourceId, children);
+    }
+  } else {
+    children.classList.add('hidden');
+    if (arrow) arrow.style.transform = '';
+  }
+}
+
+async function loadSourceArticles(sourceId, container) {
+  container.innerHTML = '<div class="text-xs text-muted px-6 py-1">加载中...</div>';
+  try {
+    const articles = await api('/sources/tree/' + sourceId + '/articles?limit=100');
+    if (!articles || articles.length === 0) {
+      container.innerHTML = '<div class="text-xs text-muted px-6 py-1">暂无文章</div>';
+      return;
+    }
+    container.innerHTML = articles.map(a => {
+      const date = a.published_at ? new Date(a.published_at).toLocaleDateString('zh-CN') : (a.fetched_at ? new Date(a.fetched_at).toLocaleDateString('zh-CN') : '');
+      return '<div class="flex items-center gap-2 py-0.5 px-2 hover:bg-surface2/30 rounded">' +
+        '<span class="text-[10px] text-muted shrink-0 w-16">' + date + '</span>' +
+        '<a href="' + (a.url || '#') + '" target="_blank" class="text-xs text-fg hover:text-accent truncate">' + escapeHtml(a.title || '无标题') + '</a>' +
+        '</div>';
+    }).join('');
+  } catch (e) {
+    container.innerHTML = '<div class="text-xs text-danger px-6 py-1">加载失败: ' + e.message + '</div>';
+  }
+}
+
+function expandAllTreeNodes() {
+  document.querySelectorAll('.tree-children').forEach(el => el.classList.remove('hidden'));
+  document.querySelectorAll('.tree-arrow').forEach(el => el.style.transform = 'rotate(90deg)');
+}
+
+function collapseAllTreeNodes() {
+  document.querySelectorAll('.tree-children').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.tree-arrow').forEach(el => el.style.transform = '');
+}
+
 function renderStats() {
-  const el = document.getElementById('statsTable');
-  el.innerHTML = SOURCE_CONFIGS.map(s => {
-    const statusDot = s.status === 'success' ? '<span class="w-2 h-2 bg-success rounded-full inline-block"></span>' : s.status === 'paused' ? '<span class="w-2 h-2 bg-muted rounded-full inline-block"></span>' : '<span class="w-2 h-2 bg-danger rounded-full inline-block"></span>';
-    return `
-    <tr class="border-b border-border/50 hover:bg-surface2 transition">
-      <td class="px-4 py-3"><span class="mr-1.5">${s.icon}</span>${s.name}</td>
-      <td class="px-4 py-3 text-right">${s.articleCount}</td>
-      <td class="px-4 py-3 text-right text-success">+${s.todayCount}</td>
-      <td class="px-4 py-3 text-right text-warn">${Math.floor(s.articleCount * 0.3)}</td>
-      <td class="px-4 py-3 text-right text-muted">${s.lastFetch}</td>
-      <td class="px-4 py-3 text-center">${statusDot}</td>
-    </tr>`;
-  }).join('');
+  loadSourceTree();
 }
 
 // ===== 弹窗交互 =====
 let selectedSourceType = null;
+
+function closeAddScheduleModal() {
 
 
 

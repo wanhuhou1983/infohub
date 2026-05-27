@@ -39,9 +39,22 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
   router.get('/tree', async (c) => {
     const sources = await sql`SELECT * FROM sources ORDER BY id`;
 
+    // 一次性查所有 source 的文章数
+    const articleCounts = await sql`
+      SELECT source_id, COUNT(*) as count
+      FROM articles
+      GROUP BY source_id
+    `;
+    const countMap = new Map<number, number>();
+    articleCounts.forEach((r: any) => countMap.set(r.source_id, Number(r.count)));
+
     // 构建节点映射
     const nodeMap = new Map();
-    sources.forEach(s => nodeMap.set(s.id, { ...s, children: [] }));
+    sources.forEach(s => nodeMap.set(s.id, {
+      ...s,
+      article_count: countMap.get(s.id) || 0,
+      children: []
+    }));
 
     const roots: any[] = [];
 
@@ -62,7 +75,32 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
       }
     });
 
+    // 计算每个节点的 total_articles（自身 + 所有子孙）
+    function calcTotal(node: any): number {
+      let total = node.article_count || 0;
+      for (const child of node.children) {
+        total += calcTotal(child);
+      }
+      node.total_articles = total;
+      return total;
+    }
+    roots.forEach(calcTotal);
+
     return c.json(roots);
+  });
+
+  // 获取指定源的文章标题列表（树形视图用）
+  router.get('/tree/:id/articles', async (c) => {
+    const sourceId = Number(c.req.param('id'));
+    const limit = Number(c.req.query('limit') || 100);
+    const articles = await sql`
+      SELECT id, title, url, published_at, fetched_at
+      FROM articles
+      WHERE source_id = ${sourceId}
+      ORDER BY COALESCE(published_at, fetched_at) DESC
+      LIMIT ${limit}
+    `;
+    return c.json(articles);
   });
 
   // 创建新信息源
