@@ -1704,7 +1704,7 @@ async function selectArticle(id) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
           翻译
         </button>` : ''}
-        ${isBilibili || isPodcast || isYoutube ? `<button onclick="showSubtitleAnalysis(${id})" id="subtitleBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+        ${isBilibili || isPodcast || isYoutube ? `<button onclick="showSubtitleAnalysis(${id}, '${article.source_type || ''}')" id="subtitleBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           转录
         </button>` : ''}
@@ -1716,7 +1716,7 @@ async function selectArticle(id) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
           ${hasSubtitle ? '刷新字幕' : '下载字幕'}
         </button>
-        ${hasSubtitle ? `<button onclick="triggerBilibiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+        ${hasSubtitle ? `<button onclick="triggerBiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           AI 解读字幕
         </button>` : ''}
@@ -2162,6 +2162,14 @@ async function triggerBilibiliSubtitle(articleId) {
 }
 
 // ===== B站字幕 AI 解读 =====
+// ===== 字幕转录路由 =====
+function showSubtitleAnalysis(articleId, sourceType) {
+  if (!sourceType) return;
+  if (sourceType.startsWith('bilibili')) triggerBilibiliSubtitle(articleId);
+  else if (sourceType.startsWith('youtube')) triggerYoutubeSubtitle(articleId);
+  else if (sourceType.toLowerCase().includes('podcast')) triggerPodcastTranscribe(articleId);
+}
+
 async function triggerBiliSubtitleAnalysis(articleId) {
   const btn = document.getElementById(`biliSubAiBtn-${articleId}`);
   const container = document.getElementById(`biliSubAiContent-${articleId}`);
@@ -3622,6 +3630,29 @@ async function toggleBilibiliAccount(id, enabled) {
 }
 
 let bilibiliSearchTimeout = null;
+// ===== 添加 B站 UP 主 =====
+async function addBilibiliAccount() {
+  const input = document.getElementById('bilibiliAddInput');
+  const mid = (input.value || '').trim();
+  if (!mid) { showToast('请输入 UP 主主页链接或 mid', 'error'); return; }
+  try {
+    const result = await api('/bilibili-admin/uppers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mid }),
+    });
+    if (result.ok) {
+      showToast('已添加 ' + result.account.name + '（默认禁用）', 'success');
+      input.value = '';
+      loadBilibiliUppers();
+    } else {
+      showToast('添加失败: ' + (result.error || '未知错误'), 'error');
+    }
+  } catch (e) {
+    showToast('添加异常: ' + (e.message || '网络错误'), 'error');
+  }
+}
+
 function searchBilibiliUppers(query) {
   clearTimeout(bilibiliSearchTimeout);
   bilibiliSearchTimeout = setTimeout(function() {
