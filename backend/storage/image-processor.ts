@@ -92,6 +92,7 @@ async function downloadAndSaveImage(imageUrl: string, sourceType: string): Promi
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
         'Accept': 'image/*,*/*;q=0.8',
+        'Referer': 'https://mp.weixin.qq.com/',
       },
     });
     if (!imgResponse.ok) return null;
@@ -224,7 +225,12 @@ export async function processImages(content: string, sourceType = 'rss'): Promis
     if (data.replacement) {
       const regex = new RegExp(`(!\\[)(.*?)(\\]\\(${escapeRegex(originalUrl)}\\))`, 'g');
       result = result.replace(regex, data.replacement);
+    } else {
+      // 图片下载失败时保留原始 URL，不删除（例如 WeChat mmbiz.qpic.cn 下载可能失败）
+      const regex = new RegExp(`(!\[)(.*?)(\]\(${escapeRegex(originalUrl)}\))`, 'g');
+      result = result.replace(regex, `$1$2(${originalUrl})`);
     }
+  }
   }
 
   // 在所有图片下载/上传/缓存替换完成后，将本地路径转为 COS URL
