@@ -1118,12 +1118,12 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     const dateCompact = date.replace(/-/g, '');
 
     // 标准类型 → 单次 API 调用
-    const endpointMap: Record<string, { path: string; body?: any }> = {
+    const endpointMap: Record<string, { path: string; body?: any; fallbackDay?: boolean }> = {
       bilibili: { path: '/bilibili-admin/refresh' },
-      xwlb: { path: '/fetch/xwlb', body: { date: dateCompact } },
-      magazine: { path: '/fetch/xwlb', body: { date: dateCompact } },
-      rmrb: { path: '/fetch/rmrb', body: { date: todayDash } },
-      penti: { path: '/fetch/penti', body: { date: dateCompact } },
+      xwlb: { path: '/fetch/xwlb', body: { date: dateCompact }, fallbackDay: true },
+      magazine: { path: '/fetch/xwlb', body: { date: dateCompact }, fallbackDay: true },
+      rmrb: { path: '/fetch/rmrb', body: { date: todayDash }, fallbackDay: true },
+      penti: { path: '/fetch/penti', body: { date: dateCompact }, fallbackDay: true },
       wechat: { path: '/wechat-admin/refresh' },
       twitter: { path: '/twitter-admin/refresh' },
       youtube: { path: '/youtube-admin/refresh' },
@@ -1154,7 +1154,18 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     }
 
     try {
-      const result = await fetchApi(entry.path, entry.body);
+      let result = await fetchApi(entry.path, entry.body);
+      // Fallback: 如果当天没有内容，尝试昨天
+      if (entry.fallbackDay && !result.inserted) {
+        const yesterday = new Date(Date.now() - 86400000);
+        const yCompact = yesterday.toISOString().slice(0, 10).replace(/-/g, '');
+        const yDash = yesterday.toISOString().slice(0, 10);
+        const fallbackBody = entry.body ? { date: yCompact } : {};
+        const fallbackResult = await fetchApi(entry.path, fallbackBody).catch(() => null);
+        if (fallbackResult && fallbackResult.inserted) {
+          result = fallbackResult;
+        }
+      }
       return c.json(result);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message }, 500);
