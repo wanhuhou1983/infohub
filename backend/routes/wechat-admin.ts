@@ -207,7 +207,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
           // 6a: Try HTTP API
           let apiMessages: any[] = [];
           try {
-            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
+            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}`, { headers });
             if (msgsResp.ok) {
               const msgsData = await msgsResp.json() as any;
               apiMessages = msgsData.messages || [];
@@ -307,7 +307,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
           // Also try API
           let apiArticles: Array<{ url: string; title: string; createTime: number }> = [];
           try {
-            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&cursor=0`, { headers });
+            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}`, { headers });
             if (msgsResp.ok) {
               const msgsData = await msgsResp.json() as any;
               apiArticles = extractArticleUrls(msgsData.messages || []);
