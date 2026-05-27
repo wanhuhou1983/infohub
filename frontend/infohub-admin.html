@@ -153,10 +153,7 @@ tailwind.config = {
         <h1 class="text-xl font-semibold">信息源管理</h1>
         <p class="text-sm text-muted mt-1">管理所有信息采集源，配置采集参数</p>
       </div>
-      <button class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-2 rounded-lg transition font-medium flex items-center gap-1.5" onclick="showAddSourceModal()">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        添加信息源
-      </button>
+
     </div>
 
     <!-- 信息源卡片列表 -->
@@ -419,151 +416,6 @@ tailwind.config = {
           <span class="text-xs text-muted">周日</span>
         </div>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- ====== 添加信息源弹窗 ====== -->
-<div id="addSourceModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">
-  <div class="bg-surface rounded-xl border border-border w-full max-w-lg max-h-[90vh] overflow-y-auto fade-in">
-    <div class="px-6 py-4 border-b border-border flex items-center justify-between">
-      <h2 class="font-semibold">添加信息源</h2>
-      <button class="text-muted hover:text-fg" onclick="closeAddSourceModal()">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
-    </div>
-    <div class="p-6">
-      <!-- 选择类型 -->
-      <div class="mb-5">
-        <label class="text-sm text-muted mb-2 block">信息源类型</label>
-        <div class="grid grid-cols-3 gap-2" id="sourceTypeGrid">
-          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="rss" onclick="selectSourceType('rss', this)">
-            <div class="text-xl mb-1">📡</div>
-            <div class="text-xs">RSS</div>
-          </button>
-          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="wechat" onclick="selectSourceType('wechat', this)">
-            <div class="text-xl mb-1">💬</div>
-            <div class="text-xs">公众号</div>
-          </button>
-          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="bilibili" onclick="selectSourceType('bilibili', this)">
-            <div class="text-xl mb-1">📺</div>
-            <div class="text-xs">哔哩哔哩</div>
-          </button>
-          <button class="source-type-btn p-3 bg-surface2 rounded-lg border border-border hover:border-accent transition text-center" data-type="web" onclick="selectSourceType('web', this)">
-            <div class="text-xl mb-1">🌐</div>
-            <div class="text-xs">网页</div>
-          </button>
-        </div>
-      </div>
-
-      <!-- 动态表单区 -->
-      <div id="sourceFormArea">
-        <!-- RSS 表单 -->
-        <div id="form-rss" class="space-y-4 hidden">
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">Feed URL *</label>
-            <input type="text" placeholder="https://example.com/feed.xml" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">名称</label>
-            <input type="text" placeholder="自动从 Feed 获取" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">分类</label>
-            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-              <option>科技</option><option>财经</option><option>综合</option><option>自定义...</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">RSS 分类</label>
-            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-              <option>默认分类</option><option>技术</option><option>新闻</option><option>AI</option>
-            </select>
-          </div>
-        </div>
-
-        <!-- 公众号表单 -->
-        <div id="form-wechat" class="space-y-4 hidden">
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">公众号过滤器（多个用逗号分隔）</label>
-            <input type="text" id="wechat-accounts" placeholder="如：老陈侃财,腾讯文档,机器之心" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-            <p class="text-xs text-muted mt-1">留空表示同步 WeFlow 中的所有公众号</p>
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">WeFlow API 地址</label>
-            <input type="text" id="weflow-url" placeholder="http://100.77.50.100:8001" value="http://100.77.50.100:8001" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">WeFlow Token</label>
-            <input type="password" id="weflow-token" placeholder="WeFlow API Token" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div class="bg-accent/10 border border-accent/20 rounded-lg p-3">
-            <p class="text-xs text-accent">ℹ️ 使用 WeFlow API 自动抓取公众号文章，配置公众号名称进行过滤</p>
-          </div>
-        </div>
-
-        <!-- 哔哩哔哩表单 -->
-        <div id="form-bilibili" class="space-y-4 hidden">
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">UP 主过滤器（多个用逗号分隔）</label>
-            <input type="text" id="bilibili-accounts" placeholder="如：老高与大茉莉,影视飓风" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-            <p class="text-xs text-muted mt-1">留空表示同步所有关注的 UP 主</p>
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">B站 Cookie (SESSDATA)</label>
-            <input type="password" id="bilibili-cookie" placeholder="B站登录 Cookie 中的 SESSDATA 值" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div class="bg-accent/10 border border-accent/20 rounded-lg p-3">
-            <p class="text-xs text-accent">ℹ️ 使用 B站关注列表 API 自动抓取 UP 主视频，配置 SESSDATA 进行登录验证</p>
-          </div>
-        </div>
-
-        <!-- 网页表单 -->
-        <div id="form-web" class="space-y-4 hidden">
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">网站 URL *</label>
-            <input type="text" placeholder="https://example.com" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">名称</label>
-            <input type="text" placeholder="网站名称" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">解析方式</label>
-            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-              <option>Smart Web Fetch（自动清洗）</option>
-              <option>MinerU（高保真解析）</option>
-              <option>原生 RSS 发现</option>
-            </select>
-          </div>
-          <div>
-            <label class="text-sm text-muted mb-1.5 block">分类</label>
-            <select class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
-              <option>综合</option><option>科技</option><option>财经</option><option>自定义...</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- 通用配置 -->
-      <div id="commonConfig" class="hidden mt-4 pt-4 border-t border-border space-y-3">
-        <div class="flex items-center justify-between">
-          <span class="text-sm">启用 AI 自动摘要</span>
-          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-sm">启用自动标签提取</span>
-          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-sm">去重检测</span>
-          <label class="switch"><input type="checkbox" checked><span class="slider"></span></label>
-        </div>
-      </div>
-    </div>
-    <div class="px-6 py-4 border-t border-border flex justify-end gap-3">
-      <button class="px-4 py-2 text-sm text-muted hover:text-fg transition" onclick="closeAddSourceModal()">取消</button>
-      <button class="px-4 py-2 text-sm bg-accent hover:bg-accent2 text-white rounded-lg transition font-medium" onclick="addSource()">添加</button>
     </div>
   </div>
 </div>
@@ -1498,8 +1350,8 @@ function isAggSource(s) {
 function renderSourceCards() {
   const el = document.getElementById('sourceCards');
   
-  // 自定义排序：公众号 -> 微信群聊 -> 哔哩哔哩 -> YouTube -> 其他
-  const order = { wechat: 1, wechat_group: 2, bilibili: 3, youtube: 4, twitter: 5 };
+  // 自定义排序：报刊杂志 -> 公众号 -> 哔哩哔哩 -> YouTube -> 播客 -> 推特 -> 微信群聊 -> 雪球 -> 集思录
+  const order = { magazine: 1, wechat: 2, bilibili: 3, youtube: 4, podcast: 5, twitter: 6, wechat_group: 7, xueqiu: 8, jisilu: 9 };
   const sortedSources = [...SOURCE_CONFIGS].sort((a, b) => {
     const orderA = order[a.sourceType] || 100;
     const orderB = order[b.sourceType] || 100;
@@ -1816,41 +1668,8 @@ function renderStats() {
 // ===== 弹窗交互 =====
 let selectedSourceType = null;
 
-function showAddSourceModal() {
-  document.getElementById('addSourceModal').classList.remove('hidden');
-  document.getElementById('addSourceModal').classList.add('flex');
-  selectedSourceType = null;
-  document.querySelectorAll('.source-type-btn').forEach(b => b.classList.remove('border-accent', 'bg-accent/10'));
-  document.querySelectorAll('[id^="form-"]').forEach(f => f.classList.add('hidden'));
-  document.getElementById('commonConfig').classList.add('hidden');
-}
 
-function closeAddSourceModal() {
-  document.getElementById('addSourceModal').classList.add('hidden');
-  document.getElementById('addSourceModal').classList.remove('flex');
-}
 
-function selectSourceType(type, btn) {
-  selectedSourceType = type;
-  document.querySelectorAll('.source-type-btn').forEach(b => b.classList.remove('border-accent', 'bg-accent/10'));
-  btn.classList.add('border-accent', 'bg-accent/10');
-  document.querySelectorAll('[id^="form-"]').forEach(f => f.classList.add('hidden'));
-  document.getElementById('form-' + type).classList.remove('hidden');
-  document.getElementById('commonConfig').classList.remove('hidden');
-}
-
-function addSource() {
-  if (!selectedSourceType) { alert('请选择信息源类型'); return; }
-  closeAddSourceModal();
-  alert('信息源添加成功（样稿演示）');
-}
-
-function showAddScheduleModal() {
-  document.getElementById('addScheduleModal').classList.remove('hidden');
-  document.getElementById('addScheduleModal').classList.add('flex');
-}
-
-function closeAddScheduleModal() {
   document.getElementById('addScheduleModal').classList.add('hidden');
   document.getElementById('addScheduleModal').classList.remove('flex');
 }
@@ -3210,7 +3029,7 @@ async function loadSourcesFromAPI() {
     const sourceMap = new Map();
     
     // 将API数据转换为前端格式
-    sources.forEach(s => {
+    sources.filter(s => s.type !== 'system').forEach(s => {
       sourceMap.set(s.id, {
         id: String(s.id),
         name: s.name,
