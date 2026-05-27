@@ -3935,6 +3935,24 @@ loadSourcesFromAPI().then(() => {
 renderSchedules();
 renderLogs();
 renderStats();
+
+// ===== 移动端管理菜单 =====
+function toggleAdminMobileMenu() {
+  const overlay = document.getElementById('adminMobileMenuOverlay');
+  if (!overlay) return;
+  overlay.classList.toggle('hidden');
+  if (!overlay.classList.contains('hidden')) {
+    document.body.style.overflow = 'hidden';
+  } else {
+    document.body.style.overflow = '';
+  }
+}
+function hideAdminMobileMenu() {
+  const overlay = document.getElementById('adminMobileMenuOverlay');
+  if (!overlay) return;
+  overlay.classList.add('hidden');
+  document.body.style.overflow = '';
+}
 </script>
 <!-- ====== 播客频道管理弹窗 ====== -->
 <div id="podcastChannelsModal" class="fixed inset-0 bg-black/60 modal-overlay z-50 hidden items-center justify-center">

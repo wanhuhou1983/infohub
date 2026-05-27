@@ -651,9 +651,31 @@ tailwind.config = {
       </div>
     </div>
     <div class="flex items-center gap-2 md:gap-4 relative">
+      <button class="md:hidden text-muted hover:text-fg transition p-1" title="搜索" onclick="toggleMobileSearch()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      </button>
+      <button class="text-muted hover:text-fg transition" title="刷新" onclick="loadArticles()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      </button>
+      <button id="fetchBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-3 md:px-4 py-1.5 rounded-lg transition font-medium relative" onclick="showFetchMenu()">
+        <span class="hidden md:inline">采集</span>
+        <svg class="w-4 h-4 md:w-3 md:h-3 md:inline md:ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <button class="hidden md:inline text-muted hover:text-fg transition" title="公众号管理" onclick="showWechatAdmin()">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+      </button>
       <button class="text-muted hover:text-fg transition" title="管理后台" onclick="window.open('/admin','_blank')">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
+      <div id="fetchMenu" class="hidden absolute right-4 top-12 bg-surface2 border border-border rounded-lg shadow-xl py-2 min-w-[180px] z-50">
+        <div class="px-3 py-1.5 text-xs text-muted font-medium">选择信息源</div>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchXWLB()">📰 新闻联播</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchRSS()">📡 RSS订阅</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchWechat()">💬 公众号</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchBilibili()">📺 B站视频</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchYoutube()">▶️ YouTube</button>
+        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchAll()">🔄 全部采集</button>
+      </div>
     </div>
   </div>
   <!-- 移动端搜索栏（默认隐藏） -->
@@ -721,27 +743,25 @@ tailwind.config = {
   </aside>
 
 
-  <!-- 主内容区（tab + 文章列表 + 文章详情并排） -->
-  <div class="flex-1 min-w-0 flex flex-col h-[calc(100vh-8rem)]">
-    <!-- tab 栏移到外层，不再被 overflow-y-auto 吃掉 sticky -->
-    <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
-      <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
-      <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
-      <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
-      <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
-      <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
-    </div>
-    <div class="flex flex-1 min-h-0">
-      <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
-        <div id="articleList" class="space-y-1"></div>
-        <div id="loadMore" class="text-center py-4 hidden">
-          <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
-        </div>
-      </main>
+  <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
+  <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
+    <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
+      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
+        <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
+        <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
+        <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
+        <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
+        <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
+      </div>
+      <div id="articleList" class="space-y-1"></div>
+      <div id="loadMore" class="text-center py-4 hidden">
+        <button class="text-sm text-accent2 hover:text-accent" onclick="loadMoreArticles()">加载更多</button>
+      </div>
+    </main>
 
-      <!-- 文章详情列（始终可见） -->
-      <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
-        <div id="detailColumnContent" class="p-4 md:p-6">
+    <!-- 文章详情列（始终可见） -->
+    <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
+      <div id="detailColumnContent" class="p-4 md:p-6">
         <div class="flex flex-col items-center justify-center h-full text-center text-muted py-32">
           <div class="text-4xl mb-4">📖</div>
           <p class="text-sm">点击左侧文章查看详情</p>
@@ -940,22 +960,9 @@ async function loadSources() {
   }
   sourceTree = tree;
 
-  // 过滤掉 system 类型（Admin Token / collection_settings），按指定顺序排序
-  const SIDEBAR_ORDER = ['magazine','wechat','bilibili','youtube','podcast','twitter','wechat_group','xueqiu','jisilu'];
-  sourceTree = sourceTree
-    .filter(s => s.type !== 'system')
-    .sort((a, b) => {
-      const ai = SIDEBAR_ORDER.indexOf(a.type);
-      const bi = SIDEBAR_ORDER.indexOf(b.type);
-      if (ai !== -1 && bi !== -1) return ai - bi;
-      if (ai !== -1) return -1;
-      if (bi !== -1) return 1;
-      return 0;
-    });
-
   // 收集群聊子源ID
   groupSourceIds = new Set([WECHAT_GROUP_ROOT]);
-  for (const s of sourceTree) {
+  for (const s of tree) {
     if (s.type === 'wechat_group') {
       groupSourceIds.add(s.id);
       for (const c of (s.children || [])) {
@@ -971,7 +978,7 @@ async function loadSources() {
   
   const el = document.getElementById('sourceList');
   
-  el.innerHTML = sourceTree.map(s => {
+  el.innerHTML = tree.map(s => {
     const color = SOURCE_COLORS[s.type] || 'bg-gray-500/20 text-gray-400';
     const active = currentSourceId === s.id ? 'bg-surface2' : '';
     const hasChildren = s.children && s.children.length > 0;
@@ -1697,7 +1704,7 @@ async function selectArticle(id) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M9 3v2m0 4V7m0 2v2m6-2a6 6 0 11-12 0 6 6 0 0112 0z"/></svg>
           翻译
         </button>` : ''}
-        ${isBilibili || isPodcast || isYoutube ? `<button onclick="showSubtitleAnalysis(${id})" id="subtitleBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
+        ${isBilibili || isPodcast || isYoutube ? `<button onclick="showSubtitleAnalysis(${id}, '${article.source_type || ''}')" id="subtitleBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition border border-purple-500/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           转录
         </button>` : ''}
@@ -1709,7 +1716,7 @@ async function selectArticle(id) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
           ${hasSubtitle ? '刷新字幕' : '下载字幕'}
         </button>
-        ${hasSubtitle ? `<button onclick="triggerBilibiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+        ${hasSubtitle ? `<button onclick="triggerBiliSubtitleAnalysis(${id})" id="biliSubAiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           AI 解读字幕
         </button>` : ''}
@@ -2155,6 +2162,14 @@ async function triggerBilibiliSubtitle(articleId) {
 }
 
 // ===== B站字幕 AI 解读 =====
+// ===== 字幕转录路由 =====
+function showSubtitleAnalysis(articleId, sourceType) {
+  if (!sourceType) return;
+  if (sourceType.startsWith('bilibili')) triggerBilibiliSubtitle(articleId);
+  else if (sourceType.startsWith('youtube')) triggerYoutubeSubtitle(articleId);
+  else if (sourceType.toLowerCase().includes('podcast')) triggerPodcastTranscribe(articleId);
+}
+
 async function triggerBiliSubtitleAnalysis(articleId) {
   const btn = document.getElementById(`biliSubAiBtn-${articleId}`);
   const container = document.getElementById(`biliSubAiContent-${articleId}`);
@@ -3163,10 +3178,15 @@ function showFetchMenu() {
 }
 
 function hideFetchMenu() {
-  const el = document.getElementById('fetchMenu');
-  if (el) el.classList.add('hidden');
+  document.getElementById('fetchMenu').classList.add('hidden');
 }
 
+// 点击其他区域关闭菜单
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#fetchBtn') && !e.target.closest('#fetchMenu')) {
+    hideFetchMenu();
+  }
+});
 
 function showToast(msg, type = 'success') {
   const div = document.createElement('div');
@@ -3499,36 +3519,11 @@ async function toggleWechatAccount(dbId, enabled) {
 }
 
 async function wechatRefresh() {
-  const btn = document.getElementById('wechatRefreshBtn');
-  const icon = document.getElementById('wechatRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="wechatRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('wechatAdminStatus').textContent = '同步中...';
-
-  try {
-    const result = await api('/wechat-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (result.ok) {
-      showToast(`同步完成：新增 ${result.newlyAdded} 个，采集 ${result.inserted} 篇`, 'success');
-    } else {
-      showToast(`同步失败: ${result.error}`, 'error');
-    }
-    // 重新加载列表 + 刷新主界面
-    await loadWechatAccounts();
-    loadArticles();
-    loadStats();
-    loadSources();
-  } catch (e) {
-    showToast(`同步异常: ${e}`, 'error');
-    document.getElementById('wechatAdminStatus').textContent = '同步失败';
-  }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="wechatRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
+  await showSyncProgressForFn('公众号', '/wechat-admin/refresh');
+  await loadWechatAccounts();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 // ===== B站 UP 主管理 =====
@@ -3635,6 +3630,29 @@ async function toggleBilibiliAccount(id, enabled) {
 }
 
 let bilibiliSearchTimeout = null;
+// ===== 添加 B站 UP 主 =====
+async function addBilibiliAccount() {
+  const input = document.getElementById('bilibiliAddInput');
+  const mid = (input.value || '').trim();
+  if (!mid) { showToast('请输入 UP 主主页链接或 mid', 'error'); return; }
+  try {
+    const result = await api('/bilibili-admin/uppers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mid }),
+    });
+    if (result.ok) {
+      showToast('已添加 ' + result.account.name + '（默认禁用）', 'success');
+      input.value = '';
+      loadBilibiliUppers();
+    } else {
+      showToast('添加失败: ' + (result.error || '未知错误'), 'error');
+    }
+  } catch (e) {
+    showToast('添加异常: ' + (e.message || '网络错误'), 'error');
+  }
+}
+
 function searchBilibiliUppers(query) {
   clearTimeout(bilibiliSearchTimeout);
   bilibiliSearchTimeout = setTimeout(function() {
@@ -3643,35 +3661,59 @@ function searchBilibiliUppers(query) {
 }
 
 async function bilibiliRefresh() {
-  const btn = document.getElementById('bilibiliRefreshBtn');
-  const icon = document.getElementById('bilibiliRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="bilibiliRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('bilibiliAdminStatus').textContent = '同步中...';
+  await showSyncProgressForFn('B站视频', '/api/bilibili-admin/refresh');
+  await loadBilibiliUppers();
+  loadArticles();
+  loadStats();
+  loadSources();
+}
 
+
+// ===== 同步进度弹窗 =====
+function showSyncProgress(sourceName) {
+  const modal = document.getElementById('syncProgressModal');
+  modal.classList.remove('hidden');
+  document.getElementById('syncProgressSpinner').classList.remove('hidden');
+  document.getElementById('syncProgressMessage').className = 'text-sm font-medium mb-1';
+  document.getElementById('syncProgressDetail').className = 'text-xs text-muted';
+  document.getElementById('syncProgressResult').className = 'hidden';
+  document.getElementById('syncProgressMessage').textContent = '正在采集' + sourceName + '...';
+  document.getElementById('syncProgressDetail').textContent = '请稍候...';
+}
+
+function updateSyncProgress(message, detail, isError) {
+  document.getElementById('syncProgressSpinner').classList.add('hidden');
+  document.getElementById('syncProgressMessage').textContent = message;
+  document.getElementById('syncProgressMessage').className = isError ? 'text-sm font-medium mb-1 text-red-400' : 'text-sm font-medium mb-1 text-green-400';
+  document.getElementById('syncProgressDetail').textContent = detail;
+  document.getElementById('syncProgressDetail').className = 'text-xs text-muted mb-3';
+  document.getElementById('syncProgressResult').className = '';
+}
+
+function closeSyncProgress() {
+  document.getElementById('syncProgressModal').classList.add('hidden');
+}
+
+async function showSyncProgressForFn(sourceName, apiPath, options) {
+  showSyncProgress(sourceName);
   try {
-    const result = await api('/api/bilibili-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const result = await api(apiPath, options || { method: 'POST', headers: { 'Content-Type': 'application/json' } });
     if (result.ok) {
-      showToast('同步完成：获取 ' + result.fetched + ' 个视频，新增 ' + result.inserted + ' 篇', 'success');
+      const detail = [];
+      if (result.fetched !== undefined) detail.push('获取 ' + result.fetched + ' 条');
+      if (result.inserted !== undefined) detail.push('新增 ' + result.inserted + ' 篇');
+      if (result.newlyAdded !== undefined && result.newlyAdded > 0) detail.push('新发现 ' + result.newlyAdded + ' 个');
+      if (!detail.length && result.message) detail.push(result.message);
+      if (result.errors && result.errors.length) detail.push('❌ ' + result.errors.length + ' 个错误');
+      updateSyncProgress('✅ ' + sourceName + ' 采集完成', detail.join('，') || '完成');
     } else {
-      showToast('同步失败: ' + result.error, 'error');
+      updateSyncProgress('❌ 采集失败', result.error || '未知错误', true);
     }
-    await loadBilibiliUppers();
-    loadArticles();
-    loadStats();
-    loadSources();
+    setTimeout(closeSyncProgress, 5000);
   } catch (e) {
-    showToast('同步异常: ' + e, 'error');
-    document.getElementById('bilibiliAdminStatus').textContent = '同步失败';
+    updateSyncProgress('❌ 采集失败', e.message || '网络异常', true);
+    setTimeout(closeSyncProgress, 8000);
   }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="bilibiliRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
 }
 
 // ===== YouTube UP 主管理 =====
@@ -3818,20 +3860,11 @@ async function addTwitterAccount() {
 }
 
 async function twitterRefresh() {
-  const btn = document.getElementById('twitterRefreshBtn');
-  const icon = document.getElementById('twitterRefreshIcon');
-  const status = document.getElementById('twitterAdminStatus');
-  btn.disabled = true;
-  icon.classList.add('animate-spin');
-  status.textContent = '同步中...';
-  try {
-    const result = await api('/twitter-admin/refresh', { method: 'POST' });
-    status.textContent = '✅ 同步完成，采集 ' + (result.count || 0) + ' 篇';
-  } catch (e) {
-    status.textContent = '❌ 同步失败: ' + (e.message || '');
-  }
-  icon.classList.remove('animate-spin');
-  btn.disabled = false;
+  await showSyncProgressForFn('Twitter', '/twitter-admin/refresh', { method: 'POST' });
+  await loadTwitterAccounts();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 function toggleYoutubeSettings() {
@@ -3943,35 +3976,11 @@ function searchYoutubeUppers(query) {
 }
 
 async function youtubeRefresh() {
-  const btn = document.getElementById('youtubeRefreshBtn');
-  const icon = document.getElementById('youtubeRefreshIcon');
-  btn.disabled = true;
-  icon.classList.add('spin');
-  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步中...';
-  document.getElementById('youtubeAdminStatus').textContent = '同步中...';
-
-  try {
-    const result = await api('/api/youtube-admin/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (result.ok) {
-      showToast('同步完成：获取 ' + result.fetched + ' 个视频，新增 ' + result.inserted + ' 篇', 'success');
-    } else {
-      showToast('同步失败: ' + result.error, 'error');
-    }
-    await loadYoutubeUppers();
-    loadArticles();
-    loadStats();
-    loadSources();
-  } catch (e) {
-    showToast('同步异常: ' + e, 'error');
-    document.getElementById('youtubeAdminStatus').textContent = '同步失败';
-  }
-
-  btn.disabled = false;
-  icon.classList.remove('spin');
-  btn.innerHTML = '<svg id="youtubeRefreshIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步';
+  await showSyncProgressForFn('YouTube', '/api/youtube-admin/refresh');
+  await loadYoutubeUppers();
+  loadArticles();
+  loadStats();
+  loadSources();
 }
 
 // ===== 播客频道管理 =====
@@ -4379,5 +4388,22 @@ loadStats();
   </div>
 </div>
 
+
+<!-- ====== 同步进度弹窗 ====== -->
+<div id="syncProgressModal" class="fixed inset-0 z-[400] hidden">
+  <div class="absolute inset-0 bg-black/60"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-surface border border-border rounded-xl shadow-2xl p-6 w-80">
+    <div class="text-center">
+      <div id="syncProgressSpinner" class="mx-auto w-10 h-10 border-4 border-accent/30 border-t-accent rounded-full animate-spin mb-4"></div>
+      <p id="syncProgressMessage" class="text-sm font-medium mb-1">正在采集...</p>
+      <p id="syncProgressDetail" class="text-xs text-muted"></p>
+      <div id="syncProgressResult" class="hidden">
+        <p id="syncResultText" class="text-sm font-medium mb-2"></p>
+        <p id="syncResultDetail" class="text-xs text-muted mb-3"></p>
+        <button class="text-xs bg-surface2 hover:bg-border text-fg px-4 py-1.5 rounded-lg transition" onclick="closeSyncProgress()">关闭</button>
+      </div>
+    </div>
+  </div>
+</div>
 </body>
 </html>
