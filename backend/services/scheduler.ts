@@ -1107,5 +1107,59 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     return c.json({ ok: true, message: 'Scheduler state reset' });
   });
 
+  // POST /trigger-source-fetch/:sourceType — 立即采集指定类型的信息源（复用内部 fetchApi）
+  router.post('/trigger-source-fetch/:sourceType', async (c) => {
+    const sourceType = c.req.param('sourceType');
+    const body = await c.req.json().catch(() => ({}));
+    const now = new Date();
+    const todayCompact = now.toISOString().slice(0, 10).replace(/-/g, '');
+    const todayDash = now.toISOString().slice(0, 10);
+    const date = body.date || todayDash;
+    const dateCompact = date.replace(/-/g, '');
+
+    // 标准类型 → 单次 API 调用
+    const endpointMap: Record<string, { path: string; body?: any }> = {
+      bilibili: { path: '/bilibili-admin/refresh' },
+      xwlb: { path: '/fetch/xwlb', body: { date: dateCompact } },
+      magazine: { path: '/fetch/xwlb', body: { date: dateCompact } },
+      rmrb: { path: '/fetch/rmrb', body: { date: todayDash } },
+      penti: { path: '/fetch/penti', body: { date: dateCompact } },
+      wechat: { path: '/wechat-admin/refresh' },
+      twitter: { path: '/twitter-admin/refresh' },
+      youtube: { path: '/youtube-admin/refresh' },
+      podcast: { path: '/podcast-admin/sync' },
+    };
+
+    // RSS: 查询所有已启用源，逐个采集
+    if (sourceType === 'rss') {
+      try {
+        const rssSources = await sql`SELECT id, name, config->>'feed_url' AS feed_url
+          FROM sources
+          WHERE enabled = true AND LOWER(type) IN ('rss', 'podcast-channel')`;
+        const results = [];
+        for (const s of rssSources) {
+          if (!s.feed_url) continue;
+          const r = await fetchApi('/fetch/rss', { feedUrl: s.feed_url, sourceName: s.name }).catch(e => ({ ok: false, error: e.message }));
+          results.push({ source: s.name, ok: r.ok, inserted: r.inserted || 0, error: r.error });
+        }
+        return c.json({ ok: true, results, totalInserted: results.reduce((sum: number, r: any) => sum + r.inserted, 0) });
+      } catch (e: any) {
+        return c.json({ ok: false, error: 'RSS 采集失败: ' + e.message }, 500);
+      }
+    }
+
+    const entry = endpointMap[sourceType];
+    if (!entry) {
+      return c.json({ ok: false, error: '不支持的采集类型: ' + sourceType });
+    }
+
+    try {
+      const result = await fetchApi(entry.path, entry.body);
+      return c.json(result);
+    } catch (e: any) {
+      return c.json({ ok: false, error: e.message }, 500);
+    }
+  });
+
   return router;
 }

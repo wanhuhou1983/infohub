@@ -1826,28 +1826,44 @@ async function runSourceFetch(id) {
     return;
   }
 
-  // B站：调用刷新 API
-  if (source.sourceType === 'bilibili') {
-    try {
-      const data = await api('/bilibili-admin/refresh', { method: 'POST' });
-      if (data.sessdataExpired) {
-        alert('❌ B站 SESSDATA 已过期，请在"信息源列表→B站→配置 UP 主"弹窗中更新 SESSDATA');
-        return;
-      }
-      if (data.ok) {
-        alert(`B站采集完成：获取 ${data.fetched} 个视频，新增 ${data.inserted} 篇`);
-        await loadSourcesFromAPI();
-      } else {
-        alert('采集失败: ' + (data.error || data.message || '未知错误'));
-      }
-    } catch (e) {
-      alert('采集异常: ' + e.message);
-    }
+  const triggerTypeMap: Record<string, string> = {
+    'bilibili': 'bilibili',
+    'xwlb': 'xwlb',
+    'magazine': 'magazine',
+    'rmrb': 'rmrb',
+    'penti': 'penti',
+    'rss': 'rss',
+    'wechat': 'wechat',
+    'wechat_group': 'wechat',
+    'twitter': 'twitter',
+    'youtube': 'youtube',
+    'podcast': 'podcast',
+  };
+  const triggerType = triggerTypeMap[source.sourceType];
+  if (!triggerType) {
+    alert('暂不支持此类型信息源的立即采集: ' + source.sourceType);
     return;
   }
 
-  // 其他来源暂未实现
-  alert('立即采集 ' + source.name + '（功能开发中）');
+  try {
+    const data = await api('/scheduler/trigger-source-fetch/' + triggerType, { method: 'POST' });
+    if (data.sessdataExpired) {
+      alert('❌ B站 SESSDATA 已过期，请在"配置 UP 主"弹窗中更新');
+      return;
+    }
+    if (data.ok || data.message?.includes?.('完成')) {
+      alert(source.name + ' 采集完成');
+      await loadSourcesFromAPI();
+    } else if (data.inserted !== undefined) {
+      // B站响应格式：{ ok: true, fetched, inserted }
+      alert(source.name + ' 采集完成：新增 ' + data.inserted + ' 篇');
+      await loadSourcesFromAPI();
+    } else {
+      alert('采集失败: ' + (data.error || data.message || '未知错误'));
+    }
+  } catch (e) {
+    alert(source.name + ' 采集异常: ' + e.message);
+  }
 }
 
 async function runScheduleNow(id) {
