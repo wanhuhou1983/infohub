@@ -651,31 +651,9 @@ tailwind.config = {
       </div>
     </div>
     <div class="flex items-center gap-2 md:gap-4 relative">
-      <button class="md:hidden text-muted hover:text-fg transition p-1" title="搜索" onclick="toggleMobileSearch()">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-      </button>
-      <button class="text-muted hover:text-fg transition" title="刷新" onclick="loadArticles()">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-      </button>
-      <button id="fetchBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-3 md:px-4 py-1.5 rounded-lg transition font-medium relative" onclick="showFetchMenu()">
-        <span class="hidden md:inline">采集</span>
-        <svg class="w-4 h-4 md:w-3 md:h-3 md:inline md:ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-      </button>
-      <button class="hidden md:inline text-muted hover:text-fg transition" title="公众号管理" onclick="showWechatAdmin()">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-      </button>
       <button class="text-muted hover:text-fg transition" title="管理后台" onclick="window.open('/admin','_blank')">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
       </button>
-      <div id="fetchMenu" class="hidden absolute right-4 top-12 bg-surface2 border border-border rounded-lg shadow-xl py-2 min-w-[180px] z-50">
-        <div class="px-3 py-1.5 text-xs text-muted font-medium">选择信息源</div>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchXWLB()">📰 新闻联播</button>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchRSS()">📡 RSS订阅</button>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchWechat()">💬 公众号</button>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchBilibili()">📺 B站视频</button>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchYoutube()">▶️ YouTube</button>
-        <button class="w-full text-left px-3 py-2 text-sm hover:bg-surface transition" onclick="fetchAll()">🔄 全部采集</button>
-      </div>
     </div>
   </div>
   <!-- 移动端搜索栏（默认隐藏） -->
@@ -962,9 +940,22 @@ async function loadSources() {
   }
   sourceTree = tree;
 
+  // 过滤掉 system 类型（Admin Token / collection_settings），按指定顺序排序
+  const SIDEBAR_ORDER = ['magazine','wechat','bilibili','youtube','podcast','twitter','wechat_group','xueqiu','jisilu'];
+  sourceTree = sourceTree
+    .filter(s => s.type !== 'system')
+    .sort((a, b) => {
+      const ai = SIDEBAR_ORDER.indexOf(a.type);
+      const bi = SIDEBAR_ORDER.indexOf(b.type);
+      if (ai !== -1 && bi !== -1) return ai - bi;
+      if (ai !== -1) return -1;
+      if (bi !== -1) return 1;
+      return 0;
+    });
+
   // 收集群聊子源ID
   groupSourceIds = new Set([WECHAT_GROUP_ROOT]);
-  for (const s of tree) {
+  for (const s of sourceTree) {
     if (s.type === 'wechat_group') {
       groupSourceIds.add(s.id);
       for (const c of (s.children || [])) {
@@ -980,7 +971,7 @@ async function loadSources() {
   
   const el = document.getElementById('sourceList');
   
-  el.innerHTML = tree.map(s => {
+  el.innerHTML = sourceTree.map(s => {
     const color = SOURCE_COLORS[s.type] || 'bg-gray-500/20 text-gray-400';
     const active = currentSourceId === s.id ? 'bg-surface2' : '';
     const hasChildren = s.children && s.children.length > 0;
@@ -3172,14 +3163,10 @@ function showFetchMenu() {
 }
 
 function hideFetchMenu() {
-  document.getElementById('fetchMenu').classList.add('hidden');
+  const el = document.getElementById('fetchMenu');
+  if (el) el.classList.add('hidden');
 }
 
-// 点击其他区域关闭菜单
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('#fetchBtn') && !e.target.closest('#fetchMenu')) {
-    hideFetchMenu();
-  }
 });
 
 function showToast(msg, type = 'success') {
