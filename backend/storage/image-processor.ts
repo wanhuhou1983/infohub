@@ -231,7 +231,6 @@ export async function processImages(content: string, sourceType = 'rss'): Promis
       result = result.replace(regex, `$1$2(${originalUrl})`);
     }
   }
-  }
 
   // 在所有图片下载/上传/缓存替换完成后，将本地路径转为 COS URL
   const cosBase = getCosBaseUrl();
