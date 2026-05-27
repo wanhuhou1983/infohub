@@ -463,7 +463,7 @@ if (!IS_CLOUD) {
             signal: AbortSignal.timeout(30000),
           });
           if (resp.ok) {
-            const result = await resp.json();
+            const result = (await resp.json()) as { articles_upserted?: number };
             totalUpserted += (result.articles_upserted || 0);
           } else {
             console.error('[cloud-sync] Batch offset=' + offset + ' API ' + resp.status);
