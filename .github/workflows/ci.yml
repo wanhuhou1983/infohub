@@ -94,6 +94,19 @@ jobs:
       - name: TypeScript type check
         run: bun x tsc --noEmit
 
+
+  # ============ Job 2.5: 前端 JS 语法检查 ============
+  html-js-check:
+    name: html-js-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check inline JS syntax in HTML files
+        run: sh scripts/check-html-js.sh backend/frontend/index.html backend/frontend/infohub-admin.html
+
   # ============ Job 3: 构建验证 ============
   build:
     name: build (docker)
