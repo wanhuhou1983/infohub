@@ -1,6 +1,8 @@
 // @ts-nocheck
 /**
  * 喷嚏图卦采集路由
+ * 
+ * ⏰ 喷嚏图卦每日18:00后更新
  */
 
 import { Hono } from 'hono';

@@ -1,6 +1,8 @@
 // @ts-nocheck
 /**
  * 人民日报采集路由
+ * 
+ * ⏰ 人民日报数字版每日10:00后更新
  */
 
 import { Hono } from 'hono';
