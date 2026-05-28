@@ -36,6 +36,7 @@ COPY backend/package.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY backend/ ./
 
+
 WORKDIR /app
 COPY frontend/ /app/frontend/
 
