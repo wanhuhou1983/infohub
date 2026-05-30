@@ -9,7 +9,7 @@ import { spawn } from 'child_process';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { saveArticleFile, hashString, processImages } from '../../file-storage.js';
+import { saveArticleFile, hashString } from '../../file-storage.js';
 import { classifyByFeed, extractTags } from '../../services/classifier.js';
 import { isEnglish, translateToChinese } from '../../services/translate.js';
 
@@ -69,7 +69,7 @@ export function createWechatRoutes(sql: Sql): Hono {
         // 清理微信垃圾空图片链接
         content = content.replace(/!\[[^\]]*\]\(\)/g, '');
 
-        try { content = await processImages(content, 'wechat'); } catch { /* ignore */ }
+        // Image download disabled - WeChat blocks direct HTTP, rely on text content only
 
         if (isEnglish(content)) {
           try {

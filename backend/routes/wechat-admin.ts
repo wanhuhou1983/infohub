@@ -13,7 +13,7 @@ import type { Sql } from 'postgres';
 import * as fs from 'fs';
 import * as path from 'path';
 import { crawlWechatArticle } from '../services/crawler.js';
-import { saveArticleFile, hashString, processImages } from '../file-storage.js';
+import { saveArticleFile, hashString } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
 
 // Cache file path (mounted from host WeFlow cache)
@@ -300,7 +300,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
               const author = displayName;
 
               let content = crawledArticle?.content || `${title}\n\n来源：${displayName}\n链接：${articleUrl}`;
-              try { content = await processImages(content, 'wechat'); } catch (e: any) { /* ignore */ }
+              // Image download disabled - WeChat blocks direct HTTP, rely on text content only
 
               const category = classifyByFeed(displayName);
               const tags = extractTags(title + ' ' + content.slice(0, 200), displayName);

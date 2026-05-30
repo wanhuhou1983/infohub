@@ -61,7 +61,7 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
     const args = [MINERU_SCRIPT, articleUrl, "--model", "MinerU-HTML", "--print"];
     let proc: any;
     try {
-      proc = spawn("python3", args, {
+      proc = spawn(process.platform === "win32" ? "python" : "python3", args, {
         cwd: path.dirname(MINERU_SCRIPT),
         stdio: ["pipe", "pipe", "pipe"],
       });
@@ -118,9 +118,6 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
       const data = await resp.json() as any;
       if (data.title && data.content && data.content.length > 20) {
         let content = data.content;
-        // Convert markdown images to __IMG__ markers for processImages
-        content = content.replace(/!\[(.*?)\]\((.+?)\)/g, "__IMG__$2__IMG__");
-        content = content.replace(/<img.*?src=["'](.+?)["'].*?>/g, "__IMG__$1__IMG__");
         content = stripCommentSection(content);
         console.log("[WeChat service] OK: " + data.title.slice(0, 40) + ` (${content.length} chars)`);
         return {
@@ -147,7 +144,7 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
     const spiderScript = path.resolve(__dirname, "../spider/wechat_spider.py");
     if (existsSync(spiderScript)) {
       const result = await new Promise<string>((resolve) => {
-        const proc = spawn("python3", [spiderScript, articleUrl], {
+        const proc = spawn(process.platform === "win32" ? "python" : "python3", [spiderScript, articleUrl], {
           stdio: ["pipe", "pipe", "pipe"],
         });
         let stdout = "";
@@ -162,9 +159,6 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
           const data = JSON.parse(result);
           if (data.title && data.content && data.content.length > 20) {
             let content = data.content;
-            // Convert markdown images to __IMG__ markers for processImages
-            content = content.replace(/!\[(.*?)\]\((.+?)\)/g, "__IMG__$2__IMG__");
-            content = content.replace(/<img.*?src=["'](.+?)["'].*?>/g, "__IMG__$1__IMG__");
             content = stripCommentSection(content);
             console.log("[WeChat spider] OK: " + data.title.slice(0, 40));
             return {
@@ -218,9 +212,8 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
           if (raw) out.push(raw);
         } else if (tag === "br") {
           out.push("\n");
-        } else if (tag === "img" || (this.attribs && this.attribs["data-src"])) {
-          const src = node.attr("data-src") || node.attr("src") || "";
-          if (src && !src.startsWith("data:")) out.push("\n__IMG__" + src + "__IMG__\n");
+        } else if (tag === "img") {
+          // Skip images - WeChat blocks direct HTTP, rely on text only
         } else if (tag === "pre") {
           const code = node.text().replace(/\n$/, "");
           if (code) out.push("\n```\n" + code + "\n```\n");
@@ -230,7 +223,9 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
         } else if (tag === "li") {
           out.push("- " + text + "\n");
         } else if (tag === "p" || tag === "section" || tag === "blockquote") {
-          if (text) out.push("\n" + text + "\n");
+          // Recursively convert nested elements for deep text extraction
+          const innerContent = convert(node);
+          if (innerContent.trim()) out.push("\n" + innerContent.trim() + "\n");
         } else if (tag.match(/^h[1-6]$/)) {
           if (text) out.push("\n" + "#".repeat(parseInt(tag[1])) + " " + text + "\n");
         } else if (tag === "hr") {
