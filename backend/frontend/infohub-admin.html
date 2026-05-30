@@ -1254,6 +1254,7 @@ const SOURCE_CONFIGS = [
     feeds: [],
   },
 ];
+  SOURCE_CONFIGS.forEach(s => { if (s.articleCount === undefined) s.articleCount = 0; if (s.todayCount === undefined) s.todayCount = 0; if (!s.status) s.status = 'success'; });
 
 const SCHEDULES = [
   { id: 6, name: '全量采集', sources: ['全部来源'], cron: '0 22 * * *', lastRun: '2026-04-21 22:00', nextRun: '2026-04-22 22:00', status: 'active', lastResult: 'success' },
@@ -1368,6 +1369,10 @@ function switchPage(page, navEl) {
   if (page === 'sources') {
     updateSourceStats();
   }
+  // 数据统计页：加载数据后重新渲染
+  if (page === 'stats') {
+    updateSourceStats();
+  }
 }
 
 // 从 API 获取实时统计并更新 SOURCE_CONFIGS
@@ -1392,13 +1397,14 @@ async function updateSourceStats() {
         sc.lastFetch = srcMap[sc.id].last_fetch ? new Date(srcMap[sc.id].last_fetch).toLocaleString('zh-CN') : '-';
         continue;
       }
-      // 按 sourceType 匹配（bilibili → bilibili-updates 的子来源求和）
-      if (sc.sourceType) {
+      // 按 sourceType/type/id 匹配
+      const matchType = sc.sourceType || sc.type || sc.id;
+      if (matchType) {
         let totalArticles = 0;
         let todayArticles = 0;
         let latestFetch = null;
         for (const s of stats.sources) {
-          if (s.type === sc.sourceType || (sc.sourceType === 'rss' && s.type === 'rss')) {
+          if (s.type === matchType || (matchType === 'rss' && s.type === 'rss')) {
             totalArticles += s.article_count;
             todayArticles += s.today_count;
             if (!latestFetch || (s.last_fetch && s.last_fetch > latestFetch)) {
@@ -1407,7 +1413,7 @@ async function updateSourceStats() {
           }
         }
         // bilibili 特殊处理：子来源是 bilibili-updates 等
-        if (sc.sourceType === 'bilibili') {
+        if (matchType === 'bilibili') {
           totalArticles = 0; todayArticles = 0; latestFetch = null;
           for (const s of stats.sources) {
             if (s.type && s.type.startsWith('bilibili')) {
@@ -1432,8 +1438,9 @@ async function updateSourceStats() {
       document.getElementById('summaryArticles').textContent = stats.totalArticles;
     }
     
-    // 重新渲染卡片
+    // 重新渲染卡片和统计
     renderSourceCards();
+    renderStats();
   } catch (e) {
     console.error('更新来源统计失败:', e);
   }
@@ -1831,9 +1838,9 @@ function renderStats() {
     return `
     <tr class="border-b border-border/50 hover:bg-surface2 transition">
       <td class="px-4 py-3"><span class="mr-1.5">${s.icon}</span>${s.name}</td>
-      <td class="px-4 py-3 text-right">${s.articleCount}</td>
-      <td class="px-4 py-3 text-right text-success">+${s.todayCount}</td>
-      <td class="px-4 py-3 text-right text-warn">${Math.floor(s.articleCount * 0.3)}</td>
+      <td class="px-4 py-3 text-right">${s.articleCount || 0}</td>
+      <td class="px-4 py-3 text-right text-success">+${s.todayCount || 0}</td>
+      <td class="px-4 py-3 text-right text-warn">${Math.floor((s.articleCount || 0) * 0.3)}</td>
       <td class="px-4 py-3 text-right text-muted">${s.lastFetch}</td>
       <td class="px-4 py-3 text-center">${statusDot}</td>
     </tr>`;
@@ -2168,7 +2175,7 @@ function renderWechatAccounts() {
   document.getElementById('wechatSelectedCount').textContent = enabledCount;
   
   listEl.innerHTML = accounts.map(a => {
-    const latestTime = a.latest_article_at ? new Date(a.latest_article_at).toLocaleString('zh-CN', { 
+    const latestTime = a.lastArticle ? new Date(a.lastArticle).toLocaleString('zh-CN', { 
       month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
     }) : '暂无文章';
     
@@ -2707,7 +2714,7 @@ function renderBilibiliUppers() {
   }
   
   listEl.innerHTML = uppers.map(a => {
-    const latestTime = a.latest_article_at ? new Date(a.latest_article_at).toLocaleString('zh-CN', { 
+    const latestTime = a.lastArticle ? new Date(a.lastArticle).toLocaleString('zh-CN', { 
       month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' 
     }) : '暂无视频';
     
@@ -4029,6 +4036,52 @@ function hideAdminMobileMenu() {
   </div>
 </div>
 
+
+<script>
+// 数据统计兜底：确保每次进入stats页面都加载数据
+(function() {
+  const origSwitchPage = switchPage;
+  switchPage = function(page, navEl) {
+    origSwitchPage(page, navEl);
+    if (page === 'stats') {
+      // 异步加载数据
+      fetch(API_BASE + '/sync/stats').then(r => r.json()).then(stats => {
+        if (!stats || !stats.sources) return;
+        const byName = {};
+        for (const s of stats.sources) { byName[s.name] = s; }
+        for (const sc of SOURCE_CONFIGS) {
+          // 按名称匹配
+          let matched = byName[sc.name];
+          // 按type/id匹配
+          if (!matched) {
+            const mt = sc.sourceType || sc.type || sc.id;
+            for (const s of stats.sources) {
+              if (s.type === mt) { matched = s; break; }
+            }
+          }
+          if (matched) {
+            sc.articleCount = matched.article_count || 0;
+            sc.todayCount = matched.today_count || 0;
+            sc.lastFetch = matched.last_fetch ? new Date(matched.last_fetch).toLocaleString('zh-CN') : '-';
+            sc.status = matched.enabled ? 'success' : 'paused';
+          }
+          if (!sc.articleCount) sc.articleCount = 0;
+          if (!sc.todayCount) sc.todayCount = 0;
+          if (!sc.status) sc.status = 'success';
+          if (!sc.lastFetch) sc.lastFetch = '-';
+        }
+        // 更新汇总
+        if (stats.totalArticles !== undefined) {
+          const el = document.getElementById('summaryArticles');
+          if (el) el.textContent = stats.totalArticles;
+        }
+        // 重新渲染
+        renderStats();
+      }).catch(e => console.error('Stats fallback failed:', e));
+    }
+  };
+})();
+</script>
 </body>
 <script src="/js/api-client.js"></script>
 </html>

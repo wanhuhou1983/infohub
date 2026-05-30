@@ -17,7 +17,17 @@ import { saveArticleFile, hashString, processImages } from '../file-storage.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
 
 // Cache file path (mounted from host WeFlow cache)
-const WEFLOW_CACHE_PATH = '/weflow-cache/session-messages.json';
+const WEFLOW_CACHE_PATH = process.env.WEFLOW_CACHE_PATH || (process.platform === 'win32' ? 'C:/Users/linhu/AppData/Roaming/weflow/cache/session-messages.json' : '/weflow-cache/session-messages.json');
+
+// 请求间隔（ms）：避免触发微信反爬限流，默认 3 秒/篇
+const FETCH_DELAY_MS = parseInt(process.env.FETCH_DELAY_MS || '3000', 10);
+
+function sleep(ms: number): Promise<void> { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+function extractDescription(raw: string): string {
+  const m = raw.match(/<des><!\[CDATA\[([\s\S]*?)\]\]><\/des>/);
+  return m && m[1] ? m[1].trim() : '';
+}
 
 /**
  * 从 WeFlow 缓存文件读取所有 gh_id → messages 映射
@@ -132,9 +142,11 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
 
       const config = wechatSource.config || {};
       const weflowUrl = (config.weflow_url || process.env.WEFLOW_URL || 'http://127.0.0.1:5031').replace(/\/+$/, '');
+    // urls_only 模式：仅入库 URL 不爬正文（用于快速批量导入）
+    const urlsOnly = c.req.query('urls_only') === 'true';
       const weflowToken = config.weflow_token || process.env.WEFLOW_TOKEN;
       if (!weflowToken) return c.json({ error: 'WeFlow Token 未配置' }, 400);
-      const wechatLimit = Math.min(Math.max(Number(config.wechat_limit) || 5, 1), 50);
+      const wechatLimit = Math.min(Math.max(Number(config.wechat_limit) || 50, 1), 50);
       const headers = { 'Authorization': `Bearer ${weflowToken}` };
 
       // Step 1: 获取 WeFlow 会话列表
@@ -204,16 +216,43 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         try {
           // --- Always try BOTH API and Cache, then merge by URL ---
 
-          // 6a: Try HTTP API
+          // 6a: Try HTTP API with retries for rate limiting
           let apiMessages: any[] = [];
-          try {
-            const msgsResp = await fetch(`${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${wechatLimit}&type=channel`, { headers });
-            if (msgsResp.ok) {
-              const msgsData = await msgsResp.json() as any;
-              apiMessages = msgsData.messages || [];
+
+          // Helper: try fetching with specific params
+          const tryFetch = async (limit: number, typeParam?: string): Promise<any[]> => {
+            const typeStr = typeParam ? `&type=${typeParam}` : '';
+            const url = `${weflowUrl}/api/v1/messages?talker=${ghId}&limit=${limit}${typeStr}`;
+            const resp = await fetch(url, { headers });
+            if (!resp.ok) return [];
+            const data = await resp.json() as any;
+            return data.messages || [];
+          };
+
+          // Strategy: try multiple approaches, stop on first success
+          // NOTE: WeFlow API requires type=channel for gh_ accounts; without it returns 0
+          const fetchStrategies = [
+            () => tryFetch(wechatLimit, 'channel'),
+            async () => { await sleep(1000); return tryFetch(50, 'channel'); },
+            async () => { await sleep(3000); return tryFetch(50, 'channel'); },
+            async () => { await sleep(6000); return tryFetch(50, 'channel'); },
+          ];
+
+          for (const strategy of fetchStrategies) {
+            try {
+              apiMessages = await strategy();
+              if (apiMessages.length > 0) {
+                console.log(`[WeChat] ${displayName}: API returned ${apiMessages.length} msgs (strategy succeeded)`);
+                break;
+              }
+              console.log(`[WeChat] ${displayName}: API returned 0 msgs, trying next strategy...`);
+            } catch (e: any) {
+              console.warn(`[WeChat] API attempt failed for ${displayName}: ${e.message}`);
             }
-          } catch (e: any) {
-            console.warn(`[WeChat] HTTP API failed for ${ghId}: ${e.message}`);
+          }
+
+          if (apiMessages.length === 0) {
+            console.warn(`[WeChat] ${displayName}: All API strategies exhausted, relying on cache only`);
           }
 
           // 6b: Always read from cache too
@@ -241,7 +280,7 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
           for (const article of allArticles.values()) {
             try {
               const { url: articleUrl, title: rawTitle, createTime } = article;
-              const contentHash = hashString(articleUrl);
+              const contentHash = urlsOnly ? hashString(articleUrl) : hashString(articleUrl);
 
               // Skip if already in DB
               const [existing] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
@@ -250,8 +289,11 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
                 continue;
               }
 
-              console.log(`🕷️ 抓取: [${displayName}] ${rawTitle.slice(0, 40) || articleUrl}`);
-              const crawledArticle = await crawlWechatArticle(articleUrl);
+              if (!urlsOnly) {
+                console.log(`🕷️ 抓取: [${displayName}] ${rawTitle.slice(0, 40) || articleUrl}`);
+              }
+              const crawledArticle = urlsOnly ? null : await crawlWechatArticle(articleUrl);
+              if (!urlsOnly) await sleep(FETCH_DELAY_MS);
 
               const title = rawTitle || (crawledArticle?.title && crawledArticle.title !== '无标题' ? crawledArticle.title : '') || displayName;
               const publishedAt = createTime ? new Date(createTime * 1000).toISOString() : new Date().toISOString();
@@ -272,12 +314,14 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
 
               if (insertedRows.length > 0) {
                 inserted++;
+                if (!urlsOnly) {
                 const newId = insertedRows[0]!.id;
                 await saveArticleFile(newId, content, {
                   id: newId, title, source_type: 'wechat',
                   source_name: displayName, url: articleUrl, published_at: publishedAt,
                   category, tags, author, is_read: false, is_starred: false,
                 });
+                }
               }
               totalFetched++;
             } catch (e: any) {
@@ -289,6 +333,9 @@ export function createWechatAdminRoutes(sql: Sql): Hono {
         } catch (e: any) {
           errors.push(`${displayName}: ${e.message}`);
         }
+
+        // Rate limit prevention: short delay between accounts
+        await sleep(1500);
       }
 
       // ======== Step 6b: 采集未关注公众号的文章 URL（仅索引，不入 OB） ========

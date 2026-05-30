@@ -2,7 +2,12 @@
 /**
  * 爬虫服务模块
  *
- * 微信公众号抓取：Python Spider (requests+bs4) → cheerio 降级 → 摘要兜底
+ * 微信公众号抓取（四层降级）：
+ *   ① wechat-service Playwright 容器（独立 IP，S级）
+ *   ② Python Spider (requests+bs4)（A 级）
+ *   ③ cheerio 直接解析（B 级降级）
+ *   ④ og:description 摘要兜底（由调用方处理）
+ *
  * MinerU 全文抓取
  */
 
@@ -12,6 +17,9 @@ import { fileURLToPath } from "url";
 import { readdirSync, statSync, readFileSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import * as cheerio from "cheerio";
+
+// wechat-service Playwright 容器地址（默认加入 quant-network，容器名 wechat-service）
+const WECHAT_SERVICE_URL = (process.env.WECHAT_SERVICE_URL || "http://wechat-service:8978").replace(/\/+$/, "");
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MINERU_SCRIPT = process.env.MINERU_SCRIPT || path.join(
@@ -97,9 +105,44 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
   });
 }
 
-// ============ 微信公众号文章抓取（Python Spider + cheerio 降级） ============
+// ============ 微信公众号文章抓取（四层降级） ============
 export async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
-  // ---- 第一层：Python Spider（requests + BeautifulSoup，解析质量更高） ----
+  // ---- 第一层：wechat-service Playwright 容器（独立 IP + 真实浏览器，S 级） ----
+  try {
+    const encodedUrl = encodeURIComponent(articleUrl);
+    const resp = await fetch(`${WECHAT_SERVICE_URL}/fetch?url=${encodedUrl}`, {
+      signal: AbortSignal.timeout(60000),
+    });
+
+    if (resp.ok) {
+      const data = await resp.json() as any;
+      if (data.title && data.content && data.content.length > 20) {
+        let content = data.content;
+        // Convert markdown images to __IMG__ markers for processImages
+        content = content.replace(/!\[(.*?)\]\((.+?)\)/g, "__IMG__$2__IMG__");
+        content = content.replace(/<img.*?src=["'](.+?)["'].*?>/g, "__IMG__$1__IMG__");
+        content = stripCommentSection(content);
+        console.log("[WeChat service] OK: " + data.title.slice(0, 40) + ` (${content.length} chars)`);
+        return {
+          title: data.title,
+          content,
+          author: data.author || "",
+          publishDate: data.publish_date || "",
+        };
+      }
+      if (data.error) {
+        console.warn(`[WeChat service] ${data.error}: ${articleUrl.slice(0, 60)}`);
+      } else {
+        console.warn(`[WeChat service] empty content: ${articleUrl.slice(0, 60)}`);
+      }
+    } else {
+      console.warn(`[WeChat service] HTTP ${resp.status}: ${articleUrl.slice(0, 60)}`);
+    }
+  } catch (e: any) {
+    console.warn(`[WeChat service] unreachable: ${e.message}`);
+  }
+
+  // ---- 第二层：Python Spider（requests + BeautifulSoup，解析质量更高） ----
   try {
     const spiderScript = path.resolve(__dirname, "../spider/wechat_spider.py");
     if (existsSync(spiderScript)) {
@@ -136,7 +179,7 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
     }
   } catch { /* spider not available */ }
 
-  // ---- 第二层：cheerio 直接解析（降级方案） ----
+  // ---- 第三层：cheerio 直接解析（降级方案） ----
   try {
     const resp = await fetch(articleUrl, {
       headers: {
