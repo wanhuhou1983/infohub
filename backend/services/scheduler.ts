@@ -447,12 +447,6 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
     `;
 
     if (biliArticles.length > 0) {
-      const sessdata = await sql`
-        SELECT config->>'sessdata' AS sessdata FROM sources
-        WHERE type = 'bilibili' LIMIT 1
-      `;
-      const sd = sessdata[0]?.sessdata || '';
-
       for (const article of biliArticles) {
         try {
           const bvid = article.url?.match(/BV[a-zA-Z0-9]+/)?.[0];
@@ -460,21 +454,24 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
 
           console.log(`[scheduler] Processing B站: ${article.title} (${bvid})`);
 
-          // Step 1: Try to get subtitle via bili-service
+          // Step 1: Try OpenCLI subtitle (CC subtitles from B站, ~3s, zero compute)
           let subtitle = '';
           try {
-            const subResp = await fetch('http://bili-service:8979/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: 'subtitle', bvid, sessdata: sd }),
-              signal: AbortSignal.timeout(30000),
-            });
-            if (subResp.ok) {
-              const subData = await subResp.json() as any;
-              if (subData.text) subtitle = subData.text;
+            const subOutput = execSync(
+              `cmd /c opencli bilibili subtitle ${bvid} -f json`,
+              { encoding: 'utf-8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+            );
+            const subJson = JSON.parse(subOutput) || [];
+            if (subJson.length > 0) {
+              subtitle = subJson.map((s: any) => s.content || '').join('\n');
+            }
+            if (subtitle) {
+              console.log(`[scheduler] OpenCLI subtitle OK: ${bvid} (${subJson.length} segments, ${subtitle.length} chars)`);
+            } else {
+              console.log(`[scheduler] OpenCLI returned empty subtitle for ${bvid}`);
             }
           } catch (e: any) {
-            console.log(`[scheduler] B站字幕获取失败: ${e.message}`);
+            console.log(`[scheduler] OpenCLI subtitle failed for ${bvid}: ${e.message?.slice(0, 100)}`);
           }
 
           let processedContent = '';
@@ -484,24 +481,29 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
             transcript = subtitle;
             console.log(`[scheduler] Got subtitle for ${bvid}, calling DeepSeek...`);
           } else {
-            // Step 2: No subtitle - try Whisper audio transcription
+            // Step 2: No subtitle - fall back to Whisper audio transcription
             try {
-              const audioResp = await fetch('http://bili-service:8979/', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'audio', bvid, sessdata: sd }),
-                signal: AbortSignal.timeout(30000),
-              });
-              if (audioResp.ok) {
-                const audioData = await audioResp.json() as any;
-                if (audioData.audio_url) {
-                  console.log(`[scheduler] Transcribing B站 audio for ${bvid}...`);
-                  const whisperResult = await whisperWindowsTranscribe(audioData.audio_url, 0);
-                  if (whisperResult) {
-                    transcript = whisperResult;
-                    console.log(`[scheduler] Whisper done for ${bvid}: ${transcript.length} chars`);
-                  }
+              // Get audio URL via OpenCLI video command
+              let audioUrl = '';
+              try {
+                const vidOutput = execSync(
+                  `cmd /c opencli bilibili video ${bvid} -f json`,
+                  { encoding: 'utf-8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
+                );
+                const vidFields = JSON.parse(vidOutput) || [];
+                const audioField = vidFields.find((f: any) => f.field === 'audio_url');
+                if (audioField?.value) audioUrl = audioField.value;
+              } catch { /* video info failed */ }
+
+              if (audioUrl) {
+                console.log(`[scheduler] Transcribing B站 audio for ${bvid} via Whisper...`);
+                const whisperResult = await whisperWindowsTranscribe(audioUrl, 0);
+                if (whisperResult) {
+                  transcript = whisperResult;
+                  console.log(`[scheduler] Whisper done for ${bvid}: ${transcript.length} chars`);
                 }
+              } else {
+                console.log(`[scheduler] No audio URL for ${bvid}, skipping transcription`);
               }
             } catch (e: any) {
               console.log(`[scheduler] B站音频转录失败: ${e.message}`);

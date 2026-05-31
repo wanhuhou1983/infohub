@@ -112,28 +112,45 @@ export function createBilibiliSubtitleRoutes(sql: Sql): Hono {
 
       let transcriptText = '';
 
-      // 3. 先尝试直接下载已有字幕
-      try {
-        const subDir = join(outDir, 'subs');
-        mkdirSync(subDir, { recursive: true });
-        const subOutput = execSync(
-          `yt-dlp --write-subs --sub-langs all --skip-download -o "${subDir}/sub" "${videoUrl}" 2>&1`,
-          { timeout: 30_000, encoding: 'utf-8' }
-        );
-        // 查找生成的字幕文件
-        const subFiles = readdirSync(subDir).filter(f => f.endsWith('.srt') || f.endsWith('.ass') || f.endsWith('.vtt'));
-        if (subFiles.length > 0 && subFiles[0]) {
-          // 读取第一个字幕文件
-          const srtContent = readFileSync(join(subDir, subFiles[0]), 'utf-8');
-          // 从 SRT 提取纯文本
-          transcriptText = srtToText(srtContent);
-          console.log(`[B站字幕] 直接从视频下载字幕成功: ${videoUrl}`);
+      // 3a. 优先使用 OpenCLI 获取 CC 字幕（最快，~3s，零计算）
+      const bvid = videoUrl.match(/BV[a-zA-Z0-9]+/)?.[0] || '';
+      if (bvid) {
+        try {
+          const subOutput = execSync(
+            `cmd /c opencli bilibili subtitle ${bvid} -f json`,
+            { encoding: 'utf-8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
+          );
+          const subJson = JSON.parse(subOutput) || [];
+          if (subJson.length > 0) {
+            transcriptText = subJson.map((s: any) => s.content || '').join('\n');
+            console.log(`[B站字幕] OpenCLI subtitle OK: ${bvid} (${subJson.length} segments)`);
+          }
+        } catch (e: any) {
+          console.log(`[B站字幕] OpenCLI subtitle failed: ${(e.message || '').slice(0, 100)}`);
         }
-      } catch (e: any) {
-        console.log(`[B站字幕] 无可下载的字幕，准备转录: ${(e.message || '').slice(0, 100)}`);
       }
 
-      // 4. 无字幕 => 转录
+      // 3b. OpenCLI 无字幕时，尝试 yt-dlp 下载原生字幕
+      if (!transcriptText) {
+        try {
+          const subDir = join(outDir, 'subs');
+          mkdirSync(subDir, { recursive: true });
+          execSync(
+            `yt-dlp --write-subs --sub-langs all --skip-download -o "${subDir}/sub" "${videoUrl}" 2>&1`,
+            { timeout: 30_000, encoding: 'utf-8' }
+          );
+          const subFiles = readdirSync(subDir).filter(f => f.endsWith('.srt') || f.endsWith('.ass') || f.endsWith('.vtt'));
+          if (subFiles.length > 0 && subFiles[0]) {
+            const srtContent = readFileSync(join(subDir, subFiles[0]), 'utf-8');
+            transcriptText = srtToText(srtContent);
+            console.log(`[B站字幕] yt-dlp 下载字幕成功: ${videoUrl}`);
+          }
+        } catch (e: any) {
+          console.log(`[B站字幕] yt-dlp 也无字幕: ${(e.message || '').slice(0, 100)}`);
+        }
+      }
+
+      // 4. 仍然无字幕 => whisper 转录
       if (!transcriptText) {
         console.log(`[B站字幕] 开始转录: ${videoUrl}`);
         const scriptPath = BILI_TRANSCRIBE_SH;
