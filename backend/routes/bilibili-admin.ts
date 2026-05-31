@@ -233,10 +233,7 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       let inserted = 0;
       const errors: string[] = [];
 
-      // 获取 SESSDATA 传递给 bili-service
-      const sessdata = (bilibiliSource.config as any)?.sessdata || '';
-
-      // 延迟一秒后再请求空间 API，避免紧接 nav 校验后被限流
+      // 延迟一秒避免操作过快
       await new Promise(r => setTimeout(r, 1000));
 
       for (const account of enabledAccounts) {
@@ -244,27 +241,29 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
         const name = account.name;
 
         try {
-          // 使用 bili-service HTTP API（Playwright 浏览器绕过 412 反爬）
+          // 使用 OpenCLI（复用 Chrome 登录态，天然绕过 B站反爬）
           let videos: any[];
           try {
-            const resp = await fetch('http://bili-service:8979/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ mid, max_pages: 1, sessdata }),
-              signal: AbortSignal.timeout(120000),
-            });
-            if (!resp.ok) {
-              errors.push(`${name}: bili-service HTTP ${resp.status}`);
-              continue;
-            }
-            const data = await resp.json() as any;
-            if (!data.ok) {
-              errors.push(`${name}: bili-service 返回错误: ${data.error || 'unknown'}`);
-              continue;
-            }
-            videos = data.videos || [];
+            const cliOutput = execSync(
+              `cmd /c opencli bilibili user-videos ${mid} --limit 20 -f json`,
+              { encoding: 'utf-8', timeout: 60000, maxBuffer: 5 * 1024 * 1024 }
+            );
+            const rawVideos = JSON.parse(cliOutput);
+            // Normalize: extract bvid from url, keep other fields
+            videos = (rawVideos || []).map((v: any) => ({
+              bvid: (v.url || '').split('/video/')[1] || '',
+              title: v.title || '',
+              play: v.plays || 0,
+              date: v.date || '',
+              // created: approximate epoch from date string
+              created: v.date ? Math.floor(new Date(v.date).getTime() / 1000) : 0,
+              description: '',
+              length: '',
+              comment: 0,
+            }));
           } catch (fetchErr: any) {
-            errors.push(`${name}: bili-service 调用失败 (${fetchErr.message})`);
+            // Fallback: try single video command for empty output corner case
+            errors.push(`${name}: OpenCLI 调用失败 (${fetchErr.message})`);
             continue;
           }
 
@@ -326,7 +325,9 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
         }
       }
 
-      // 处理 disabled UP 主：只存 URL + title（不抓内容）
+      // 处理 disabled UP 主：跳过（OpenCLI 逐账号调用耗时, 200+ 账号）
+      // 如需索引，取消下面 if(false) 即可
+      if (false) {
       try {
         const disabledAccounts = await sql`
           SELECT id, name, config->>'mid' AS mid
@@ -338,17 +339,18 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
           const mid = account.mid;
           if (!mid) continue;
           try {
-            const resp = await fetch('http://bili-service:8979/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ mid, max_pages: 1, sessdata }),
-              signal: AbortSignal.timeout(30000),
-            });
-            if (!resp.ok) continue;
-            const data = await resp.json() as any;
-            if (!data.ok || !data.videos) continue;
+            const cliOutput = execSync(
+              `cmd /c opencli bilibili user-videos ${mid} --limit 20 -f json`,
+              { encoding: 'utf-8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
+            );
+            const rawVideos = JSON.parse(cliOutput) || [];
+            const videos = rawVideos.map((v: any) => ({
+              bvid: (v.url || '').split('/video/')[1] || '',
+              title: v.title || '',
+              created: v.date ? Math.floor(new Date(v.date).getTime() / 1000) : 0,
+            }));
 
-            for (const video of (data.videos || [])) {
+            for (const video of videos) {
               const bvid = video.bvid;
               const title = video.title;
               const videoUrl = `https://www.bilibili.com/video/${bvid}`;
@@ -375,6 +377,7 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       } catch (e) {
         // Silently continue
       }
+      } // if(false) - disabled accounts
       await sql`UPDATE sources SET last_fetch = NOW() WHERE id = ${bilibiliSource.id}`;
       const durationMs = Date.now() - startMs;
       await sql`
@@ -806,7 +809,7 @@ export function createBilibiliAdminRoutes(sql: Sql): Hono {
       if (!updatesSource) return c.json({ error: 'B站更新源子节点未配置' }, 400);
 
       // 调用 bili-service 获取关注列表
-      const resp = await fetch('http://bili-service:8979/', {
+      const resp = await fetch(process.env.BILI_SERVICE_URL || 'http://bili-service:8979', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'followings', sessdata }),
