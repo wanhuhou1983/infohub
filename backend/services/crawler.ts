@@ -213,7 +213,11 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
         } else if (tag === "br") {
           out.push("\n");
         } else if (tag === "img") {
-          // Skip images - WeChat blocks direct HTTP, rely on text only
+          // Keep image URL for web display (referrerpolicy=no-referrer bypasses WeChat hotlink protection)
+          const dataSrc = node.attr("data-src") || node.attr("src") || "";
+          if (dataSrc && (dataSrc.startsWith("http://") || dataSrc.startsWith("https://"))) {
+            out.push("\n__IMG__" + dataSrc + "__IMG__\n");
+          }
         } else if (tag === "pre") {
           const code = node.text().replace(/\n$/, "");
           if (code) out.push("\n```\n" + code + "\n```\n");
