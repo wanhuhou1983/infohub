@@ -27,7 +27,7 @@ export function createRmrbRoutes(sql: Sql): Hono {
       const sourceId = 1264;
 
       const rmrbDir = process.env.RMRB_DIR || path.resolve(__dirname, '../../skills/rmrb-daily');
-      const python = 'python3';
+      const python = process.platform === 'win32' ? 'python' : 'python3';
       const outputMd = `/tmp/rmrb_${date.replace(/-/g,'')}.md`;
 
       const proc = spawn(python, [path.join(rmrbDir, 'rmrb_daily.py'), date, ...(full ? ['--full', '--output', outputMd] : ['--output', outputMd])], { timeout: 120000 });
