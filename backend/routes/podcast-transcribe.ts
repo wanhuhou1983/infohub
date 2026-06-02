@@ -13,6 +13,7 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { execSync } from 'child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { join } from 'path';
 import { tmpdir } from 'os';
 
@@ -53,9 +54,9 @@ export function createPodcastTranscribeRoutes(sql: Sql): Hono {
       const platform = extra.platform || 'XimalayaMusicClient';
 
       // 3. 获取音频 URL
-      const scriptPath = new URL('../../scripts/podcast_audio.py', import.meta.url).pathname;
-      const venvPath = new URL('../../.venv311/bin/python3', import.meta.url);
-      const pythonBin = existsSync(venvPath) ? venvPath.pathname : (process.platform === 'win32' ? 'python' : 'python3');
+      const scriptPath = fileURLToPath(new URL('../../scripts/podcast_audio.py', import.meta.url));
+      const venvPath = fileURLToPath(new URL('../../.venv311/bin/python3', import.meta.url));
+      const pythonBin = existsSync(venvPath) ? venvPath : (process.platform === 'win32' ? 'python' : 'python3');
 
       let audioUrl = '';
       if (platform === 'XimalayaMusicClient' || platform === 'ximalaya') {
