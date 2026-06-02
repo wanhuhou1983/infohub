@@ -184,7 +184,7 @@ export function createPodcastAdminRoutes(sql: Sql): Hono {
       const { execSync } = await import('child_process');
       const scriptPath = new URL('../../scripts/fetch_podcast_episodes.py', import.meta.url).pathname;
       const venvPath = new URL('../../.venv311/bin/python3', import.meta.url);
-      const pythonBin = existsSync(venvPath) ? venvPath.pathname : 'python3';
+      const pythonBin = existsSync(venvPath) ? venvPath.pathname : (process.platform === 'win32' ? 'python' : 'python3');
 
       let totalInserted = 0;
       let totalSkipped = 0;
@@ -380,7 +380,7 @@ export function createPodcastAdminRoutes(sql: Sql): Hono {
         const { execSync } = await import('child_process');
         const scriptPath = new URL('../../scripts/podcast_audio.py', import.meta.url).pathname;
         const venvPath = new URL('../../.venv311/bin/python3', import.meta.url);
-        const pythonBin = existsSync(venvPath) ? venvPath.pathname : 'python3';
+        const pythonBin = existsSync(venvPath) ? venvPath.pathname : (process.platform === 'win32' ? 'python' : 'python3');
 
         const result = execSync(
           `"${pythonBin}" "${scriptPath}" --url "${trackUrl.replace(/"/g, '\\"')}"`,
@@ -423,7 +423,7 @@ export function createPodcastAdminRoutes(sql: Sql): Hono {
       const { execSync } = await import('child_process');
       const scriptPath = new URL('../../scripts/search_podcast.py', import.meta.url).pathname;
       const venvPath = new URL('../../.venv311/bin/python3', import.meta.url);
-      const pythonBin = existsSync(venvPath) ? venvPath.pathname : 'python3';
+      const pythonBin = existsSync(venvPath) ? venvPath.pathname : (process.platform === 'win32' ? 'python' : 'python3');
       const result = execSync(
         `"${pythonBin}" "${scriptPath}" "${keyword.replace(/"/g, '\\"')}" ${page}`,
         { timeout: 20000, encoding: 'utf-8' }

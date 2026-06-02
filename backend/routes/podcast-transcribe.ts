@@ -55,7 +55,7 @@ export function createPodcastTranscribeRoutes(sql: Sql): Hono {
       // 3. 获取音频 URL
       const scriptPath = new URL('../../scripts/podcast_audio.py', import.meta.url).pathname;
       const venvPath = new URL('../../.venv311/bin/python3', import.meta.url);
-      const pythonBin = existsSync(venvPath) ? venvPath.pathname : 'python3';
+      const pythonBin = existsSync(venvPath) ? venvPath.pathname : (process.platform === 'win32' ? 'python' : 'python3');
 
       let audioUrl = '';
       if (platform === 'XimalayaMusicClient' || platform === 'ximalaya') {
