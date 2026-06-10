@@ -8,7 +8,7 @@
  * - PATCH /api/twitter-admin/accounts/:id/toggle → 切换启用/禁用
  * - POST  /api/twitter-admin/refresh         → 采集已启用账号的最新推文
  *
- * 数据来源：Nitter RSS（无需 Twitter API Key）
+ * 数据来源：Twitter/X GraphQL API（guest token 方式，无需 API Key）
  */
 
 import { Hono } from 'hono';
@@ -16,195 +16,233 @@ import type { Sql } from 'postgres';
 import { saveArticleFile, hashString } from '../file-storage.js';
 import { cleanHtmlToText } from '../services/parser.js';
 import { classifyByFeed, extractTags } from '../services/classifier.js';
-import RssParser from 'rss-parser';
 
-/** VPS Worker 配置 */
-const BILI_SERVICE_URL = process.env.BILI_SERVICE_URL || 'http://bili-service:8979';
-const TWITTER_COOKIES = process.env.TWITTER_COOKIES || '';  // Format: "ct0=xxx; auth_token=xxx"
+// ============ Twitter API 常量 ============
 
-/** Nitter 实例列表，用于容错回退 */
-const NITTER_INSTANCES = [
-  'nitter.net',
-  'nitter.fly.dev',
-  'nitter.poast.org',
-  'nitter.lonelystream.com',
-  'nitter.1d4.us',
-];
+/** Twitter 公开 Bearer Token（Web 客户端使用） */
+const TWITTER_BEARER =
+  'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
 
-interface NitterItem {
-  title?: string;
-  link?: string;
-  pubDate?: string;
-  content?: string;
-  contentSnippet?: string;
-  guid?: string;
-  creator?: string;
-  'dc:creator'?: string;
-  categories?: string[];
-  enclosure?: { url?: string };
-}
+/** UserByScreenName GraphQL query ID */
+const UBSN_QUERY_ID = '681MIj51w00Aj6dY0GXnHw';
 
-/** HTML 解码 */
-function decodeHtml(str: string): string {
-  return str
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&apos;/g, "'");
-}
+/** UserByScreenName features */
+const UBSN_FEATURES: Record<string, boolean> = {
+  hidden_profile_subscriptions_enabled: true,
+  profile_label_improvements_pcf_label_in_post_enabled: true,
+  responsive_web_profile_redirect_enabled: true,
+  rweb_tipjar_consumption_enabled: true,
+  verified_phone_label_enabled: false,
+  subscriptions_verification_info_is_identity_verified_enabled: true,
+  subscriptions_verification_info_verified_since_enabled: true,
+  highlights_tweets_tab_ui_enabled: true,
+  responsive_web_twitter_article_notes_tab_enabled: true,
+  subscriptions_feature_can_gift_premium: false,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+};
 
-/**
- * 通过 VPS Playwright 浏览器采集 x.com 推文
- */
-async function fetchPlaywrightTweets(handle: string): Promise<any[]> {
-  // 调用本地 bili-service 的 Playwright Twitter 采集端点
-  const resp = await fetch(`${BILI_SERVICE_URL}/`, {
+/** UserTweets GraphQL query ID */
+const UT_QUERY_ID = 'fVhuOkcsO6w1T0nmCAo_sw';
+
+/** UserTweets features */
+const UT_FEATURES: Record<string, boolean> = {
+  rweb_video_screen_enabled: true,
+  rweb_cashtags_enabled: true,
+  profile_label_improvements_pcf_label_in_post_enabled: true,
+  responsive_web_profile_redirect_enabled: true,
+  rweb_tipjar_consumption_enabled: true,
+  verified_phone_label_enabled: false,
+  creator_subscriptions_tweet_preview_api_enabled: true,
+  responsive_web_graphql_timeline_navigation_enabled: true,
+  responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+  premium_content_api_read_enabled: true,
+  communities_web_enable_tweet_community_results_fetch: true,
+  c9s_tweet_anatomy_moderator_badge_enabled: true,
+  articles_preview_enabled: true,
+  responsive_web_edit_tweet_api_enabled: true,
+  graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+  view_counts_everywhere_api_enabled: true,
+  longform_notetweets_consumption_enabled: true,
+  responsive_web_twitter_article_tweet_consumption_enabled: true,
+  tweet_awards_web_tipping_enabled: false,
+  freedom_of_speech_not_reach_fetch_enabled: true,
+  standardized_nudges_misinfo: true,
+  tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+  longform_notetweets_rich_text_read_enabled: true,
+  longform_notetweets_inline_media_enabled: true,
+  responsive_web_enhance_cards_enabled: false,
+};
+
+// ============ Twitter GraphQL API ============
+
+let _cachedGuestToken: string | null = null;
+let _guestTokenExpiry = 0;
+
+/** 获取 guest token（带缓存，1 小时有效） */
+async function getGuestToken(): Promise<string> {
+  if (_cachedGuestToken && Date.now() < _guestTokenExpiry) {
+    return _cachedGuestToken;
+  }
+  const resp = await fetch('https://api.twitter.com/1.1/guest/activate.json', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'twitter',
-      handle,
-      max_tweets: 20,
-      cookies: TWITTER_COOKIES,
-    }),
-    signal: AbortSignal.timeout(90000),
+    headers: { Authorization: `Bearer ${TWITTER_BEARER}` },
+    signal: AbortSignal.timeout(10000),
   });
-
-  if (!resp.ok) throw new Error(`本地 Playwright 采集返回 ${resp.status}`);
-
-  const data: any = await resp.json();
-  if (!data.ok || !data.tweets || data.tweets.length === 0) {
-    throw new Error('本地 Playwright 采集无结果');
-  }
-
-  // 将采集格式转换为内部格式（与旧格式兼容）
-  return data.tweets.map((t: any) => {
-    const text = t.text || '';
-    const statsStr = [
-      t.stats?.replies ? `${t.stats.replies} replies` : '',
-      t.stats?.retweets ? `${t.stats.retweets} retweets` : '',
-      t.stats?.likes ? `${t.stats.likes} likes` : '',
-      t.stats?.views ? `${t.stats.views} views` : '',
-    ].filter(Boolean).join(' | ');
-
-    const imgHtml = (t.images || []).map((url: string) => `<img src="${url}">`).join('\n');
-
-    const content = [text, statsStr, imgHtml].filter(Boolean).join('\n\n');
-
-    const tweetId = t.id || t.url?.split('/status/').pop() || '';
-
-    return {
-      title: text.slice(0, 100),
-      link: t.url || `https://x.com/${handle}/status/${tweetId}`,
-      pubDate: t.timestamp || new Date().toISOString(),
-      content,
-      contentSnippet: text.slice(0, 200),
-      guid: tweetId,
-    };
-  });
+  if (!resp.ok) throw new Error(`获取 guest token 失败: HTTP ${resp.status}`);
+  const data = (await resp.json()) as any;
+  _cachedGuestToken = data.guest_token;
+  _guestTokenExpiry = Date.now() + 55 * 60 * 1000; // 55 分钟
+  return _cachedGuestToken;
 }
 
-/**
- * 尝试获取 Twitter 账号的推文
- * 三阶回退：Playwright 浏览器采集 → VPS Nitter RSS 代理 → 直连 Nitter
- */
-async function fetchNitterFeed(handle: string): Promise<any[]> {
-  const rssParser = new RssParser({
-    timeout: 15000,
+interface TweetData {
+  id: string;
+  text: string;
+  created_at: string;
+  retweet_count: number;
+  favorite_count: number;
+  reply_count: number;
+  quote_count: number;
+  views: number;
+  media_urls: string[];
+  url: string;
+}
+
+interface UserInfo {
+  userId: string;
+  name: string;
+  screenName: string;
+}
+
+/** 通过 UserByScreenName 获取用户信息 */
+async function fetchUserInfo(handle: string, guestToken: string): Promise<UserInfo | null> {
+  const variables = { screen_name: handle, withSafetyModeUserFields: true };
+  const url =
+    `https://x.com/i/api/graphql/${UBSN_QUERY_ID}/UserByScreenName` +
+    `?variables=${encodeURIComponent(JSON.stringify(variables))}` +
+    `&features=${encodeURIComponent(JSON.stringify(UBSN_FEATURES))}`;
+
+  const resp = await fetch(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-      'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+      Authorization: `Bearer ${TWITTER_BEARER}`,
+      'x-guest-token': guestToken,
+      'x-twitter-active-user': 'yes',
+      'x-twitter-client-language': 'en',
     },
-    customFields: {
-      item: ['dc:creator'],
-    },
+    signal: AbortSignal.timeout(15000),
   });
 
-  // ── 第一阶：VPS Playwright 浏览器采集 ──
-  try {
-    const items = await fetchPlaywrightTweets(handle);
-    if (items.length > 0) return items;
-  } catch (e: any) {
-    console.warn(`[Twitter] Playwright 采集失败，回退 RSS: ${e.message}`);
-  }
+  if (!resp.ok) return null;
+  const data = (await resp.json()) as any;
+  const result = data?.data?.user?.result;
+  if (!result) return null;
 
-  // ── 第二阶：VPS Worker Nitter RSS 代理 ──
-  try {
-    const resp = await fetch(`${BILI_SERVICE_URL}/twitter/rss/${encodeURIComponent(handle)}`, {
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(25000),
-    });
-    if (resp.ok) {
-      const data: any = await resp.json();
-      if (data.ok && data.xml) {
-        const feed = await rssParser.parseString(data.xml);
-        if (feed.items && feed.items.length > 0) {
-          return feed.items;
+  return {
+    userId: result.rest_id,
+    name: result.legacy?.name || `@${handle}`,
+    screenName: result.legacy?.screen_name || handle,
+  };
+}
+
+/** 通过 UserTweets GraphQL 获取推文列表 */
+async function fetchUserTweets(
+  userId: string,
+  handle: string,
+  guestToken: string,
+): Promise<TweetData[]> {
+  const variables = {
+    userId,
+    count: 20,
+    includePromotedContent: false,
+    withQuickPromoteEligibilityTweetFields: true,
+    withVoice: true,
+    withV2Timeline: true,
+  };
+  const url =
+    `https://x.com/i/api/graphql/${UT_QUERY_ID}/UserTweets` +
+    `?variables=${encodeURIComponent(JSON.stringify(variables))}` +
+    `&features=${encodeURIComponent(JSON.stringify(UT_FEATURES))}`;
+
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${TWITTER_BEARER}`,
+      'x-guest-token': guestToken,
+      'x-twitter-active-user': 'yes',
+      'x-twitter-client-language': 'en',
+    },
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (!resp.ok) throw new Error(`UserTweets API HTTP ${resp.status}`);
+  const data = (await resp.json()) as any;
+
+  const instructions = data?.data?.user?.result?.timeline?.timeline?.instructions || [];
+  const tweets: TweetData[] = [];
+
+  for (const inst of instructions) {
+    // 格式 1: inst.entry.content.itemContent.tweet_results.result（单条推文）
+    const entryResult = inst.entry?.content?.itemContent?.tweet_results?.result;
+    if (entryResult) {
+      const td =
+        entryResult.__typename === 'TweetWithVisibilityResults' ? entryResult.tweet : entryResult;
+      if (td?.legacy) {
+        tweets.push(formatTweet(td, handle));
+      }
+    }
+
+    // 格式 2: inst.type === "TimelineAddEntries" → inst.entries[]
+    if (inst.type === 'TimelineAddEntries' && Array.isArray(inst.entries)) {
+      for (const entry of inst.entries) {
+        const r = entry?.content?.itemContent?.tweet_results?.result;
+        if (!r) continue;
+        const td =
+          r.__typename === 'TweetWithVisibilityResults' ? r.tweet : r;
+        if (td?.legacy) {
+          tweets.push(formatTweet(td, handle));
         }
       }
     }
-    console.warn(`[Twitter] VPS Worker RSS 代理无结果，回退直连: ${handle}`);
-  } catch (e: any) {
-    console.warn(`[Twitter] VPS Worker RSS 代理失败，回退直连: ${e.message}`);
   }
 
-  // ── 第三阶：本地直连 Nitter ──
-  let lastError: string = '';
-
-  for (const instance of NITTER_INSTANCES) {
-    const url = `https://${instance}/${handle}/rss`;
-    try {
-      const feed = await rssParser.parseURL(url);
-      if (feed.items && feed.items.length > 0) {
-        return feed.items;
-      }
-    } catch (e: any) {
-      lastError = `${instance}: ${e.message}`;
-      continue;
-    }
-  }
-
-  throw new Error(`所有 Nitter 实例均失败: ${lastError}`);
+  return tweets;
 }
 
-/**
- * 通过 Nitter 推断用户显示名称
- * 优先通过 VPS Worker 代理，失败后回退到本地直连
- */
-async function inferUserName(handle: string): Promise<string | null> {
-  // ── 优先：VPS Worker ──
-  try {
-    const resp = await fetch(`${BILI_SERVICE_URL}/twitter/user-info/${encodeURIComponent(handle)}`, {
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (resp.ok) {
-      const data: any = await resp.json();
-      if (data.ok && data.feedTitle) {
-        const match = data.feedTitle.match(/^(.+?)\s*\(@/);
-        if (match) return match[1]!.trim();
-      }
-    }
-  } catch {
-    // fallback to direct
+/** 将 GraphQL 返回的推文数据格式化为统一结构 */
+function formatTweet(tweetData: any, handle: string): TweetData {
+  const l = tweetData.legacy;
+  return {
+    id: l.id_str || tweetData.rest_id,
+    text: l.full_text || '',
+    created_at: l.created_at || new Date().toISOString(),
+    retweet_count: l.retweet_count || 0,
+    favorite_count: l.favorite_count || 0,
+    reply_count: l.reply_count || 0,
+    quote_count: l.quote_count || 0,
+    views: tweetData.views?.count || 0,
+    media_urls: (l.extended_entities?.media || []).map((m: any) => m.media_url_https || m.media_url),
+    url: `https://x.com/${handle}/status/${l.id_str}`,
+  };
+}
+
+/** 采集单个账号的最新推文 */
+async function fetchTwitterFeed(handle: string): Promise<{ tweets: TweetData[]; userInfo: UserInfo | null }> {
+  const guestToken = await getGuestToken();
+
+  // 获取用户信息
+  const userInfo = await fetchUserInfo(handle, guestToken);
+  if (!userInfo) {
+    throw new Error(`无法获取 @${handle} 的用户信息`);
   }
 
-  // ── 回退：直连 Nitter ──
-  try {
-    const rssParser = new RssParser({ timeout: 10000 });
-    const feed = await rssParser.parseURL(`https://nitter.net/${handle}/rss`);
-    if (feed.title) {
-      const match = feed.title.match(/^(.+?)\s*\(@/);
-      if (match) return match[1]!.trim();
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  // 获取推文
+  const tweets = await fetchUserTweets(userInfo.userId, handle, guestToken);
+
+  return { tweets, userInfo };
 }
+
+// ============ Routes ============
 
 export function createTwitterAdminRoutes(sql: Sql): Hono {
   const router = new Hono();
@@ -268,10 +306,14 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
       // 去掉 @ 前缀
       handle = handle.replace(/^@/, '').trim();
 
-      // 如果没有提供名称，尝试从 Nitter 推断
+      // 如果没有提供名称，从 Twitter API 获取
       if (!name) {
-        const inferred = await inferUserName(handle);
-        name = inferred || `@${handle}`;
+        try {
+          const info = await fetchUserInfo(handle, await getGuestToken());
+          name = info?.name || `@${handle}`;
+        } catch {
+          name = `@${handle}`;
+        }
       }
 
       // 检查是否已存在
@@ -339,12 +381,6 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
   router.post('/refresh', async (c) => {
     const startMs = Date.now();
 
-    // Accept cookies from frontend body (localStorage), override env
-    const _body = await c.req.json().catch(() => ({}));
-    if (_body.ct0 && _body.auth_token) {
-      process.env.TWITTER_COOKIES = 'ct0=' + _body.ct0 + '; auth_token=' + _body.auth_token;
-    }
-
     try {
       const [twitterSource] = await sql`
         SELECT id FROM sources WHERE type = 'twitter' AND parent_id IS NULL LIMIT 1
@@ -366,6 +402,9 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
         return c.json({ ok: true, message: '没有已启用的 X 账号', inserted: 0 });
       }
 
+      // 预获取 guest token（所有账号共用）
+      const guestToken = await getGuestToken();
+
       let totalFetched = 0;
       let inserted = 0;
       const errors: string[] = [];
@@ -375,52 +414,46 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
         const name = account.name;
 
         try {
-          const items = await fetchNitterFeed(handle);
-          if (items.length === 0) {
+          // 获取用户信息
+          const userInfo = await fetchUserInfo(handle, guestToken);
+          if (!userInfo) {
+            errors.push(`${name}: 无法获取用户信息`);
+            continue;
+          }
+
+          // 获取推文
+          const tweets = await fetchUserTweets(userInfo.userId, handle, guestToken);
+          if (tweets.length === 0) {
             errors.push(`${name}: 无推文数据`);
             continue;
           }
 
-          for (const item of items) {
+          for (const tweet of tweets) {
             try {
-              const rawTitle = item.title || '';
-              const rawContent = item.content || item.contentSnippet || rawTitle || '';
-              const guid = item.guid || item.link || '';
-              const tweetId = guid.split('/').pop() || guid;
-              const pubDate = item.pubDate || new Date().toISOString();
-
-              // 清洗标题和内容
-              const title = cleanHtmlToText(decodeHtml(rawTitle));
-              const contentText = cleanHtmlToText(decodeHtml(rawContent));
-
-              // 提取额外的推文信息（转发/点赞/回复数）
-              let extraMeta = '';
-              const statsMatch = rawContent.match(/([\d,]+)\s*(retweet|reply|like|favorite)s?/gi);
-              if (statsMatch) {
-                extraMeta = '\n\n' + statsMatch.join(' | ');
-              }
+              // 构建统计信息
+              const statsStr = [
+                tweet.retweet_count ? `🔄${tweet.retweet_count}` : '',
+                tweet.favorite_count ? `❤️${tweet.favorite_count}` : '',
+                tweet.reply_count ? `💬${tweet.reply_count}` : '',
+                tweet.views ? `👁️${tweet.views}` : '',
+              ]
+                .filter(Boolean)
+                .join(' ');
 
               // 构建正文
-              let fullContent = contentText;
-              if (extraMeta) fullContent += extraMeta;
+              let fullContent = tweet.text;
+              if (statsStr) fullContent += `\n\n${statsStr}`;
+              // 添加图片 URL
+              for (const imgUrl of tweet.media_urls) {
+                fullContent += `\n\n![图片](${imgUrl})`;
+              }
 
-              // 尝试提取图片 URL（Nitter 的 description 中包含图片链接）
-              const imgRegex = /<img\s+[^>]*src\s*=\s*"([^"]+)"[^>]*>/gi;
-              let imgMatch;
-              const imgUrls: string[] = [];
-              while ((imgMatch = imgRegex.exec(rawContent)) !== null) {
-                const url = imgMatch[1];
-                if (url && !url.includes('/emoji/') && !url.includes('profile')) {
-                  imgUrls.push(url);
-                }
-              }
-              if (imgUrls.length > 0) {
-                fullContent += '\n\n![图片](' + imgUrls[0] + ')';
-              }
+              // 标题：取前 100 字符
+              const title = cleanHtmlToText(tweet.text.slice(0, 100));
+              const contentText = cleanHtmlToText(fullContent);
 
               // 去重 key
-              const contentHash = hashString('twitter_' + tweetId);
-              const tweetUrl = `https://x.com/${handle}/status/${tweetId}`;
+              const contentHash = hashString('twitter_' + tweet.id);
 
               // 检查是否已存在
               const [existing] = await sql`
@@ -436,7 +469,19 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
 
               const insertedRows = await sql`
                 INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author)
-                VALUES (${account.id}, ${title.slice(0, 500)}, ${fullContent.slice(0, 10000)}, ${title.slice(0, 200)}, ${tweetUrl}, ${pubDate}, ${category}, ${tags}, ${contentHash}, NOW(), ${name})
+                VALUES (
+                  ${account.id},
+                  ${title.slice(0, 500)},
+                  ${contentText.slice(0, 10000)},
+                  ${title.slice(0, 200)},
+                  ${tweet.url},
+                  ${tweet.created_at},
+                  ${category},
+                  ${tags},
+                  ${contentHash},
+                  NOW(),
+                  ${name}
+                )
                 ON CONFLICT (content_hash) DO NOTHING
                 RETURNING id
               `;
@@ -444,13 +489,13 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
               if (insertedRows.length > 0) {
                 inserted++;
                 const newId = insertedRows[0]!.id;
-                await saveArticleFile(newId, fullContent, {
+                await saveArticleFile(newId, contentText, {
                   id: newId,
                   title,
                   source_type: 'twitter-updates',
                   source_name: name,
-                  url: tweetUrl,
-                  published_at: pubDate,
+                  url: tweet.url,
+                  published_at: tweet.created_at,
                   category,
                   tags,
                   author: name,
@@ -474,9 +519,14 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
       const durationMs = Date.now() - startMs;
       await sql`
         INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)
-        VALUES (${twitterSource.id}, 'X账号推文采集', 'success', ${inserted},
+        VALUES (
+          ${twitterSource.id},
+          'X账号推文采集',
+          'success',
+          ${inserted},
           ${`已启用 ${enabledAccounts.length} 个账号，获取 ${totalFetched} 条推文，入库 ${inserted} 条${errors.length ? '，错误: ' + errors.join('; ') : ''}`},
-          ${durationMs})
+          ${durationMs}
+        )
       `;
 
       return c.json({
@@ -488,7 +538,9 @@ export function createTwitterAdminRoutes(sql: Sql): Hono {
       });
     } catch (e: any) {
       const durationMs = Date.now() - startMs;
-      const [twitterSource] = await sql`SELECT id FROM sources WHERE type = 'twitter' AND parent_id IS NULL LIMIT 1`;
+      const [twitterSource] = await sql`
+        SELECT id FROM sources WHERE type = 'twitter' AND parent_id IS NULL LIMIT 1
+      `;
       if (twitterSource) {
         await sql`
           INSERT INTO fetch_logs (source_id, action, status, articles_count, detail, duration_ms)

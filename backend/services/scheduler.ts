@@ -5,7 +5,8 @@ import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { translateToChinese, isEnglish, createConcurrencyPool } from './translate.js';
-import { whisperWindowsTranscribe } from './transcribe.js';
+// Mac 适配：暂时跳过 Whisper（后续走 s1 API）
+// import { whisperWindowsTranscribe } from './transcribe.js';
 import { saveArticleFile } from '../file-storage.js';
 import { fail } from '../shared/response.js';
 
@@ -133,6 +134,7 @@ interface SourceTitles {
   youtube: Array<{ title: string; channel: string }>;
   twitter: number;
   rss: number;
+  jintiankansha: number;
 }
 
 interface PostProcessStats {
@@ -182,15 +184,17 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
       .then(r => ({ source: 'YouTube', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
     ...(s.podcast?.enabled !== false ? [fetchApi('/podcast-admin/sync')
       .then(r => ({ source: '播客', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
+    ...(s.jintiankansha?.enabled !== false ? [fetchApi('/fetch/jintiankansha')
+      .then(r => ({ source: '今天看啥', success: !!r.ok, inserted: r.totalInserted || 0, fetched: r.totalFetched || 0, error: r.error }))] : []),
   ];
 
   // RSS: query enabled sources, then fetch each
   let rssAgg: FetchResult = { source: 'RSS', success: true, inserted: 0 };
   try {
     const rssSources = await sql`
-      SELECT id, name, config->>'feed_url' AS feed_url
+      SELECT id, name, COALESCE(config->>'feed_url', config->>'feedUrl', config->>'url') AS feed_url
       FROM sources
-      WHERE enabled = true AND LOWER(type) IN ('rss', 'podcast-channel')
+      WHERE enabled = true AND LOWER(type) IN ('rss', 'rss_news', 'rss-feed', 'podcast-channel')
     `;
     const rssFetches = rssSources
       .filter(s => s.feed_url)
@@ -357,283 +361,17 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
     console.error('[scheduler] Phase 2a error:', e.message);
   }
 
-  // --- 2b: Podcast Transcription ---
-  console.log('[scheduler] Phase 2b: Podcast transcription...');
-  try {
-    const podcastArticles = await sql`
-      SELECT a.id, a.title, a.extra->>'audio_url' AS audio_url, s.name
-      FROM articles a JOIN sources s ON a.source_id = s.id
-      WHERE a.fetched_at::date = ${today}
-        AND s.type IN ('podcast-channel', 'rss')
-        AND a.extra->>'audio_url' IS NOT NULL
-        AND a.extra->>'audio_url' != ''
-        AND a.content NOT LIKE '%音频转录%'
-      ORDER BY a.id
-      LIMIT 10
-    `;
-
-    // GPU-bound (Whisper): STRICTLY SERIAL
-    for (const article of podcastArticles) {
-      try {
-        const audioUrl = article.audio_url;
-        if (!audioUrl) continue;
-
-        console.log(`[scheduler] Transcribing podcast: ${article.title} (${audioUrl})`);
-        const transcript = await whisperWindowsTranscribe(audioUrl, 0);
-        if (!transcript) {
-          console.log(`[scheduler] Transcription returned null for id=${article.id}`);
-          continue;
-        }
-
-        const originalContent = await sql`SELECT content FROM articles WHERE id = ${article.id}`;
-        const content = originalContent[0]?.content || '';
-
-        const newContent = `> 🎙️ 音频转录\n> \n> ${transcript}\n\n---\n\n${content}`;
-
-        await sql`UPDATE articles SET content = ${newContent} WHERE id = ${article.id}`;
-
-        // Update OB file
-        try {
-          const [updated] = await sql`
-            SELECT a.*, s.name AS source_name, s.type AS source_type
-            FROM articles a LEFT JOIN sources s ON a.source_id = s.id
-            WHERE a.id = ${article.id}
-          `;
-          if (updated) {
-            await saveArticleFile(article.id, newContent, {
-              id: article.id,
-              title: updated.title,
-              source_type: updated.source_type || 'unknown',
-              source_name: updated.source_name || '',
-              url: updated.url,
-              published_at: updated.published_at,
-              category: updated.category,
-              tags: updated.tags || [],
-              author: updated.author,
-              is_read: updated.is_read,
-              is_starred: updated.is_starred,
-              content_hash: updated.content_hash,
-              extra: updated.extra,
-            });
-          }
-        } catch (e: any) {
-          console.error(`[scheduler] OB update failed for transcription id=${article.id}:`, e.message);
-        }
-
-        stats.transcribed++;
-      } catch (e: any) {
-        console.error(`[scheduler] Transcription failed for id=${article.id}:`, e.message);
-      }
-    }
-    console.log(`[scheduler] Phase 2b complete: ${stats.transcribed} podcasts transcribed`);
-  } catch (e: any) {
-    console.error('[scheduler] Phase 2b error:', e.message);
-  }
+  // --- 2b: Podcast Transcription (SKIPPED on Mac — will use s1 API later) ---
+  // console.log('[scheduler] Phase 2b: Podcast transcription...');
+  // ... skipped on Mac, will route via s1 API ...
 
 
-  // --- 2b-2: B站字幕下载 + Whisper 转录 + DeepSeek 重断句 ---
-  console.log('[scheduler] Phase 2b-2: Bilibili subtitle/audio processing...');
-  try {
-    const biliArticles = await sql`
-      SELECT a.id, a.title, a.url, a.extra, s.name AS source_name, s.type AS source_type
-      FROM articles a JOIN sources s ON a.source_id = s.id
-      WHERE a.fetched_at::date = ${today}
-        AND s.type LIKE 'bilibili%'
-        AND (a.content IS NULL OR a.content = '' OR a.content NOT LIKE '%字幕%')
-        AND a.content NOT LIKE '%音频转录%'
-        AND a.content NOT LIKE '%【整理后】%'
-      ORDER BY a.id
-      LIMIT 10
-    `;
-
-    if (biliArticles.length > 0) {
-      for (const article of biliArticles) {
-        try {
-          const bvid = article.url?.match(/BV[a-zA-Z0-9]+/)?.[0];
-          if (!bvid) continue;
-
-          console.log(`[scheduler] Processing B站: ${article.title} (${bvid})`);
-
-          // Step 1: Try OpenCLI subtitle (CC subtitles from B站, ~3s, zero compute)
-          let subtitle = '';
-          try {
-            const subOutput = execSync(
-              `cmd /c opencli bilibili subtitle ${bvid} -f json`,
-              { encoding: 'utf-8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
-            );
-            const subJson = JSON.parse(subOutput) || [];
-            if (subJson.length > 0) {
-              subtitle = subJson.map((s: any) => s.content || '').join('\n');
-            }
-            if (subtitle) {
-              console.log(`[scheduler] OpenCLI subtitle OK: ${bvid} (${subJson.length} segments, ${subtitle.length} chars)`);
-            } else {
-              console.log(`[scheduler] OpenCLI returned empty subtitle for ${bvid}`);
-            }
-          } catch (e: any) {
-            console.log(`[scheduler] OpenCLI subtitle failed for ${bvid}: ${e.message?.slice(0, 100)}`);
-          }
-
-          let processedContent = '';
-          let transcript = '';
-
-          if (subtitle) {
-            transcript = subtitle;
-            console.log(`[scheduler] Got subtitle for ${bvid}, calling DeepSeek...`);
-          } else {
-            // Step 2: No subtitle - fall back to Whisper audio transcription
-            try {
-              // Get audio URL via OpenCLI video command
-              let audioUrl = '';
-              try {
-                const vidOutput = execSync(
-                  `cmd /c opencli bilibili video ${bvid} -f json`,
-                  { encoding: 'utf-8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
-                );
-                const vidFields = JSON.parse(vidOutput) || [];
-                const audioField = vidFields.find((f: any) => f.field === 'audio_url');
-                if (audioField?.value) audioUrl = audioField.value;
-              } catch { /* video info failed */ }
-
-              if (audioUrl) {
-                console.log(`[scheduler] Transcribing B站 audio for ${bvid} via Whisper...`);
-                const whisperResult = await whisperWindowsTranscribe(audioUrl, 0);
-                if (whisperResult) {
-                  transcript = whisperResult;
-                  console.log(`[scheduler] Whisper done for ${bvid}: ${transcript.length} chars`);
-                }
-              } else {
-                console.log(`[scheduler] No audio URL for ${bvid}, skipping transcription`);
-              }
-            } catch (e: any) {
-              console.log(`[scheduler] B站音频转录失败: ${e.message}`);
-            }
-          }
-
-          if (transcript) {
-            // DeepSeek re-paragraph
-            const reparagraphed = await deepseekReparagraph(transcript, article.title);
-            if (reparagraphed && reparagraphed !== transcript) {
-              processedContent = `【整理后】\n\n${reparagraphed}\n\n---\n\n【原始转录】\n${transcript}`;
-            } else {
-              processedContent = `【原始转录】\n\n${transcript}`;
-            }
-          } else if (subtitle) {
-            processedContent = `【字幕】\n\n${subtitle}`;
-          } else {
-            console.log(`[scheduler] No transcript or subtitle for ${bvid}`);
-            continue;
-          }
-
-          await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${article.id}`;
-
-          try {
-            const [updated] = await sql`
-              SELECT a.*, s.name AS source_name, s.type AS source_type
-              FROM articles a LEFT JOIN sources s ON a.source_id = s.id
-              WHERE a.id = ${article.id}
-            `;
-            if (updated) {
-              await saveArticleFile(article.id, processedContent, {
-                id: article.id, title: updated.title,
-                source_type: updated.source_type || 'unknown',
-                source_name: updated.source_name || '',
-                url: updated.url, published_at: updated.published_at,
-                category: updated.category, tags: updated.tags || [],
-                author: updated.author,
-                is_read: updated.is_read, is_starred: updated.is_starred,
-                content_hash: updated.content_hash, extra: updated.extra,
-              });
-            }
-          } catch (e: any) {
-            console.error(`[scheduler] OB update failed for B站 id=${article.id}:`, e.message);
-          }
-
-          stats.transcribed++;
-        } catch (e: any) {
-          console.error(`[scheduler] B站 processing failed for id=${article.id}:`, e.message);
-        }
-      }
-    }
-    console.log(`[scheduler] Phase 2b-2 complete`);
-  } catch (e: any) {
-    console.error('[scheduler] Phase 2b-2 error:', e.message);
-  }
-  // --- 2c: Subtitle Download (Bilibili & YouTube) ---
-  console.log('[scheduler] Phase 2c: Subtitle download...');
-  try {
-    const subtitleArticles = await sql`
-      SELECT a.id, a.title, a.url, s.type
-      FROM articles a JOIN sources s ON a.source_id = s.id
-      WHERE a.fetched_at::date = ${today}
-        AND s.type IN ('bilibili', 'bilibili-watch-later', 'bilibili-updates', 'bilibili-favorites',
-                        'youtube-updates', 'youtube-watch-later', 'youtube-favorites')
-      ORDER BY a.id
-    `;
-
-    if (subtitleArticles.length > 0) {
-      // Network I/O: parallel with max 3 concurrent
-      const subtitleLimit = createConcurrencyPool(3);
-      const subtitleResults = await Promise.allSettled(
-        subtitleArticles.map((article: any) => subtitleLimit(async () => {
-          const isBilibili = article.type.startsWith('bilibili');
-          const apiPath = isBilibili ? '/bilibili-subtitle/subtitle' : '/youtube-subtitle/subtitle';
-          const resp = await fetchApi(apiPath, { article_id: article.id });
-
-          if (!resp.ok || !resp.subtitle) return;
-
-          // Append subtitle text to article content
-          const [row] = await sql`SELECT content, extra FROM articles WHERE id = ${article.id}`;
-          const existingContent = row?.content || '';
-          const subtitle = resp.subtitle;
-
-          // Only append if not already present
-          if (existingContent.includes(subtitle.slice(0, 100))) return;
-
-          const newContent = `${existingContent}\n\n---\n\n${subtitle}`;
-
-          await sql`UPDATE articles SET content = ${newContent} WHERE id = ${article.id}`;
-
-          // Update OB file
-          try {
-            const [updated] = await sql`
-              SELECT a.*, s.name AS source_name, s.type AS source_type
-              FROM articles a LEFT JOIN sources s ON a.source_id = s.id
-              WHERE a.id = ${article.id}
-            `;
-            if (updated) {
-              await saveArticleFile(article.id, newContent, {
-                id: article.id,
-                title: updated.title,
-                source_type: updated.source_type || 'unknown',
-                source_name: updated.source_name || '',
-                url: updated.url,
-                published_at: updated.published_at,
-                category: updated.category,
-                tags: updated.tags || [],
-                author: updated.author,
-                is_read: updated.is_read,
-                is_starred: updated.is_starred,
-                content_hash: updated.content_hash,
-                extra: updated.extra,
-              });
-            }
-          } catch (e: any) {
-            console.error(`[scheduler] OB update failed for subtitle id=${article.id}:`, e.message);
-          }
-
-          stats.subtitles++;
-        }))
-      );
-      const failed = subtitleResults.filter(r => r.status === 'rejected').length;
-      if (failed > 0) {
-        console.error(`[scheduler] Phase 2c: ${failed} subtitle downloads failed`);
-      }
-    }
-    console.log(`[scheduler] Phase 2c complete: ${stats.subtitles} subtitles downloaded`);
-  } catch (e: any) {
-    console.error('[scheduler] Phase 2c error:', e.message);
-  }
+  // --- 2b-2: B站字幕/音频处理 (SKIPPED on Mac — will use s1 API later) ---
+  // console.log('[scheduler] Phase 2b-2: Bilibili subtitle/audio processing...');
+  // ... skipped on Mac, will route via s1 API ...
+  // --- 2c: Subtitle Download (SKIPPED on Mac — will use s1 API later) ---
+  // console.log('[scheduler] Phase 2c: Subtitle download...');
+  // ... skipped on Mac, will route via s1 API ...
 
   console.log(`[scheduler] Phase 2 post-processing complete: translated=${stats.translated}, transcribed=${stats.transcribed}, subtitles=${stats.subtitles}`);
   return stats;
@@ -649,6 +387,7 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
   const youtube: Array<{ title: string; channel: string }> = [];
   let twitter = 0;
   let rss = 0;
+  let jintiankansha = 0;
 
   try {
     // Wechat articles today
@@ -720,11 +459,20 @@ async function queryTodayTitles(sql: Sql): Promise<SourceTitles> {
     `;
     rss = rssRows[0]?.cnt || 0;
 
+    // 今天看啥 count today
+    const jtksRows = await sql`
+      SELECT COUNT(*)::int AS cnt FROM articles a
+      JOIN sources s ON a.source_id = s.id
+      WHERE a.fetched_at::date = ${today}
+        AND LOWER(s.type) IN ('jintiankansha', 'weibo', 'xueqiu')
+    `;
+    jintiankansha = jtksRows[0]?.cnt || 0;
+
   } catch (e: any) {
     console.error('[scheduler] queryTodayTitles error:', e.message);
   }
 
-  return { wechat, bilibili, podcast, youtube, twitter, rss };
+  return { wechat, bilibili, podcast, youtube, twitter, rss, jintiankansha };
 }
 
 // ============ Phase 4: Anomaly Detection ============
@@ -869,6 +617,16 @@ function buildReport(
   }
   lines.push('');
 
+  // 今天看啥
+  const jtksResult = fetchResults.find(r => r.source === '今天看啥');
+  lines.push(`## 今天看啥（${titles.jintiankansha}篇）`);
+  if (titles.jintiankansha > 0) {
+    lines.push(`新增 ${titles.jintiankansha} 篇 ✅`);
+  } else {
+    lines.push(jtksResult?.success ? '无新增' : `❌ ${jtksResult?.error || '采集失败'}`);
+  }
+  lines.push('');
+
   // 后处理统计
   lines.push('## 🔄 后处理');
   lines.push(`- 英文翻译: ${postProcessStats.translated} 篇`);
@@ -915,6 +673,7 @@ const DEFAULT_SETTINGS: CollectionSettings = {
     penti: { name: '喷嚏图卦', enabled: true },
     rmrb: { name: '人民日报', enabled: true },
     wechat_group: { name: '微信群聊', enabled: false },
+    jintiankansha: { name: '今天看啥', enabled: true },
   },
 };
 
@@ -1133,14 +892,15 @@ export function createSchedulerRoutes(sql: Sql): Hono {
       twitter: { path: '/twitter-admin/refresh' },
       youtube: { path: '/youtube-admin/refresh' },
       podcast: { path: '/podcast-admin/sync' },
+      jintiankansha: { path: '/fetch/jintiankansha' },
     };
 
     // RSS: 查询所有已启用源，逐个采集
     if (sourceType === 'rss') {
       try {
-        const rssSources = await sql`SELECT id, name, config->>'feed_url' AS feed_url
+        const rssSources = await sql`SELECT id, name, COALESCE(config->>'feed_url', config->>'feedUrl', config->>'url') AS feed_url
           FROM sources
-          WHERE enabled = true AND LOWER(type) IN ('rss', 'podcast-channel')`;
+          WHERE enabled = true AND LOWER(type) IN ('rss', 'rss_news', 'rss-feed', 'podcast-channel')`;
         const results = [];
         for (const s of rssSources) {
           if (!s.feed_url) continue;

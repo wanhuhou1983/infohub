@@ -1,108 +1,41 @@
 // @ts-nocheck
 /**
  * 新闻联播采集路由
- * 
- * ⏰ 新闻联播文字稿每日21:00后更新
- * 
- * v2: 从每篇文章页面抓取全文，而非仅标题列表
+ *
+ * 两阶段采集：
+ *   Phase 1: 抓取当日列表页 → parseXWLBListHtml 提取每条新闻的 VIDE 链接
+ *   Phase 2: 逐篇 fetch VIDE 页面 → parseXWLBContentHtml 提取 #content_area 正文
+ *   Phase 3: 拼接所有正文 → 入库
+ *
+ * ⏰ 新闻联播每日 19:00 播出，文字稿约 21:00 后可获取
  */
 
 import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { saveArticleFile, hashString } from '../../file-storage.js';
-import { parseXWLBListHtml } from '../../services/parser.js';
+import { parseXWLBListHtml, parseXWLBContentHtml } from '../../services/parser.js';
 
-/**
- * 从文章页面提取正文（content_area div）
- */
-async function fetchArticleContent(url: string): Promise<string | null> {
+const XWLB_LIST_URL = 'https://tv.cctv.com/lm/xwlb/day'; // 列表页模板：/day/20260610.shtml
+const SOURCE_ID = 2893;
+
+/** 并发抓取单条新闻正文（限流） */
+async function fetchPerArticle(url: string): Promise<{ title: string; body: string } | null> {
   try {
     const resp = await fetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(15000),
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      signal: AbortSignal.timeout(10000),
     });
     if (!resp.ok) return null;
     const html = await resp.text();
+    const body = parseXWLBContentHtml(html);
+    if (!body || body.length < 10) return null;
 
-    // Extract content_area div
-    const contentMatch = html.match(/id="content_area"[^>]*>([\s\S]*?)<\/div>/);
-    if (!contentMatch) {
-      // Fallback: try to find text in paragraphs
-      const paragraphs = html.match(/<p[^>]*>([\s\S]*?)<\/p>/g);
-      if (paragraphs) {
-        return paragraphs
-          .map(p => p.replace(/<[^>]+>/g, '').trim())
-          .filter(t => t.length > 10)
-          .join('\n');
-      }
-      return null;
-    }
-
-    return contentMatch[1]
-      .replace(/<br\s*\/?>/gi, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&nbsp;/g, ' ')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    // 标题从页面提取（via cheerio in parseXWLBContentHtml 返回纯文本，标题需单独提取）
+    // parseXWLBContentHtml 只返回正文，标题已在列表页解析时获取
+    return { title: '', body };
   } catch {
     return null;
   }
-}
-
-/**
- * 获取新闻联播全文：遍历每天的文章链接，逐篇抓取正文
- */
-async function fetchXWLBFull(date: string): Promise<{ title: string; content: string; articleCount: number }> {
-  const pubDate = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
-  const title = `${date}-新闻联播`;
-
-  // Step 1: Get article list from day page
-  let listData: Array<{ title: string; link?: string }> = [];
-  try {
-    const resp = await fetch(`https://tv.cctv.com/lm/xwlb/day/${date}.shtml`, {
-      signal: AbortSignal.timeout(15000),
-    });
-    const listHtml = await resp.text();
-    listData = parseXWLBListHtml(listHtml, date);
-  } catch (e: any) {
-    console.error(`[xwlb] 列表获取失败: ${e.message}`);
-  }
-
-  if (listData.length === 0) {
-    return { title, content: '', articleCount: 0 };
-  }
-
-  // Step 2: Fetch each article's full text
-  const articles: Array<{ title: string; content: string }> = [];
-  for (const item of listData) {
-    if (!item.url) {
-      articles.push({ title: item.title, content: item.title });
-      continue;
-    }
-    const text = await fetchArticleContent(item.url);
-    if (text && text.length > 20) {
-      articles.push({ title: item.title, content: text });
-      console.log(`[xwlb]   ${item.title.slice(0, 30)}... (${text.length} chars)`);
-    } else {
-      articles.push({ title: item.title, content: item.title });
-      console.log(`[xwlb]   ${item.title.slice(0, 30)}... (short)`);
-    }
-  }
-
-  // Step 3: Assemble full content
-  const lines: string[] = [`# ${title}`, ''];
-  for (const art of articles) {
-    lines.push(`## ${art.title}`);
-    lines.push('');
-    lines.push(art.content);
-    lines.push('');
-  }
-
-  return { title, content: lines.join('\n'), articleCount: listData.length };
 }
 
 export function createXwlbRoutes(sql: Sql): Hono {
@@ -110,38 +43,92 @@ export function createXwlbRoutes(sql: Sql): Hono {
 
   router.post('/xwlb', async (c) => {
     try {
-      const body = await c.req.json().catch(() => ({} as any));
-      const date = body?.date || new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const pubDate = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
-      const sourceId = 1;
-      console.log(`[xwlb] 获取 ${date} 新闻联播全文...`);
+      const body = await c.req.json().catch(() => ({}) as any);
+      // 默认取昨天（新闻联播 19:00 播出）
+      const now = new Date();
+      const yesterday = new Date(now.getTime() - 86400000);
+      const dateStr =
+        body?.date ||
+        `${yesterday.getFullYear()}${String(yesterday.getMonth() + 1).padStart(2, '0')}${String(yesterday.getDate()).padStart(2, '0')}`;
+      const pubDate = `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}`;
 
-      const { title, content, articleCount } = await fetchXWLBFull(date);
-      if (!content) return c.json({ ok: false, error: '获取失败' }, 500);
+      console.log(`[xwlb] 获取 ${dateStr} 新闻联播...`);
 
-      const hash = hashString('xwlb:' + date);
-      const inserted = await sql`
-        INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author, extra)
-        VALUES (${sourceId}, ${title}, ${content}, ${content.slice(0, 150)}, 'https://tv.cctv.com/lm/xwlb/', ${pubDate}, '时政', ${['新闻联播', date.slice(0, 6)]}, ${hash}, NOW(), '央视', '{}')
-        ON CONFLICT (content_hash) DO UPDATE SET content = ${content}, summary = ${content.slice(0, 150)}
+      // ====== Phase 1: 抓取列表页，解析每条新闻链接 ======
+      const listUrl = `${XWLB_LIST_URL}/${dateStr}.shtml`;
+      console.log(`[xwlb]  列表页: ${listUrl}`);
+
+      const listResp = await fetch(listUrl, {
+        signal: AbortSignal.timeout(15000),
+        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+      });
+
+      if (!listResp.ok) {
+        return c.json({ ok: false, error: `列表页请求失败 HTTP ${listResp.status}`, date: dateStr }, 500);
+      }
+
+      const listHtml = await listResp.text();
+      const articles = parseXWLBListHtml(listHtml, dateStr);
+      console.log(`[xwlb]  解析到 ${articles.length} 条新闻`);
+
+      if (articles.length === 0) {
+        return c.json({ ok: true, inserted: 0, date: dateStr, note: '当日尚无节目或无可用链接' });
+      }
+
+      // ====== Phase 2: 逐篇抓全文（限并发 5） ======
+      const fullTexts: string[] = [];
+      for (let i = 0; i < articles.length; i++) {
+        const art = articles[i];
+        console.log(`[xwlb]    [${i + 1}/${articles.length}] ${art.title.slice(0, 40)}`);
+        const result = await fetchPerArticle(art.url);
+        if (result && result.body) {
+          fullTexts.push(`### ${art.title}\n\n${result.body}`);
+        } else {
+          // 降级：只放标题
+          fullTexts.push(`### ${art.title}\n\n（全文获取失败）`);
+        }
+        // 限速，避免被 ban
+        if (i < articles.length - 1) await new Promise(r => setTimeout(r, 500));
+      }
+
+      // ====== Phase 3: 拼接入库 ======
+      const title = `${dateStr}-新闻联播`;
+      const content = `# 《新闻联播》${pubDate}\n\n${fullTexts.join('\n\n---\n\n')}`;
+      const contentHash = hashString('xwlb:' + dateStr);
+
+      const rows = await sql`
+        INSERT INTO articles (
+          source_id, title, content, summary, url,
+          published_at, category, tags, content_hash,
+          fetched_at, author, extra
+        ) VALUES (
+          ${SOURCE_ID}, ${title}, ${content}, ${content.slice(0, 150)},
+          ${listUrl},
+          ${pubDate}, '时政', ${['新闻联播', dateStr.slice(0, 6)]},
+          ${contentHash}, NOW(), '央视', '{}'
+        )
+        ON CONFLICT (content_hash) DO UPDATE SET
+          content = EXCLUDED.content,
+          summary  = EXCLUDED.summary
         RETURNING id
       `;
 
-      if (inserted.length > 0) {
-        const artId = inserted[0].id;
-        const { processedContent } = await saveArticleFile(artId, content, {
-          id: artId, title, source_type: 'magazine', source_name: '新闻联播',
-          url: 'https://tv.cctv.com/lm/xwlb/', published_at: pubDate,
-          category: '时政', tags: ['新闻联播', date.slice(0, 6)],
+      if (rows.length > 0) {
+        const artId = rows[0].id;
+        await saveArticleFile(artId, content, {
+          id: artId, title, source_type: 'magazine',
+          source_name: '新闻联播', url: listUrl,
+          published_at: pubDate, category: '时政',
+          tags: ['新闻联播', dateStr.slice(0, 6)],
           author: '央视', is_read: false, is_starred: false,
         });
-        if (processedContent !== content) {
-          await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${artId}`;
-        }
-        return c.json({ ok: true, fetched: articleCount, inserted: 1, date, contentLen: content.length });
+        console.log(`[xwlb]  ✅ 入库 article_id=${artId}, ${articles.length} 条新闻, ${content.length} 字符`);
+        return c.json({ ok: true, inserted: 1, date: dateStr, segments: articles.length, chars: content.length });
       }
-      return c.json({ ok: true, fetched: articleCount, inserted: 0, date });
+
+      return c.json({ ok: true, inserted: 0, date: dateStr, note: '已存在' });
     } catch (e: any) {
+      console.error(`[xwlb] 错误: ${e.message}`);
       return c.json({ ok: false, error: e.message }, 500);
     }
   });
