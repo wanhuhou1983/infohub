@@ -86,7 +86,15 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
     }
     roots.forEach(calcTotal);
 
-    return c.json(roots);
+    // Explicit Content-Length to avoid chunked transfer encoding (Nginx chunked bug)
+    const body = JSON.stringify(roots);
+    return new Response(body, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': String(new TextEncoder().encode(body).length),
+      },
+    });
   });
 
   // 获取指定源的文章标题列表（树形视图用）
