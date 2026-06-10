@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 信息源路由
  *
  * 注意：这是唯一生效的 sources 路由定义。
@@ -31,13 +31,13 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
 
   // 获取所有信息源
   router.get('/', async (c) => {
-    const sources = await sql`SELECT * FROM sources ORDER BY id`;
+    const sources = await sql`SELECT * FROM sources WHERE type != 'system' ORDER BY id`;
     return c.json(sources);
   });
 
   // 获取信息源树（支持多层嵌套）
   router.get('/tree', async (c) => {
-    const sources = await sql`SELECT * FROM sources ORDER BY id`;
+    const sources = await sql`SELECT * FROM sources WHERE type != 'system' ORDER BY id`;
 
     // 一次性查所有 source 的文章数
     const articleCounts = await sql`
@@ -284,6 +284,53 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
       importedFiles: processed,
       skippedFiles: skipped,
     });
+  });
+
+  
+  // ========== 新增 RSS 源 ==========
+  router.post('/rss', async (c) => {
+    try {
+      const body = await c.req.json();
+      const { feed_url, name, parent_id, new_category } = body;
+      if (!feed_url) return c.json({ error: '请提供 feed_url' }, 400);
+
+      let targetParentId = parent_id;
+
+      // Handle new category creation
+      if (new_category && !targetParentId) {
+        const [newCat] = await sql`
+          INSERT INTO sources (name, type, enabled, parent_id)
+          VALUES (${new_category}, 'rss_news', true, NULL)
+          RETURNING id
+        `;
+        targetParentId = newCat.id;
+      }
+
+      if (!targetParentId) {
+        return c.json({ error: '请选择分类或输入新分类名称' }, 400);
+      }
+
+      // Try to fetch RSS to get title
+      let sourceName = name || feed_url;
+      try {
+        const RssParser = (await import('rss-parser')).default;
+        const parser = new RssParser({ timeout: 10000 });
+        const feed = await parser.parseURL(feed_url);
+        if (feed.title) sourceName = feed.title;
+      } catch (e) {
+        // Use provided name or URL as fallback
+      }
+
+      const [inserted] = await sql`
+        INSERT INTO sources (name, type, enabled, parent_id, config)
+        VALUES (${sourceName}, 'rss_news', true, ${targetParentId}, ${JSON.stringify({ feed_url })}::jsonb)
+        RETURNING id
+      `;
+
+      return c.json({ ok: true, id: inserted.id, name: sourceName });
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
   });
 
   return router;
