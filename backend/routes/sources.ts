@@ -303,7 +303,7 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
           VALUES (${new_category}, 'rss_news', true, NULL)
           RETURNING id
         `;
-        targetParentId = newCat.id;
+        if (newCat) targetParentId = newCat.id;
       }
 
       if (!targetParentId) {
@@ -327,6 +327,7 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
         RETURNING id
       `;
 
+      if (!inserted) return c.json({ error: 'Insert failed' }, 500);
       return c.json({ ok: true, id: inserted.id, name: sourceName });
     } catch (e: any) {
       return c.json({ error: e.message }, 500);
