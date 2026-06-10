@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -746,7 +746,7 @@ tailwind.config = {
   <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
   <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
     <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
-      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-14 bg-bg z-40">
+      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-0 bg-bg z-40">
         <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
         <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
         <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
@@ -776,7 +776,7 @@ tailwind.config = {
 <script>
 // 动态推断 API 地址：开发环境用同主机:3001，生产环境走反向代理
 const API = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
-  ? `http://${window.location.hostname}:3001/api`
+  ? '/api'
   : '/api';
 
 let currentTab = 'all';
@@ -1769,7 +1769,7 @@ async function selectArticle(id) {
           html = html.replace(regex, '<mark class="search-highlight">$1</mark>');
         }
         // 给图片添加点击放大
-        html = html.replace(/<img([^>]+)>/g, '<img$1 class="image-zoomable cursor-zoom-in" onclick="showImagePreview(this.src)" onerror="handleImageError(this)" loading="lazy">');
+        html = html.replace(/<img([^>]+)>/g, '<img$1 referrerpolicy="no-referrer" class="image-zoomable cursor-zoom-in" onclick="showImagePreview(this.src)" onerror="handleImageError(this)" loading="lazy">');
         // 章节 AI 解读按钮注入
         let sectionIdx = 0;
         html = html.replace(
@@ -2932,6 +2932,13 @@ function hideImagePreview() {
 function handleImageError(img) {
   if (img.dataset.fallbackTried) {
     img.style.display = 'none';
+    return;
+  }
+  // 外部图片（微信 mmbiz 等）加 referrerpolicy 后重试一次
+  if (img.src.includes('mmbiz.qpic.cn') || img.src.includes('mmbiz.qlogo.cn')) {
+    img.dataset.fallbackTried = '1';
+    img.referrerpolicy = 'no-referrer';
+    img.src = img.src; // 触发重新加载
     return;
   }
   // 尝试从 COS URL 回退到本地 /api/images/{source}/{filename}
