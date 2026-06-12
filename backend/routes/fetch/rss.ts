@@ -201,7 +201,7 @@ export function createRssRoutes(sql: Sql): Hono {
       if (!feedUrl) return c.json({ ok: false, error: '缺少 feedUrl' }, 400);
       if (!sourceName) return c.json({ ok: false, error: '缺少 sourceName' }, 400);
 
-      const [sourceRow] = await sql`SELECT id, config FROM sources WHERE enabled = true AND name = ${sourceName} AND LOWER(type) IN ('rss','podcast-channel') LIMIT 1`;
+      const [sourceRow] = await sql`SELECT id, config FROM sources WHERE enabled = true AND name = ${sourceName} AND LOWER(type) IN ('rss','rss_news','rss-feed','podcast-channel') LIMIT 1`;
       if (!sourceRow) return c.json({ ok: false, error: `未找到已启用的源: ${sourceName}` }, 404);
       const sourceId = sourceRow.id;
       const config = typeof sourceRow.config === 'string' ? JSON.parse(sourceRow.config) : (sourceRow.config || {});

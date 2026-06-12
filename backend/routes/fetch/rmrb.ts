@@ -24,10 +24,10 @@ export function createRmrbRoutes(sql: Sql): Hono {
       const body = await c.req.json().catch(() => ({} as any));
       const date = body?.date || new Date().toISOString().slice(0,10); const pubDate = (body?.date || new Date().toISOString().slice(0,10)).replace(/(\d{4})-(\d{2})-(\d{2})/g, '$1-$2-$3').replace(/(\d{4})(\d{2})(\d{2})/g, '$1-$2-$3');
       const full = body?.full !== false;
-      const sourceId = 1264;
+      const sourceId = 2892;
 
       const rmrbDir = process.env.RMRB_DIR || path.resolve(__dirname, '../../skills/rmrb-daily');
-      const python = process.platform === 'win32' ? 'python' : 'python3';
+      const python = process.env.PYTHON_PATH || '/Users/linhu/.workbuddy/binaries/python/envs/default/bin/python3';
       const outputMd = `/tmp/rmrb_${date.replace(/-/g,'')}.md`;
 
       const proc = spawn(python, [path.join(rmrbDir, 'rmrb_daily.py'), date, ...(full ? ['--full', '--output', outputMd] : ['--output', outputMd])], { timeout: 120000 });
@@ -49,7 +49,7 @@ export function createRmrbRoutes(sql: Sql): Hono {
       let inserted = 0;
       if (rows.length > 0) {
         inserted = 1;
-        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'magazine', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:pubDate, category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
+        await saveArticleFile(rows[0].id, bodyContent, { id:rows[0].id, title, source_type:'rmrb', source_name:'人民日报', url:'https://paper.people.com.cn/rmrb/', published_at:pubDate, category:'时政', tags:['人民日报',date.slice(0,7)], author:'人民日报', is_read:false, is_starred:false });
       }
       const cnt = bodyContent.split('###').filter(l => l.trim()).length;
       return c.json({ ok: true, fetched: cnt, inserted, date });

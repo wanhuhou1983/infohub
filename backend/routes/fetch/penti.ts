@@ -24,7 +24,7 @@ export function createPentiRoutes(sql: Sql): Hono {
     try {
       const body = await c.req.json().catch(() => ({} as any));
       const date = body?.date || new Date().toISOString().slice(0,10).replace(/-/g, ''); const pubDate = date.slice(0,4)+'-'+date.slice(4,6)+'-'+date.slice(6,8);
-      const sourceId = 12;
+      const sourceId = 2891;
 
       const listUrl = `https://www.dapenti.com/blog/blog.asp?subjectid=70&name=xilei`;
       const resp = await fetch(listUrl, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });

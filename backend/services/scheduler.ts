@@ -3,11 +3,49 @@ import { Hono } from 'hono';
 import type { Sql } from 'postgres';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execSync } from 'node:child_process';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { translateToChinese, isEnglish, createConcurrencyPool } from './translate.js';
 import { whisperWindowsTranscribe } from './transcribe.js';
 import { saveArticleFile } from '../file-storage.js';
 import { fail } from '../shared/response.js';
+import { fetchAllJtkSources } from './jintiankansha.js';
+
+const __dirname_scheduler = dirname(fileURLToPath(import.meta.url));
+
+// ============ 云端 PG 同步 ============
+let _syncBusy = false;
+
+export async function pushToCloud(): Promise<void> {
+  if (_syncBusy) {
+    console.log('[cloud-sync] 上一次同步尚未完成，跳过');
+    return;
+  }
+  _syncBusy = true;
+  try {
+    console.log('[cloud-sync] 开始 PG 直连同步...');
+    const syncScript = join(__dirname_scheduler, '..', '..', 'scripts', 'sync-pg-to-cloud.ts');
+    const proc = Bun.spawn(['bun', 'run', syncScript], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const out = await new Response(proc.stdout).text();
+    const errOut = await new Response(proc.stderr).text();
+    const exitCode = await proc.exited;
+    if (exitCode === 0) {
+      const lastLine = out.trim().split('\n').pop() || '';
+      console.log('[cloud-sync] ✓ ' + lastLine);
+    } else {
+      console.error('[cloud-sync] 失败 (exit=' + exitCode + '):');
+      if (errOut) console.error(errOut.trim());
+    }
+  } catch (e: any) {
+    console.error('[cloud-sync] 启动失败:', e.message);
+  } finally {
+    _syncBusy = false;
+  }
+}
 
 // ============ DeepSeek 重断句（播客转录/B站字幕后处理） ============
 async function deepseekReparagraph(text: string, context: string): Promise<string | null> {
@@ -94,6 +132,8 @@ let _lastRunAt: string | null = null;
 let _lastRunStatus: 'running' | 'success' | 'error' | null = null;
 let _lastRunError: string | null = null;
 let _isRunning = false;
+const _runHistory: RunSummary[] = [];
+const MAX_HISTORY = 50;
 
 // ============ Helper: call internal API ============
 async function fetchApi(path: string, body?: any): Promise<any> {
@@ -124,6 +164,15 @@ interface FetchResult {
   inserted: number;
   fetched?: number;
   error?: string;
+}
+
+interface RunSummary {
+  time: string;
+  total: number;
+  sources: number;
+  durationMs: number;
+  sourceBreakdown: { source: string; count: number }[];
+  error: string | null;
 }
 
 interface SourceTitles {
@@ -172,8 +221,14 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
       if (!r.inserted) r = await fetchApi('/fetch/penti', { date: yesterdayCompact });
       return { source: '喷嚏图卦', success: !!r.ok, inserted: r.inserted || 0, error: r.error };
     })()] : []),
-    ...(s.wechat?.enabled !== false ? [fetchApi('/wechat-admin/refresh')
-      .then(r => ({ source: '公众号', success: !!r.ok, inserted: r.inserted || 0, error: r.error }))] : []),
+    ...(s.wechat?.enabled !== false ? [(async () => {
+      try {
+        const r = await fetchAllJtkSources(sql);
+        return { source: '公众号(JTK)', success: true, inserted: r.inserted, fetched: r.total, error: r.errors > 0 ? `${r.errors} errors` : undefined };
+      } catch (e: any) {
+        return { source: '公众号(JTK)', success: false, inserted: 0, error: e.message };
+      }
+    })()] : []),
     ...(s.bilibili?.enabled !== false ? [fetchApi('/bilibili-admin/refresh')
       .then(r => ({ source: 'B站', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error }))] : []),
     ...(s.twitter?.enabled !== false ? [fetchApi('/twitter-admin/refresh')
@@ -190,7 +245,7 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
     const rssSources = await sql`
       SELECT id, name, config->>'feed_url' AS feed_url
       FROM sources
-      WHERE enabled = true AND LOWER(type) IN ('rss', 'podcast-channel')
+      WHERE enabled = true AND LOWER(type) IN ('rss', 'rss-feed', 'rss_news', 'podcast-channel')
     `;
     const rssFetches = rssSources
       .filter(s => s.feed_url)
@@ -456,9 +511,10 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
 
           // Step 1: Try OpenCLI subtitle (CC subtitles from B站, ~3s, zero compute)
           let subtitle = '';
+          const opencliCmd = process.platform === 'win32' ? 'cmd /c opencli' : 'opencli';
           try {
             const subOutput = execSync(
-              `cmd /c opencli bilibili subtitle ${bvid} -f json`,
+              `${opencliCmd} bilibili subtitle ${bvid} -f json`,
               { encoding: 'utf-8', timeout: 30000, maxBuffer: 10 * 1024 * 1024 }
             );
             const subJson = JSON.parse(subOutput) || [];
@@ -487,7 +543,7 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
               let audioUrl = '';
               try {
                 const vidOutput = execSync(
-                  `cmd /c opencli bilibili video ${bvid} -f json`,
+                  `${opencliCmd} bilibili video ${bvid} -f json`,
                   { encoding: 'utf-8', timeout: 30000, maxBuffer: 5 * 1024 * 1024 }
                 );
                 const vidFields = JSON.parse(vidOutput) || [];
@@ -577,7 +633,7 @@ async function phase2PostProcess(sql: Sql): Promise<PostProcessStats> {
       const subtitleResults = await Promise.allSettled(
         subtitleArticles.map((article: any) => subtitleLimit(async () => {
           const isBilibili = article.type.startsWith('bilibili');
-          const apiPath = isBilibili ? '/bilibili-subtitle/subtitle' : '/youtube-subtitle/subtitle';
+          const apiPath = isBilibili ? '/bilibili/subtitle' : '/youtube/subtitle';
           const resp = await fetchApi(apiPath, { article_id: article.id });
 
           if (!resp.ok || !resp.subtitle) return;
@@ -945,11 +1001,7 @@ async function isSourceEnabled(sql: Sql, key: string): Promise<boolean> {
 
 // ============ Main Entry Point ============
 export async function runDailyFetch(sql: Sql): Promise<string> {
-  // Auto-reset stuck flag after 10 minutes
-  const timeout = setTimeout(() => {
-    console.error('[scheduler] 10 minute timeout reached, force-resetting');
-    _isRunning = false;
-  }, 600_000);
+  // 原子检查：如果已有任务在跑则直接拒绝
   if (_isRunning) {
     throw new Error('Another fetch is already running');
   }
@@ -957,6 +1009,12 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
   _lastRunAt = new Date().toISOString();
   _lastRunStatus = 'running';
   _lastRunError = null;
+
+  // 安全超时：10 分钟后强制解锁（防止任务挂死导致永久锁死）
+  const timeout = setTimeout(() => {
+    console.error('[scheduler] 10 minute timeout reached, force-resetting');
+    _isRunning = false;
+  }, 600_000);
 
   try {
     console.log('[scheduler] === Daily fetch started ===');
@@ -1018,11 +1076,51 @@ export async function runDailyFetch(sql: Sql): Promise<string> {
 
     _lastRunStatus = 'success';
     console.log('[scheduler] === Daily fetch completed ===');
+
+    // ---- 写入采集摘要 ----
+    try {
+      const durationMs = Date.now() - new Date(_lastRunAt!).getTime();
+      const totalFetched = fetchResults.reduce((sum, r) => sum + (r.inserted || 0), 0);
+      const sourceCount = fetchResults.filter(r => r.inserted > 0).length;
+      const breakdown = fetchResults
+        .filter(r => r.inserted > 0)
+        .map(r => ({ source: r.source, count: r.inserted }));
+      // 汇总日志
+      const summary = `[${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}] 采集完成: ${totalFetched}篇(${sourceCount}源), 耗时${(durationMs / 1000).toFixed(1)}s` + (breakdown.length > 0 ? ' | ' + breakdown.map(b => `${b.source}×${b.count}`).join(' ') : '');
+      console.log('[scheduler]', summary);
+      // 写入 fetch_logs
+      await sql`INSERT INTO fetch_logs (action, status, articles_count, detail, started_at, duration_ms)
+        VALUES ('hourly_summary', 'success', ${totalFetched}, ${summary.slice(0, 500)}, ${_lastRunAt!}, ${durationMs})`;
+      // 内存历史
+      _runHistory.unshift({
+        time: _lastRunAt!,
+        total: totalFetched,
+        sources: sourceCount,
+        durationMs,
+        sourceBreakdown: breakdown,
+        error: null,
+      });
+      if (_runHistory.length > MAX_HISTORY) _runHistory.length = MAX_HISTORY;
+    } catch (e: any) {
+      console.error('[scheduler] Failed to write summary:', e.message);
+    }
+
+    // 采集完成后自动同步到云端 PG
+    pushToCloud().catch(e => console.error('[cloud-sync] 后台同步失败:', e.message));
+
     return markdown;
   } catch (e: any) {
     _lastRunStatus = 'error';
     _lastRunError = e.message;
     console.error('[scheduler] Daily fetch error:', e.message);
+    // 错误摘要
+    try {
+      const durationMs = _lastRunAt ? Date.now() - new Date(_lastRunAt).getTime() : 0;
+      await sql`INSERT INTO fetch_logs (action, status, articles_count, detail, started_at, duration_ms)
+        VALUES ('hourly_summary', 'error', 0, ${('ERROR: ' + e.message).slice(0, 500)}, ${_lastRunAt!}, ${durationMs})`;
+      _runHistory.unshift({ time: _lastRunAt!, total: 0, sources: 0, durationMs, sourceBreakdown: [], error: e.message });
+      if (_runHistory.length > MAX_HISTORY) _runHistory.length = MAX_HISTORY;
+    } catch { /* ignore */ }
     throw e;
   } finally {
     clearTimeout(timeout);
@@ -1093,7 +1191,29 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     });
   });
 
-  // POST /reset — force reset stuck scheduler (admin only)
+  // GET /history — 采集历史摘要
+  router.get('/history', async (c) => {
+    const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') || '24')));
+    // 优先从 DB 查
+    try {
+      const rows = await sql`
+        SELECT action, status, articles_count AS total, detail, started_at AS time, duration_ms
+        FROM fetch_logs WHERE action = 'hourly_summary'
+        ORDER BY started_at DESC LIMIT ${limit}
+      `;
+      if (rows.length > 0) {
+        return c.json(rows.map(r => ({
+          time: r.time,
+          total: r.total,
+          status: r.status,
+          durationMs: r.duration_ms,
+          detail: r.detail,
+        })));
+      }
+    } catch { /* fallback to memory */ }
+    // 内存兜底
+    return c.json(_runHistory.slice(0, limit));
+  });
   router.post('/reset', async (c) => {
     const adminToken = process.env.ADMIN_TOKEN || '';
     if (adminToken) {
@@ -1129,27 +1249,55 @@ export function createSchedulerRoutes(sql: Sql): Hono {
       magazine: { path: '/fetch/xwlb', body: { date: dateCompact }, fallbackDay: true },
       rmrb: { path: '/fetch/rmrb', body: { date: todayDash }, fallbackDay: true },
       penti: { path: '/fetch/penti', body: { date: dateCompact }, fallbackDay: true },
-      wechat: { path: '/wechat-admin/refresh' },
+      wechat: { path: '/fetch/jintiankansha' },
       twitter: { path: '/twitter-admin/refresh' },
       youtube: { path: '/youtube-admin/refresh' },
       podcast: { path: '/podcast-admin/sync' },
     };
 
-    // RSS: 查询所有已启用源，逐个采集
+    // RSS: 查询所有已启用源，非阻塞并发采集
     if (sourceType === 'rss') {
       try {
-        const rssSources = await sql`SELECT id, name, config->>'feed_url' AS feed_url
+        const rssSources = await sql`
+          SELECT id, name, COALESCE(config->>'feed_url', config->>'feedUrl', config->>'url') AS feed_url
           FROM sources
-          WHERE enabled = true AND LOWER(type) IN ('rss', 'podcast-channel')`;
-        const results = [];
-        for (const s of rssSources) {
-          if (!s.feed_url) continue;
-          const r = await fetchApi('/fetch/rss', { feedUrl: s.feed_url, sourceName: s.name }).catch(e => ({ ok: false, error: e.message }));
-          results.push({ source: s.name, ok: r.ok, inserted: r.inserted || 0, error: r.error });
+          WHERE enabled = true AND LOWER(type) IN ('rss', 'rss_news', 'rss-feed', 'podcast-channel')
+        `;
+        const sources = rssSources.filter((s: any) => s.feed_url);
+        if (sources.length === 0) {
+          return c.json({ ok: true, results: [], totalInserted: 0 });
         }
-        return c.json({ ok: true, results, totalInserted: results.reduce((sum: number, r: any) => sum + r.inserted, 0) });
+
+        // 立即返回 202 Accepted
+        c.status(202);
+        const response = c.json({ ok: true, status: 'started', totalSources: sources.length });
+
+        // 后台并发抓取（setImmediate 确保响应先发出）
+        setImmediate(async () => {
+          try {
+            console.log(`[trigger-rss] 后台开始抓取 ${sources.length} 个源...`);
+            const settled = await Promise.allSettled(
+              sources.map((s: any) =>
+                fetchApi('/fetch/rss', { feedUrl: s.feed_url, sourceName: s.name })
+                  .then((r: any) => ({ source: s.name, ok: r.ok, inserted: r.inserted || 0, error: r.error }))
+                  .catch((e: any) => ({ source: s.name, ok: false, inserted: 0, error: e.message }))
+              )
+            );
+            const results = settled.map((r: any) => r.status === 'fulfilled' ? r.value : { source: '?', ok: false, inserted: 0, error: 'promise rejected' });
+            const totalInserted = results.reduce((sum: number, r: any) => sum + r.inserted, 0);
+            const summary = { ok: true, results, totalInserted, completedAt: new Date().toISOString() };
+            // 写入结果文件，供自动化读取
+            try { writeFileSync('/tmp/infohub-rss-last-result.json', JSON.stringify(summary, null, 2), 'utf-8'); } catch {}
+            console.log(`[trigger-rss] ✅ 完成: ${results.length} 个源，共入库 ${totalInserted} 条`);
+            pushToCloud().catch(e => console.error('[cloud-sync] RSS 采集后同步失败:', e.message));
+          } catch (e: any) {
+            console.error('[trigger-rss] 后台抓取异常:', e.message);
+          }
+        });
+
+        return response;
       } catch (e: any) {
-        return c.json({ ok: false, error: 'RSS 采集失败: ' + e.message }, 500);
+        return c.json({ ok: false, error: 'RSS 查询源失败: ' + e.message }, 500);
       }
     }
 
@@ -1171,6 +1319,8 @@ export function createSchedulerRoutes(sql: Sql): Hono {
           result = fallbackResult;
         }
       }
+      // 采集后异步同步到云端
+      pushToCloud().catch(e => console.error('[cloud-sync] ' + sourceType + ' 采集后同步失败:', e.message));
       return c.json(result);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message }, 500);

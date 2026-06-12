@@ -10,6 +10,21 @@ import { createHash } from 'node:crypto';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
+// ============ 限流日志 ============
+const _throttleState: Record<string, { count: number; lastLog: number }> = {};
+
+function throttledWarn(key: string, msg: string, intervalMs: number = 60000) {
+  const now = Date.now();
+  const s = _throttleState[key] || { count: 0, lastLog: 0 };
+  s.count++;
+  if (now - s.lastLog > intervalMs) {
+    console.warn(msg.replace('{count}', String(s.count)));
+    s.count = 0;
+    s.lastLog = now;
+  }
+  _throttleState[key] = s;
+}
+
 // ============ Ollama 本地翻译（DeepSeek R1） ============
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://172.18.0.1:11435';
 const OLLAMA_TRANSLATE_MODEL = process.env.OLLAMA_TRANSLATE_MODEL || 'gemma4:26b';
@@ -32,7 +47,7 @@ async function ollamaTranslate(text: string, from: string = 'en', to: string = '
     });
 
     if (!resp.ok) {
-      console.error(`[翻译] Ollama 翻译错误: HTTP ${resp.status}`);
+      throttledWarn('ollama-http', `[翻译] Ollama 不可用 (HTTP ${resp.status})，60s内失败{count}次`);
       return null;
     }
 
@@ -43,7 +58,7 @@ async function ollamaTranslate(text: string, from: string = 'en', to: string = '
     if (!result) return null;
     return result;
   } catch (e: any) {
-    console.error(`[翻译] Ollama 翻译请求失败: ${e.message}`);
+    throttledWarn('ollama-conn', `[翻译] Ollama 连接失败，60s内失败{count}次`);
     return null;
   }
 }
@@ -70,7 +85,7 @@ async function llamaCppTranslate(text: string, from: string = 'en', to: string =
     });
 
     if (!resp.ok) {
-      console.error(`[翻译] llama.cpp 翻译错误: HTTP ${resp.status}`);
+      throttledWarn('llamacpp-http', `[翻译] llama.cpp 不可用 (HTTP ${resp.status})，60s内失败{count}次`);
       return null;
     }
 
@@ -79,7 +94,7 @@ async function llamaCppTranslate(text: string, from: string = 'en', to: string =
     if (!result) return null;
     return result.replace(/<think[\s\S]*?<\/think>/g, '').trim();
   } catch (e: any) {
-    console.error(`[翻译] llama.cpp 翻译请求失败: ${e.message}`);
+    throttledWarn('llamacpp-conn', `[翻译] llama.cpp 连接失败，60s内失败{count}次`);
     return null;
   }
 }
@@ -317,7 +332,7 @@ export async function translateText(text: string, from: string = 'en', to: strin
     if (result) return result;
   }
 
-  console.error('[翻译] 没有任何翻译API可用，跳过翻译');
+  throttledWarn('no-api', '[翻译] 没有任何翻译API可用，跳过翻译，60s内跳过{count}次');
   return null;
 }
 
@@ -349,7 +364,7 @@ export async function translateToChinese(text: string): Promise<string> {
   const hasGoogle = !!process.env.GOOGLE_TRANSLATE_KEY;
 
   if (!hasDeepSeek && !hasOllama && !hasBaidu && !hasAzure && !hasGoogle) {
-    console.log('[翻译] 没有任何翻译API配置，跳过翻译');
+    throttledWarn('no-api', '[翻译] 没有任何翻译API配置，跳过翻译，60s内跳过{count}次');
     return text;
   }
 

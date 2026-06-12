@@ -8,6 +8,7 @@ import { createRmrbRoutes } from './rmrb.js';
 import { createAiNewsRoutes } from './ai-news.js';
 import { createPentiRoutes } from './penti.js';
 import { createTranscribeRoutes } from '../../services/transcribe.js';
+import { createJintiankanshaRoutes } from './jintiankansha.js';
 
 export function createFetchRoutes(sql: Sql): Hono {
   const router = new Hono();
@@ -18,5 +19,6 @@ export function createFetchRoutes(sql: Sql): Hono {
   router.route('/', createAiNewsRoutes(sql));
   router.route('/', createPentiRoutes(sql));
   router.route('/', createTranscribeRoutes(sql));
+  router.route('/', createJintiankanshaRoutes(sql));
   return router;
 }

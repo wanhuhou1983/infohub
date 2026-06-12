@@ -12,6 +12,29 @@
  * - 所有路由参数化查询，消除 sql.unsafe()
  */
 
+// ⚠️ 必须在任何模块 import 之前加载 .env.json，
+// 否则 translate.ts 等模块中的常量（DEEPSEEK_API_KEY、LLAMA_BASE_URL 等）
+// 会在 import 时就初始化，导致 .env.json 里的配置不生效。
+import { readFileSync as _readFileSync, existsSync as _existsSync } from 'fs';
+import { join as _join, dirname as _dirname } from 'path';
+import { fileURLToPath as _fileURLToPath } from 'url';
+(() => {
+  try {
+    const _dir = _dirname(_fileURLToPath(import.meta.url));
+    const _p = _join(_dir, '..', '.env.json');
+    if (_existsSync(_p)) {
+      const envConfig = JSON.parse(_readFileSync(_p, 'utf-8'));
+      for (const [key, value] of Object.entries(envConfig)) {
+        if (typeof value === 'string' && !process.env[key]) {
+          process.env[key] = value;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[启动] 无法加载 .env.json:', (e as Error).message);
+  }
+})();
+
 import 'dotenv/config';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
@@ -40,30 +63,13 @@ import { createAiRoutes } from './routes/ai.js';
 import { createPodcastTranscribeRoutes } from './routes/podcast-transcribe.js';
 import { createTwitterAdminRoutes } from './routes/twitter-admin.js';
 import { createCaixinRoutes } from './routes/caixin.js';
-import { createSchedulerRoutes, runDailyFetch } from './services/scheduler.js';
+import { createSchedulerRoutes, runDailyFetch, pushToCloud } from './services/scheduler.js';
 import { invalidateEnvCache, getImagesDir, getObDir } from './file-storage.js';
 import { fail } from './shared/response.js';
 
-// 必须在任何模块初始化之前加载 .env.json
-const __dirname_env = dirname(fileURLToPath(import.meta.url));
-(() => {
-  try {
-    const envJsonPath = join(__dirname_env, '..', '.env.json');
-    if (existsSync(envJsonPath)) {
-      const envConfig = JSON.parse(readFileSync(envJsonPath, 'utf-8'));
-      for (const [key, value] of Object.entries(envConfig)) {
-        if (typeof value === 'string' && !process.env[key]) {
-          process.env[key] = value;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[启动] 无法加载 .env.json:', (e as Error).message);
-  }
-})();
-
 
 const IS_CLOUD = process.env.CLOUD_MODE === 'true';
+const __dirname_env = dirname(fileURLToPath(import.meta.url));
 const sql = postgres(process.env.DATABASE_URL!);
 
 const app = new Hono();
@@ -85,7 +91,7 @@ app.use('/api/*', cors({
     return ALLOWED_ORIGINS.includes(origin) ? origin : null;
   },
   allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
-  allowHeaders: ['Content-Type'],
+  allowHeaders: ['Content-Type', 'Authorization'],
 }));
 
 // ============ 云端模式：禁用本地专属路由 ============
@@ -421,91 +427,49 @@ if (!IS_CLOUD) {
   }
 }
 
-// ============ 内建定时调度器 + 云端同步 ============
+// ============ 内建定时调度器（每小时采集 + 云端同步） ============
 if (!IS_CLOUD) {
-  const DAILY_MS = 24 * 60 * 60 * 1000;
+  const HOURLY_MS = 60 * 60 * 1000;
 
-  async function pushToCloud() {
-    console.log('[cloud-sync] 开始推送数据到云...');
-    try {
-      const SYNC_TOKEN = process.env.SYNC_TOKEN || '';
-      if (!SYNC_TOKEN) {
-        console.log('[cloud-sync] SYNC_TOKEN 未配置，跳过');
-        return;
-      }
-      const [srcCount] = await sql`SELECT COUNT(*)::int AS c FROM sources`;
-      // Batch push all 24h articles (50 per batch)
-      const total24h = await sql`SELECT count(*)::int as c FROM articles WHERE fetched_at > NOW() - interval '24 hours'`;
-      const total = total24h[0]?.c || 0;
-      console.log('[cloud-sync] 24h articles to sync: ' + total);
-      let totalUpserted = 0;
-      const batchSize = 50;
-      for (let offset = 0; offset < total; offset += batchSize) {
-        const batch = await sql`
-          SELECT a.source_id, a.title, a.content, a.summary, a.url, a.author,
-                 a.published_at, a.fetched_at, a.category, a.tags, a.content_hash
-          FROM articles a
-          WHERE a.fetched_at > NOW() - interval '24 hours'
-          ORDER BY a.id DESC
-          OFFSET ${offset} LIMIT ${batchSize}
-        `;
-        if (batch.length === 0) break;
-        const cloudUrl = 'https://info.wuflux.cn/api/cloud-sync/push';
-        try {
-          const resp = await fetch(cloudUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SYNC_TOKEN },
-            body: JSON.stringify({ articles: batch }),
-            signal: AbortSignal.timeout(30000),
-          });
-          if (resp.ok) {
-            const result = (await resp.json()) as { articles_upserted?: number };
-            totalUpserted += (result.articles_upserted || 0);
-          } else {
-            console.error('[cloud-sync] Batch offset=' + offset + ' API ' + resp.status);
-          }
-        } catch (e: any) {
-          console.error('[cloud-sync] Batch offset=' + offset + ' error: ' + e.message);
-        }
-      }
-      console.log('[cloud-sync] OK: ' + totalUpserted + '/' + total + ' articles synced');
-    } catch (e: any) {
-      console.error('[cloud-sync] FAIL:', e.message);
+  // 计算下一个整点偏移时刻（默认每小时 HH:10）
+  function getNextRunTarget(offsetMin: number): Date {
+    const now = new Date();
+    const target = new Date(now);
+    target.setMinutes(offsetMin, 0, 0);
+    if (target.getTime() <= now.getTime()) {
+      target.setHours(target.getHours() + 1);
     }
+    return target;
   }
 
   async function scheduleNextRun() {
     try {
-      const [row] = await sql`SELECT config FROM sources WHERE type='system' AND name='collection_settings' LIMIT 1`;
-      const cfg = (row && row.config) || {};
-      const dailyTime = cfg.dailyTime || '00:10';
-      const parts = dailyTime.split(':');
-      const hour = Math.min(23, Math.max(0, parseInt(parts[0]) || 0));
-      const min = Math.min(59, Math.max(0, parseInt(parts[1]) || 10));
-      const now = new Date();
-      const target = new Date(now);
-      target.setHours(hour, min, 0, 0);
-      let delayMs = target.getTime() - now.getTime();
-      if (delayMs <= 0) delayMs += DAILY_MS;
-      console.log('[scheduler] next run: ' + target.toISOString() + ' (' + Math.round(delayMs / 60000) + 'min)');
+      // 下一小时 XX:10
+      const target = getNextRunTarget(10);
+      const delayMs = target.getTime() - Date.now();
+      const delayMin = Math.round(delayMs / 60000);
+
+      console.log('[scheduler] next run: ' + target.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) + ' (' + delayMin + 'min)');
+
       setTimeout(async () => {
-        console.log('[scheduler] === triggering ===');
+        console.log('[scheduler] === hourly fetch triggering ===');
         try {
           const report = await runDailyFetch(sql);
-          console.log('[scheduler] done');
+          console.log('[scheduler] done (' + (report?.length || 0) + ' chars report)');
         } catch (e: any) {
           console.error('[scheduler] error:', e.message);
         }
-        await pushToCloud();
+        // pushToCloud 已在 runDailyFetch 内部自动触发
         await scheduleNextRun();
       }, delayMs);
     } catch (e: any) {
       console.error('[scheduler] init error:', e.message);
-      setTimeout(scheduleNextRun, 3600000);
+      setTimeout(scheduleNextRun, 60000); // 错误时 1 分钟后重试
     }
   }
 
   scheduleNextRun();
+  // 启动后 30s 做一次初始云端同步
   setTimeout(function() { pushToCloud(); }, 30000);
 }
 

@@ -56,7 +56,19 @@ export function stripCommentSection(content: string): string {
 }
 
 // ============ MinerU 全文抓取 ============
+let _mineruErrCount = 0;
+let _mineruErrLastLog = 0;
+let _mineruScriptExists: boolean | null = null;
+
 export async function crawlArticleContent(articleUrl: string): Promise<string | null> {
+  // 首次调用时检查脚本是否存在，不存在则后续全部跳过
+  if (_mineruScriptExists === null) {
+    _mineruScriptExists = existsSync(MINERU_SCRIPT);
+    if (!_mineruScriptExists) {
+      console.warn('[MinerU] 脚本不存在, 将跳过所有 MinerU 抓取: ' + MINERU_SCRIPT);
+    }
+  }
+  if (!_mineruScriptExists) return null;
   return new Promise((resolve) => {
     const args = [MINERU_SCRIPT, articleUrl, "--model", "MinerU-HTML", "--print"];
     let proc: any;
@@ -92,7 +104,15 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
     proc.on("close", (code: number) => {
       clearTimeout(timeout);
       if (code !== 0 || !stdout.trim()) {
-        console.error(`MinerU error: ${stderr}`);
+        // 限流日志：每 60 秒最多打印一次聚合统计
+        const now = Date.now();
+        _mineruErrCount++;
+        if (now - _mineruErrLastLog > 60000) {
+          const errDetail = stderr.trim() ? stderr.trim().split('\n')[0].slice(0, 200) : '(no stderr)';
+          console.warn(`[MinerU] 最近 60s 失败 ${_mineruErrCount} 次，最新: ${errDetail}`);
+          _mineruErrCount = 0;
+          _mineruErrLastLog = now;
+        }
         resolve(null);
         return;
       }

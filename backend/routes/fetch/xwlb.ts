@@ -113,7 +113,7 @@ export function createXwlbRoutes(sql: Sql): Hono {
       const body = await c.req.json().catch(() => ({} as any));
       const date = body?.date || new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const pubDate = `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`;
-      const sourceId = 1;
+      const sourceId = 2893;
       console.log(`[xwlb] 获取 ${date} 新闻联播全文...`);
 
       const { title, content, articleCount } = await fetchXWLBFull(date);

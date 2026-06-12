@@ -1,34 +1,28 @@
-﻿// @ts-nocheck
+// @ts-nocheck
 /**
  * jintiankansha.me Unified Fetcher
- * 
- * Single API client for wechat/bilibili/xueqiu/weibo discovery.
- * Paginates my_columns to get all subscribed sources.
+ *
+ * API client for WeChat public account discovery via 今天看啥 API.
+ * Replaces the old WEFLOW-based approach.
  */
 
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-import { spawn } from 'child_process';
-import type { Sql } from 'postgres';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+import type { Sql } from 'postgres';
+import { crawlWechatArticle } from './crawler.js';
+import { saveArticleFile, hashString } from '../file-storage.js';
 
 // ============ Config ============
 const JTK_BASE = 'http://www.jintiankansha.me/api3';
-const JTK_USER = process.env.JTK_USER || '85657238@qq.com';
-const JTK_TOKEN = process.env.JTK_TOKEN || 'PxbH4Pz9Qn';
-const JTK_ARTICLES_PER_COLUMN = 5;
+const JTK_USER = process.env.JTK_USER || '';
+const JTK_TOKEN = process.env.JTK_TOKEN || '';
+const JTK_ARTICLES_PER_COLUMN = 8; // 每次每个专栏最多抓 8 篇
 const JTK_PAGE_SIZE = 20;
 
-// Python crawler script path
-const SCRIPT_DIR = path.resolve(__dirname, '..', '..', 'scripts');
-const WX_CRAWLER = process.platform === 'win32'
-  ? path.join(SCRIPT_DIR, 'jtk_crawl_wx.py')
-  : path.join(SCRIPT_DIR, 'jtk_crawl_wx.py');
+function checkJtkConfig() {
+  if (!JTK_USER || !JTK_TOKEN) {
+    throw new Error('JTK_USER or JTK_TOKEN not configured — set in .env');
+  }
+}
 
 // ============ Types ============
 interface JtkColumn {
@@ -38,13 +32,16 @@ interface JtkColumn {
   image?: string;
   desc?: string;
 }
+
 interface JtkArticle {
   name: string; title?: string; author: string;
   original_url: string; publish_time: string;
   image?: string; description?: string;
 }
-interface JtkFetchResult {
+
+export interface JtkFetchResult {
   total: number; inserted: number; skipped: number; errors: number;
+  sourceBreakdown?: { source: string; count: number }[];
 }
 
 // Source type -> PG parent category mapping
@@ -53,22 +50,29 @@ const SOURCE_MAP: Record<string, { type: string; parentId: number }> = {
   'B站投稿视频':  { type: 'bilibili', parentId: 4 },
   '微博':         { type: 'weibo',    parentId: 9 },
   '雪球动态':     { type: 'xueqiu',   parentId: 8 },
-  '小宇宙':    { type: 'podcast-channel', parentId: 5 },
+  '小宇宙':       { type: 'podcast-channel', parentId: 5 },
 };
 
 // ============ API Client ============
 async function jtkApi(pathQuery: string): Promise<any> {
+  checkJtkConfig();
   const sep = pathQuery.includes('?') ? '&' : '?';
-  const url = `${JTK_BASE}${pathQuery}${sep}token=${JTK_TOKEN}&user=${JTK_USER}`;
+  const url = `${JTK_BASE}${pathQuery}${sep}token=${encodeURIComponent(JTK_TOKEN)}&user=${encodeURIComponent(JTK_USER)}`;
   const resp = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     signal: AbortSignal.timeout(15000),
   });
   if (!resp.ok) throw new Error(`JTK ${resp.status}: ${pathQuery}`);
   const json = await resp.json();
+  if (json.status !== 'success') {
+    throw new Error(`JTK API error: ${json.data?.message || 'unknown'}`);
+  }
   return json.data;
 }
 
+/**
+ * 获取所有订阅专栏列表（分页）
+ */
 export async function fetchAllColumns(): Promise<JtkColumn[]> {
   const all: JtkColumn[] = [];
   let page = 1;
@@ -82,40 +86,9 @@ export async function fetchAllColumns(): Promise<JtkColumn[]> {
   return all;
 }
 
-
-// ============ Xyz Audio Extractor ============
-async function crawlXiaoyuzhouAudio(episodeUrl: string): Promise<string | null> {
-  return new Promise((resolve) => {
-    const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
-    const scriptPath = join(dirname(fileURLToPath(import.meta.url)), 'scrape_xiaoyuzhou_audio.py');
-    const proc = spawn(pythonExe, [scriptPath, episodeUrl], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 20000,
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-    proc.on('close', (code: number | null) => {
-      try {
-        const result = JSON.parse(stdout.trim());
-        resolve(result.audio_url || null);
-      } catch {
-        if (stderr) console.error(`[JTK] Audio py: ${stderr.slice(0,200)}`);
-        resolve(null);
-      }
-    });
-    proc.on('error', (err: Error) => {
-      console.error(`[JTK] Audio spawn: ${err.message}`);
-      resolve(null);
-    });
-  });
-}
-
-
-
-
-
+/**
+ * 获取某个专栏的最近文章
+ */
 async function fetchColumnArticles(slug: string): Promise<JtkArticle[]> {
   try {
     const articles: JtkArticle[] = await jtkApi(`/query/get_topics_by_one_column?slug=${slug}&limit=${JTK_ARTICLES_PER_COLUMN}`);
@@ -126,38 +99,9 @@ async function fetchColumnArticles(slug: string): Promise<JtkArticle[]> {
   }
 }
 
-// ============ WeChat crawler via Python subprocess ============
-async function crawlWechatContent(wxUrl: string): Promise<{ content: string; title: string; author: string } | null> {
-  return new Promise((resolve) => {
-    const pythonExe = process.platform === 'win32' ? 'python' : 'python3';
-    const proc = spawn(pythonExe, [WX_CRAWLER, wxUrl], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-    proc.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-    proc.on('close', (code: number | null) => {
-      try {
-        const result = JSON.parse(stdout.trim());
-        if (result.content && result.content.length > 0) resolve(result);
-        else resolve(null);
-      } catch {
-        if (stderr) console.error(`[JTK] Python err: ${stderr.slice(0,200)}`);
-        resolve(null);
-      }
-    });
-    proc.on('error', (err: Error) => {
-      console.error(`[JTK] Python spawn: ${err.message}`);
-      resolve(null);
-    });
-  });
-}
-
 // ============ Process single column ============
 async function fetchColumn(
-  sql: Sql, col: JtkColumn, limit: number
+  sql: Sql, col: JtkColumn,
 ): Promise<{ total: number; inserted: number; skipped: number }> {
   const mapping = SOURCE_MAP[col.source];
   if (!mapping) {
@@ -165,7 +109,7 @@ async function fetchColumn(
     return { total: 0, inserted: 0, skipped: 0 };
   }
 
-  // Ensure child source exists
+  // Ensure child source exists in DB
   let sourceId: number;
   const existing = await sql`SELECT id FROM sources WHERE type = ${mapping.type} AND name = ${col.name} AND parent_id = ${mapping.parentId}`;
   if (existing.length > 0) {
@@ -188,7 +132,9 @@ async function fetchColumn(
     const url = a.original_url || '';
     if (!url) { skipped++; continue; }
 
-    const dup = await sql`SELECT id FROM articles WHERE url = ${url}`;
+    // 用 content_hash 去重
+    const contentHash = createHash('md5').update(url).digest('hex');
+    const dup = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash}`;
     if (dup.length > 0) { skipped++; continue; }
 
     const title = a.name || a.title || '';
@@ -201,37 +147,45 @@ async function fetchColumn(
     }
 
     let content = '';
-
-    // WeChat: crawl full content
+    // WeChat: 用 crawlWechatArticle 抓正文（已有四层降级含 Playwright）
     if (mapping.type === 'wechat' && url.includes('mp.weixin.qq.com')) {
       try {
-        const result = await crawlWechatContent(url);
+        const result = await crawlWechatArticle(url);
         if (result) content = result.content;
       } catch (e: any) {
         console.error(`[JTK] Crawl error ${url}: ${e.message}`);
       }
     }
-
-    const contentHash = createHash('md5').update(content || url).digest('hex');
+    // 其他类型：用标题+URL兜底
+    if (!content) {
+      content = `${title}\n\n来源：${col.name}\n链接：${url}`;
+    }
 
     try {
-      // Podcast: extract audio URL from xiaoyuzhou page
-      let audioUrl: string | null = null;
-      if (mapping.type === 'podcast-channel' && url.includes('xiaoyuzhoufm.com')) {
-        audioUrl = await crawlXiaoyuzhouAudio(url);
-      }
-
       const extra: Record<string, any> = {};
       if (a.image) extra.image = a.image;
       if (a.description) extra.description = a.description;
-      if (audioUrl) extra.audio_url = audioUrl;
 
-      await sql`
+      const result = await sql`
         INSERT INTO articles (source_id, title, url, author, content, content_hash, published_at, fetched_at, extra)
         VALUES (${sourceId}, ${title}, ${url}, ${author}, ${content || ''}, ${contentHash},
-          ${publishedAt ? sql.unsafe(`'${publishedAt}'::timestamptz`) : null},
-          NOW(), ${JSON.stringify(extra)}::jsonb)`;
+          ${publishedAt || null}::timestamptz, NOW(), ${JSON.stringify(extra)}::jsonb)
+        RETURNING id`;
+      const articleId = result[0]?.id;
       inserted++;
+
+      // 调用 saveArticleFile 下载图片并替换 __IMG__ 标记
+      if (articleId) {
+        try {
+          await saveArticleFile(articleId, content || '', {
+            id: articleId, title, source_type: mapping.type, source_name: col.name,
+            url, published_at: publishedAt, category: null, tags: [], author,
+            is_read: false, is_starred: false,
+          });
+        } catch (e: any) {
+          console.error(`[JTK] saveArticleFile failed for ${articleId}: ${e.message}`);
+        }
+      }
       const preview = title.length > 50 ? title.slice(0,47)+'...' : title;
       console.log(`[JTK] ${col.name}: "${preview}" (${content.length}ch)`);
     } catch (e: any) {
@@ -243,23 +197,41 @@ async function fetchColumn(
 }
 
 // ============ Main ============
+/**
+ * 从今天看啥 API 抓取所有专栏的最新文章。
+ * 目前专注于微信公众号 (type=wechat)，其他类型已由调度器独立处理。
+ */
 export async function fetchAllJtkSources(sql: Sql): Promise<JtkFetchResult> {
   console.log('[JTK] Fetching all columns...');
   let columns: JtkColumn[];
-  try { columns = await fetchAllColumns(); }
-  catch (e: any) { console.error(`[JTK] Columns: ${e.message}`); return { total:0, inserted:0, skipped:0, errors:1 }; }
+  try {
+    columns = await fetchAllColumns();
+  } catch (e: any) {
+    console.error(`[JTK] Columns: ${e.message}`);
+    return { total: 0, inserted: 0, skipped: 0, errors: 1 };
+  }
   console.log(`[JTK] Got ${columns.length} columns`);
 
   let total = 0, inserted = 0, skipped = 0, errors = 0;
+  const sourceBreakdown: { source: string; count: number }[] = [];
+
   for (const col of columns) {
     try {
-      const r = await fetchColumn(sql, col, JTK_ARTICLES_PER_COLUMN);
-      total += r.total; inserted += r.inserted; skipped += r.skipped;
+      const r = await fetchColumn(sql, col);
+      total += r.total;
+      inserted += r.inserted;
+      skipped += r.skipped;
+      if (r.inserted > 0) {
+        sourceBreakdown.push({ source: col.name, count: r.inserted });
+      }
     } catch (e: any) {
-      console.error(`[JTK] ${col.name}: ${e.message}`); errors++;
+      console.error(`[JTK] ${col.name}: ${e.message}`);
+      errors++;
     }
-    await new Promise(r => setTimeout(r, 300));
+    // 稍等以免触发频次限制
+    await new Promise(r => setTimeout(r, 500));
   }
-  console.log(`[JTK] Done: ${total} fetched, ${inserted} new, ${skipped} dup, ${errors} err`);
-  return { total, inserted, skipped, errors };
+
+  console.log(`[JTK] Done: ${total} total, ${inserted} new, ${skipped} dup, ${errors} err`);
+  return { total, inserted, skipped, errors, sourceBreakdown };
 }

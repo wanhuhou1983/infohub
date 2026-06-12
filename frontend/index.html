@@ -1756,7 +1756,7 @@ async function selectArticle(id) {
       ${article.content && (article.content.length > 500 || (article.content.length > 100 && !article.content.includes('来源：') && !article.content.includes('链接：'))) ? (() => {
         // 智能分段 + 处理图片标记
         let content = smartParagraphize(article.content);
-        content = content.replace(/^__IMG__(.+?)__IMG__$/gm, '![image]($1)');
+        content = content.replace(/__IMG__(.+?)__IMG__/gm, '![image]($1)');
         // 章节检测
         window._currentSections = detectSections(content);
         const cachedSectionAnalysis = (article.extra?.section_analysis) || [];
