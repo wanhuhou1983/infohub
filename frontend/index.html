@@ -1769,7 +1769,15 @@ async function selectArticle(id) {
           html = html.replace(regex, '<mark class="search-highlight">$1</mark>');
         }
         // 给图片添加点击放大
-        html = html.replace(/<img([^>]+)>/g, '<img$1 referrerpolicy="no-referrer" class="image-zoomable cursor-zoom-in" onclick="showImagePreview(this.src)" onerror="handleImageError(this)" loading="lazy">');
+        html = html.replace(/<img([^>]+)>/g, (match, attrs) => {
+          // 微信图片使用代理绕过防盗链
+          const srcMatch = attrs.match(/src=["']([^"']+)["']/);
+          if (srcMatch && /mmbiz\.qpic\.cn|mmbiz\.qlogo\.cn/.test(srcMatch[1])) {
+            const proxyUrl = '/api/image-proxy?url=' + encodeURIComponent(srcMatch[1]);
+            attrs = attrs.replace(srcMatch[1], proxyUrl);
+          }
+          return '<img' + attrs + ' referrerpolicy="no-referrer" class="image-zoomable cursor-zoom-in" onclick="showImagePreview(this.src)" onerror="handleImageError(this)" loading="lazy">';
+        });
         // 章节 AI 解读按钮注入
         let sectionIdx = 0;
         html = html.replace(

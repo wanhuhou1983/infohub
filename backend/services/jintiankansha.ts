@@ -177,11 +177,19 @@ async function fetchColumn(
       // 调用 saveArticleFile 下载图片并替换 __IMG__ 标记
       if (articleId) {
         try {
-          await saveArticleFile(articleId, content || '', {
+          const { processedContent } = await saveArticleFile(articleId, content || '', {
             id: articleId, title, source_type: mapping.type, source_name: col.name,
             url, published_at: publishedAt, category: null, tags: [], author,
             is_read: false, is_starred: false,
           });
+          // 将处理后的内容（图片已下载+URL已替换）回写到数据库
+          if (processedContent && processedContent !== content) {
+            try {
+              await sql`UPDATE articles SET content = ${processedContent} WHERE id = ${articleId}`;
+            } catch (ue: any) {
+              console.error(`[JTK] content回写失败 ${articleId}: ${ue.message}`);
+            }
+          }
         } catch (e: any) {
           console.error(`[JTK] saveArticleFile failed for ${articleId}: ${e.message}`);
         }

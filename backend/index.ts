@@ -209,6 +209,43 @@ if (!IS_CLOUD) {
   });
 }
 
+// 图片代理：服务端请求外部图片（如微信 mmbiz）并返回给前端，绕过防盗链
+app.get('/api/image-proxy', async (c) => {
+  const url = c.req.query('url');
+  if (!url) return c.text('Missing url parameter', 400);
+
+  // 只允许代理特定域名
+  const allowedHosts = ['mmbiz.qpic.cn', 'mmbiz.qlogo.cn', 'wx.qlogo.cn'];
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(url);
+  } catch {
+    return c.text('Invalid URL', 400);
+  }
+  if (!allowedHosts.some(h => parsedUrl.hostname.endsWith(h))) {
+    return c.text('Domain not allowed', 403);
+  }
+
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        'Referer': 'https://mp.weixin.qq.com/',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      },
+    });
+    if (!resp.ok) return c.text(`Upstream error: ${resp.status}`, 502);
+
+    const contentType = resp.headers.get('content-type') || 'image/png';
+    const buf = await resp.arrayBuffer();
+    c.header('Content-Type', contentType);
+    c.header('Cache-Control', 'public, max-age=86400');
+    c.header('Access-Control-Allow-Origin', '*');
+    return c.body(Buffer.from(buf));
+  } catch (e: any) {
+    return c.text(`Proxy error: ${e.message}`, 502);
+  }
+});
+
 app.get('/', (c) => {
   const indexPath = join(FRONTEND_DIR, 'index.html');
   if (existsSync(indexPath)) {

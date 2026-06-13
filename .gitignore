@@ -32,3 +32,7 @@ backend/data/
 _.DS_Store
 *.xlsx
 package-lock.json
+
+# Obsidian 本地数据（不同步）
+backend/obsidian-local/
+backend/obsidian/
