@@ -21,7 +21,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
   router.get('/', async (c) => {
     const {
       source_id, category, is_read, is_starred,
-      search, tab, limit = '50', offset = '0'
+      search, tab, source_type, limit = '50', offset = '0'
     } = c.req.query();
 
     const numLimit = Math.min(Math.max(Number(limit) || 50, 1), 200);
@@ -81,6 +81,14 @@ export function createArticlesRoutes(sql: Sql): Hono {
     }
     if (c.req.query('is_watch_later') !== undefined) {
       conditions.push(sql`a.is_watch_later = ${c.req.query('is_watch_later') === 'true'}`);
+    }
+
+    // source_type 过滤：支持逗号分隔的多个类型
+    if (source_type) {
+      const types = source_type.split(',').map(t => t.trim()).filter(Boolean);
+      if (types.length > 0) {
+        conditions.push(sql`s.type = ANY(${types}::text[])`);
+      }
     }
 
     // 合并条件：用 AND 连接所有片段
