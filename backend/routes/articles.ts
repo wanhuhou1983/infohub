@@ -20,7 +20,7 @@ export function createArticlesRoutes(sql: Sql): Hono {
   // 获取文章列表（动态条件构建，参数化安全查询）
   router.get('/', async (c) => {
     const {
-      source_id, category, is_read, is_starred,
+      source_id, source_type, category, is_read, is_starred,
       search, tab, limit = '50', offset = '0'
     } = c.req.query();
 
@@ -28,14 +28,15 @@ export function createArticlesRoutes(sql: Sql): Hono {
     const numOffset = Math.max(Number(offset) || 0, 0);
 
     // 第一步：确定 source_id 过滤条件（递归查所有子孙源）
+    // 支持逗号分隔多个 source_id，例如 ?source_id=4,7
     let sourceIds: number[] = [];
     if (source_id) {
-      const sid = Number(source_id);
-      if (isNaN(sid) || sid <= 0) return fail(c, 'Invalid source_id', 400);
-      // 递归 WITH 查询获取所有子孙源
+      const ids = source_id.split(',').map(Number).filter(id => !isNaN(id) && id > 0);
+      if (ids.length === 0) return fail(c, 'Invalid source_id', 400);
+      // 递归 WITH 查询获取所有子孙源（支持多根节点）
       const allDescendants = await sql`
         WITH RECURSIVE tree AS (
-          SELECT id FROM sources WHERE id = ${sid}
+          SELECT id FROM sources WHERE id = ANY(${ids}::int[])
           UNION ALL
           SELECT s.id FROM sources s JOIN tree t ON s.parent_id = t.id
           WHERE s.enabled = true
@@ -67,6 +68,14 @@ export function createArticlesRoutes(sql: Sql): Hono {
       conditions.push(sql`a.is_starred = TRUE`);
     } else if (tab === 'today') {
       conditions.push(sql`a.published_at >= CURRENT_DATE`);
+    }
+
+    // source_type 过滤（支持逗号分隔多个类型）
+    if (source_type) {
+      const types = source_type.split(',').map((t: string) => t.trim()).filter(Boolean);
+      if (types.length > 0) {
+        conditions.push(sql`s.type = ANY(${types})`);
+      }
     }
 
     // 独立过滤条件（可与 tab 叠加）
@@ -219,6 +228,15 @@ export function createArticlesRoutes(sql: Sql): Hono {
     if (isNaN(id) || id <= 0) return fail(c, 'Invalid id', 400);
     const { is_starred } = await c.req.json();
     await sql`UPDATE articles SET is_starred = ${!!is_starred} WHERE id = ${id}`;
+    return c.json({ ok: true });
+  });
+
+  // 标记稍后观看
+  router.patch('/:id/watch-later', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return fail(c, 'Invalid id', 400);
+    const { is_watch_later } = await c.req.json();
+    await sql`UPDATE articles SET is_watch_later = ${!!is_watch_later} WHERE id = ${id}`;
     return c.json({ ok: true });
   });
 

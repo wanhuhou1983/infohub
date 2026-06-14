@@ -77,7 +77,7 @@ const UT_FEATURES: Record<string, boolean> = {
 
 // ============ Twitter GraphQL API ============
 
-let _cachedGuestToken: string | null = null;
+let _cachedGuestToken = '';
 let _guestTokenExpiry = 0;
 
 /** 获取 guest token（带缓存，1 小时有效） */
