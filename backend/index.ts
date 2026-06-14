@@ -74,12 +74,17 @@ const sql = postgres(process.env.DATABASE_URL!);
 
 const app = new Hono();
 
-// CORS：指定允许的前端域名（开发 + 生产）
+// CORS：指定允许的前端域名（开发 + 生产 + Capacitor App）
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:3001',
   'http://127.0.0.1:3000',
   'http://127.0.0.1:3001',
+  // Capacitor Android/iOS App
+  'capacitor://localhost',
+  'ionic://localhost',
+  'http://localhost',
+  'https://localhost',
   // 生产环境域名通过环境变量配置
   ...(process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : []),
 ];
