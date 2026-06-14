@@ -75,7 +75,6 @@ jobs:
     name: Deploy to VPS
     needs: [build]
     runs-on: ubuntu-latest
-    if: ${{ secrets.DEPLOY_HOST != '' }}
     env:
       REGISTRY: ghcr.io
       IMAGE_NAME: ${{ github.repository }}/infohub-backend
