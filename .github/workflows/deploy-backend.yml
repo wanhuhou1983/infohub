@@ -55,7 +55,11 @@ jobs:
         run: |
           SHA="${{ github.sha }}"
           SHORT="${SHA:0:7}"
-          TAG="${{ inputs.image_tag || format('{0}-{1}', github.ref_name, SHORT) }}"
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            TAG="${{ github.ref_name }}-${SHORT}"
+          fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
       - uses: docker/build-push-action@v6
         with:
