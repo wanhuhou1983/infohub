@@ -1,77 +1,57 @@
-# InfoHub Backend Deploy
 name: Deploy
 
 on:
   workflow_dispatch:
     inputs:
       environment:
-        description: '部署环境'
+        description: 'Deploy env'
         type: choice
         default: 'production'
         options:
           - production
       image_tag:
-        description: '镜像标签（留空则使用 git SHA）'
+        description: 'Image tag'
         type: string
         default: ''
 
-# 同一时间只允许一个部署运行
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: false
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/infohub-backend
-
 jobs:
-  # ============ Phase 1: 类型检查 ============
   check:
-    name: Type check & Test
+    name: Type check
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: backend
-
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install dependencies
+      - name: Install deps
         run: bun install
-
       - name: TypeScript check
         run: bun x tsc --noEmit
-
       - name: Run tests
         run: bun test
 
-  # ============ Phase 2: 构建并推送镜像 ============
   build:
-    name: Build & Push Docker image
+    name: Build & Push
     needs: [check]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
       id-token: write
-
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}/infohub-backend
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
-
-      # 镜像标签：优先使用手动指定标签，否则使用 git SHA
       - name: Generate image tags
         id: meta
         run: |
@@ -79,37 +59,26 @@ jobs:
           SHORT="${SHA:0:7}"
           TAG="${{ inputs.image_tag || format('{0}-{1}', github.ref_name, SHORT) }}"
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "short_sha=${SHORT}" >> $GITHUB_OUTPUT
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ github.repository }}/infohub-backend:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ github.repository }}/infohub-backend:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
 
-      - name: Output image digest
-        run: echo "Image pushed: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}"
-
-  # ============ Phase 3: SSH 部署到 VPS ============
   deploy:
     name: Deploy to VPS
     needs: [build]
     runs-on: ubuntu-latest
-    # 如果未配置部署密钥，跳过部署但构建仍然成功
     if: secrets.DEPLOY_HOST != ''
-
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}/infohub-backend
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+      - uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -118,21 +87,13 @@ jobs:
           script_stop: true
           script: |
             set -e
-
-            echo "=== 1. 登录 GHCR ==="
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
-
-            echo "=== 2. 拉取最新镜像 ==="
-            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-            echo "=== 3. 备份当前容器 ==="
-            docker tag infohub-backend infohub-backend:previous 2>/dev/null || true
-
-            echo "=== 4. 停止并移除旧容器 ==="
+            echo "=== 1. Login GHCR ==="
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            echo "=== 2. Pull latest ==="
+            docker pull ghcr.io/${{ github.repository }}/infohub-backend:latest
+            echo "=== 3. Restart container ==="
             docker stop infohub-backend 2>/dev/null || true
             docker rm infohub-backend 2>/dev/null || true
-
-            echo "=== 5. 启动新容器 ==="
             docker run -d \
               --name infohub-backend \
               --restart unless-stopped \
@@ -142,37 +103,8 @@ jobs:
               --network infohub-net \
               --log-opt max-size=10m \
               --log-opt max-file=3 \
-              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
-            echo "=== 6. 健康检查 ==="
+              ghcr.io/${{ github.repository }}/infohub-backend:latest
+            echo "=== 4. Health check ==="
             sleep 3
-            for i in 1 2 3 4 5; do
-              STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/api/test || echo "000")
-              if [ "$STATUS" = "200" ]; then
-                echo "✅ 健康检查通过 (attempt $i)"
-                break
-              fi
-              echo "⏳ 等待服务就绪... (attempt $i)"
-              sleep 2
-            done
-
-            if [ "$STATUS" != "200" ]; then
-              echo "❌ 健康检查失败！回滚到上一版本..."
-              docker stop infohub-backend
-              docker rm infohub-backend
-              docker run -d \
-                --name infohub-backend \
-                --restart unless-stopped \
-                -p 3001:3001 \
-                -v /opt/infohub/data:/app/data \
-                -v /opt/infohub/.env.json:/app/.env.json:ro \
-                --network infohub-net \
-                ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:previous 2>/dev/null || \
-                docker run -d --name infohub-backend ...ghcr.io/wanhuhou1983/infohub-backend:latest
-              exit 1
-            fi
-
-            echo "=== 7. 清理旧镜像（保留最近 3 个） ==="
-            docker image prune -f --filter "until=24h"
-
-            echo "🎉 部署完成！"
+            curl -f http://localhost:3001/api/test
+            echo "Done!"
