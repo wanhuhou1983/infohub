@@ -53,7 +53,7 @@ docker run -d \
   --name infohub-backend \
   --restart unless-stopped \
   -p 3001:3001 \
-  -e DATABASE_URL="postgres://infohub:infohub123@infohub-postgres-cloud:5432/infohub" \
+  -e DATABASE_URL="postgres://infohub:infohub123@infohub-postgres-cloud:5432/infohub?timezone=Asia/Shanghai" \
   -e PORT="3001" \
   -e REQUIRE_AUTH="false" \
   -e ALLOWED_ORIGIN="https://wuflux.cn,https://info.wuflux.cn" \

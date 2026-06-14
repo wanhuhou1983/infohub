@@ -203,20 +203,21 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
 
   const fetches: Promise<FetchResult>[] = [
     // 报刊杂志: try today, then fallback to yesterday if 0 inserted
-        // 人民日报：每日10点后更新当天版面
-    ...(s.rmrb?.enabled !== false ? [(async () => {
+    // Time gate: only fetch after content normally published
+    ...(s.rmrb?.enabled !== false && now.getHours() >= 10 ? [(async () => {
+      // 人民日报：每日10点后更新当天版面
       let r = await fetchApi('/fetch/rmrb', { date: todayDash });
       if (!r.inserted) r = await fetchApi('/fetch/rmrb', { date: yesterdayDash });
       return { source: '人民日报', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
     })()] : []),
-        // 新闻联播：每日21点后更新当天文字稿
-    ...(s.xwlb?.enabled !== false ? [(async () => {
+    ...(s.xwlb?.enabled !== false && now.getHours() >= 21 ? [(async () => {
+      // 新闻联播：每日21点后更新当天文字稿（避免过早抓取不完整内容）
       let r = await fetchApi('/fetch/xwlb', { date: todayCompact });
       if (!r.inserted) r = await fetchApi('/fetch/xwlb', { date: yesterdayCompact });
       return { source: '新闻联播', success: !!r.ok, inserted: r.inserted || 0, fetched: r.fetched || 0, error: r.error };
     })()] : []),
-        // 喷嚏图卦：每日18点后更新当天图卦
-    ...(s.penti?.enabled !== false ? [(async () => {
+    ...(s.penti?.enabled !== false && now.getHours() >= 18 ? [(async () => {
+      // 喷嚏图卦：每日18点后更新当天图卦
       let r = await fetchApi('/fetch/penti', { date: todayCompact });
       if (!r.inserted) r = await fetchApi('/fetch/penti', { date: yesterdayCompact });
       return { source: '喷嚏图卦', success: !!r.ok, inserted: r.inserted || 0, error: r.error };

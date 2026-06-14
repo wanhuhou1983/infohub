@@ -1,32 +1,39 @@
 #!/bin/bash
 # start-backend.sh — 带自动重启的 infohub 后端启动器
-# 自动建立 SSH 隧道，进程崩溃时 3 秒自动拉起
-# 用法: bash start-backend.sh
+# 由 LaunchAgent (com.infohub.backend) 管理，崩溃后自动重启
+# 兼容手动运行: bash start-backend.sh
 
 BACKEND_DIR="/Users/linhu/WorkBuddy/2026-06-09-21-34-58/infohub/backend"
-SCRIPT_DIR="/Users/linhu/WorkBuddy/2026-06-09-21-34-58/infohub/scripts"
 LOG_FILE="/tmp/infohub.log"
 BUN="/Users/linhu/.bun/bin/bun"
-RESTART_DELAY=3
+RESTART_DELAY=5
 MAX_RESTARTS=100
 
 cd "$BACKEND_DIR"
 
-# ====== SSH 隧道 ======
+# ====== 等待 PostgreSQL 就绪（最多 30 秒） ======
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 等待 PostgreSQL 就绪..." >> "$LOG_FILE"
+for i in $(seq 1 15); do
+  if pg_isready -h localhost -p 5432 >/dev/null 2>&1; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] PostgreSQL 已就绪" >> "$LOG_FILE"
+    break
+  fi
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 等待 PostgreSQL... ($i/15)" >> "$LOG_FILE"
+  sleep 2
+done
+
+# ====== SSH 隧道（非阻塞，用于云端同步，失败不影响主流程） ======
 TUNNEL_PID=$(pgrep -f "ssh.*-L 15432:localhost:5433" | head -1)
 if [ -z "$TUNNEL_PID" ]; then
-  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 建立 SSH 隧道到云端 PG..." >> "$LOG_FILE"
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] 建立 SSH 隧道到云端 PG（非阻塞）..." >> "$LOG_FILE"
   ssh -fN -L 15432:localhost:5433 \
     -o ServerAliveInterval=60 \
     -o ServerAliveCountMax=3 \
     -o ExitOnForwardFailure=yes \
     -o StrictHostKeyChecking=no \
-    ubuntu@101.35.250.154 2>>"$LOG_FILE"
-  if [ $? -eq 0 ]; then
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] SSH 隧道已建立 (localhost:15432 → cloud PG:5433)" >> "$LOG_FILE"
-  else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠️ SSH 隧道建立失败" >> "$LOG_FILE"
-  fi
+    -o ConnectTimeout=10 \
+    ubuntu@101.35.250.154 2>>"$LOG_FILE" || \
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚠️ SSH 隧道建立失败，云端同步暂不可用（不影响本地运行）" >> "$LOG_FILE"
 else
   echo "[$(date '+%Y-%m-%d %H:%M:%S')] SSH 隧道已存在 (PID: $TUNNEL_PID)" >> "$LOG_FILE"
 fi

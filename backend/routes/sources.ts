@@ -342,5 +342,27 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
     }
   });
 
+  // GET /sources/stats — 过去24小时各源文章统计
+  router.get('/stats', async (c) => {
+    try {
+      const rows = await sql`
+        SELECT 
+          s.id AS source_id, 
+          s.name AS source_name, 
+          s.type AS source_type,
+          COUNT(*)::int AS count,
+          MAX(a.fetched_at) AS last_fetch
+        FROM articles a
+        JOIN sources s ON s.id = a.source_id
+        WHERE a.fetched_at > NOW() - INTERVAL '24 hours'
+        GROUP BY s.id, s.name, s.type
+        ORDER BY count DESC, last_fetch DESC
+      `;
+      return c.json(rows);
+    } catch (e: any) {
+      return c.json({ error: e.message }, 500);
+    }
+  });
+
   return router;
 }

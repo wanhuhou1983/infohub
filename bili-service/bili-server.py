@@ -10,9 +10,11 @@ import re
 import time
 import urllib.request
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 
 PORT = int(os.environ.get('PORT', '8979'))
+CHROMIUM_PATH = os.environ.get('CHROMIUM_EXECUTABLE_PATH', '')
 
 # ═══════════════════════════════════════════
 # B站采集
@@ -22,7 +24,10 @@ def fetch_videos(mid: str, max_pages: int = 1, sessdata: str = '') -> list[dict]
     """Use Playwright to fetch UP主 video list"""
     all_videos = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        launch_args = {'headless': True}
+        if CHROMIUM_PATH:
+            launch_args['executable_path'] = CHROMIUM_PATH
+        browser = p.chromium.launch(**launch_args)
         context_args = {
             'user_agent': (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -239,7 +244,10 @@ def fetch_twitter(handle: str, max_tweets: int = 20, cookies: str = '') -> list[
     """
     tweets = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        launch_args = {'headless': True}
+        if CHROMIUM_PATH:
+            launch_args['executable_path'] = CHROMIUM_PATH
+        browser = p.chromium.launch(**launch_args)
         context_args = {
             'user_agent': (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -455,6 +463,72 @@ def _extract_tweets(data: dict, out: list):
 # HTTP Handler
 # ═══════════════════════════════════════════
 
+# ═══════════════════════════════════════════
+# 微信公众号文章采集
+# ═══════════════════════════════════════════
+
+def fetch_wechat_article(url: str) -> dict:
+    """使用 Playwright 抓取微信公众号文章全文"""
+    launch_args = {'headless': True}
+    if CHROMIUM_PATH:
+        launch_args['executable_path'] = CHROMIUM_PATH
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch_args)
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/125.0.0.0 Safari/537.36"
+            ),
+        )
+        page = context.new_page()
+        
+        try:
+            print(f"[WeChat] Fetching {url[:80]}", flush=True)
+            page.goto(url, wait_until='networkidle', timeout=30000)
+            
+            # 等待文章内容加载
+            page.wait_for_selector('#js_content', timeout=10000)
+            
+            title = page.title() or ''
+            title = title.strip()
+            
+            # 提取正文
+            content_el = page.query_selector('#js_content')
+            content = content_el.inner_text() if content_el else ''
+            
+            # 提取作者
+            author = ''
+            author_el = page.query_selector('#js_name') or page.query_selector('.rich_media_meta_text')
+            if author_el:
+                author = author_el.inner_text().strip()
+            
+            print(f"[WeChat] OK: {title[:40]} ({len(content)} chars)", flush=True)
+            
+            return {
+                'title': title,
+                'content': content,
+                'author': author,
+                'publish_date': '',
+            }
+        except Exception as e:
+            print(f"[WeChat] Error: {e}", flush=True)
+            try:
+                content_el = page.query_selector('#js_content')
+                content = content_el.inner_text() if content_el else ''
+                return {
+                    'title': page.title() or '',
+                    'content': content,
+                    'author': '',
+                    'publish_date': '',
+                }
+            except:
+                return {'error': str(e)}
+        finally:
+            browser.close()
+
+
 class BiliHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         length = int(self.headers.get('Content-Length', 0))
@@ -530,10 +604,26 @@ class BiliHandler(BaseHTTPRequestHandler):
             self._json(400, {'error': f'Unknown action: {action}'})
     
     def do_GET(self):
-        if self.path == '/health':
+        parsed = urlparse(self.path)
+        
+        if parsed.path == '/health':
             self._json(200, {'status': 'ok', 'service': 'media-fetch'})
+        elif parsed.path == '/fetch':
+            params = parse_qs(parsed.query)
+            url = params.get('url', [None])[0]
+            if not url:
+                self._json(400, {'error': 'url parameter required'})
+                return
+            try:
+                result = fetch_wechat_article(url)
+                if 'error' in result:
+                    self._json(500, result)
+                else:
+                    self._json(200, result)
+            except Exception as e:
+                self._json(500, {'error': str(e)})
         else:
-            self._json(404, {'error': 'Not found. POST /'})
+            self._json(404, {'error': 'Not found. POST / or GET /fetch?url='})
     
     def _json(self, status, data):
         self.send_response(status)

@@ -60,11 +60,28 @@ tailwind.config = {
 
   <!-- Main Content -->
   <div class="max-w-6xl mx-auto px-4 py-6">
-    <div id="loading" class="text-center py-16">
-      <div class="spinner inline-block w-8 h-8 border-2 border-accent border-t-transparent rounded-full mb-3"></div>
-      <p class="text-muted text-sm">加载中...</p>
+
+    <!-- Tab Bar -->
+    <div class="flex gap-1 mb-4 border-b border-border">
+      <button id="tab-sources" class="px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition" onclick="switchTab('sources')">数据源管理</button>
+      <button id="tab-stats" class="px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition" onclick="switchTab('stats')">更新日志</button>
     </div>
-    <div id="cards" class="space-y-4"></div>
+
+    <div id="tab-sources-content">
+      <div id="loading" class="text-center py-16">
+        <div class="spinner inline-block w-8 h-8 border-2 border-accent border-t-transparent rounded-full mb-3"></div>
+        <p class="text-muted text-sm">加载中...</p>
+      </div>
+      <div id="cards" class="space-y-4"></div>
+    </div>
+
+    <div id="tab-stats-content" class="hidden">
+      <div id="statsLoading" class="text-center py-16">
+        <div class="spinner inline-block w-8 h-8 border-2 border-accent border-t-transparent rounded-full mb-3"></div>
+        <p class="text-muted text-sm">加载中...</p>
+      </div>
+      <div id="statsCards" class="space-y-3"></div>
+    </div>
   </div>
 
 <script>
@@ -100,11 +117,10 @@ function load() {
   api('/sources/tree').then(function(tree) {
     if (!tree || !Array.isArray(tree)) throw new Error('API returned empty');
 
-    // Move YouTube category to the end
+    // Sort categories in fixed order
+    var CAT_ORDER = { magazine: 1, rss_news: 2, wechat: 3, bilibili: 4, youtube: 5, podcast: 6, twitter: 7, xueqiu: 8, weibo: 9 };
     tree.sort(function(a, b) {
-      if (a.type === 'youtube') return 1;
-      if (b.type === 'youtube') return -1;
-      return 0;
+      return (CAT_ORDER[a.type] || 99) - (CAT_ORDER[b.type] || 99);
     });
 
     var grandTotal = 0;
@@ -579,6 +595,72 @@ function syncYoutubeFollowings() {
 
 // ====== keep old syncAllFollowings for backwards compat ======
 function syncAllFollowings() { syncYoutubeFollowings(); }
+
+// ====== Tab switching ======
+var currentTab = 'sources';
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-sources').className = tab === 'sources'
+    ? 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition'
+    : 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition';
+  document.getElementById('tab-stats').className = tab === 'stats'
+    ? 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition'
+    : 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition';
+  document.getElementById('tab-sources-content').classList.toggle('hidden', tab !== 'sources');
+  document.getElementById('tab-stats-content').classList.toggle('hidden', tab !== 'stats');
+  if (tab === 'sources' && !document.getElementById('cards').children.length) load();
+  if (tab === 'stats') loadStats();
+}
+
+// ====== Stats / 更新日志 ======
+function loadStats() {
+  document.getElementById('statsLoading').classList.remove('hidden');
+  document.getElementById('statsCards').innerHTML = '';
+
+  api('/sources/stats').then(function(data) {
+    document.getElementById('statsLoading').classList.add('hidden');
+
+    if (!Array.isArray(data) || data.length === 0) {
+      document.getElementById('statsCards').innerHTML = '<div class="text-center text-muted text-sm py-12">过去24小时内无新增文章</div>';
+      return;
+    }
+
+    var totalArt = 0;
+    for (var i = 0; i < data.length; i++) totalArt += data[i].count;
+
+    var html = '<div class="text-xs text-muted mb-3">过去24小时，' + data.length + ' 个信息源共新增 <span class="text-fg font-medium">' + totalArt + '</span> 篇</div>';
+
+    html += '<div class="bg-surface rounded-xl border border-border overflow-hidden">';
+    html += '<table class="w-full text-sm">';
+    html += '<thead><tr class="border-b border-border text-xs text-muted">';
+    html += '<th class="text-left px-4 py-2 font-medium">信息源</th>';
+    html += '<th class="text-left px-4 py-2 font-medium">类型</th>';
+    html += '<th class="text-right px-4 py-2 font-medium">新增篇数</th>';
+    html += '<th class="text-right px-4 py-2 font-medium">最新抓取</th>';
+    html += '</tr></thead><tbody>';
+
+    for (var i = 0; i < data.length; i++) {
+      var r = data[i];
+      var typeLabel = TYPES[r.source_type] || r.source_type;
+      var typeColor = COLORS[r.source_type] || 'bg-slate-500/20 text-slate-400';
+      var lastFetch = r.last_fetch ? new Date(r.last_fetch).toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit', month: 'numeric', day: 'numeric' }) : '-';
+      var rowBg = i % 2 === 0 ? '' : 'bg-surface2/30';
+
+      html += '<tr class="border-b border-border/50 ' + rowBg + ' hover:bg-surface2/50 transition">';
+      html += '<td class="px-4 py-2.5 font-medium truncate max-w-[200px]">' + r.source_name + '</td>';
+      html += '<td class="px-4 py-2.5"><span class="text-xs px-1.5 py-0.5 rounded ' + typeColor + '">' + typeLabel + '</span></td>';
+      html += '<td class="px-4 py-2.5 text-right"><span class="text-success font-medium">' + r.count + '</span></td>';
+      html += '<td class="px-4 py-2.5 text-right text-muted text-xs">' + lastFetch + '</td>';
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+    document.getElementById('statsCards').innerHTML = html;
+  }).catch(function(e) {
+    document.getElementById('statsLoading').classList.add('hidden');
+    document.getElementById('statsCards').innerHTML = '<div class="text-danger text-sm p-4">加载失败: ' + e.message + '</div>';
+  });
+}
 
 document.addEventListener('DOMContentLoaded', load);
 </script>
