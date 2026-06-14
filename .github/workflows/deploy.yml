@@ -1,27 +1,8 @@
+name: Deploy
+
 # InfoHub Deploy — 部署工作流
 #
 # 触发条件：手动触发（workflow_dispatch）
-#   支持选择部署环境：staging / production
-#
-# 流程：
-#   1. 运行类型检查（复用 CI 逻辑）
-#   2. 构建 Docker 镜像并推送到 GHCR
-#   3. SSH 到目标 VPS，拉取新镜像，重启容器
-#   4. 健康检查验证部署成功
-#
-# 前置条件（请先在 GitHub Secrets 中配置）：
-#   DEPLOY_HOST     — VPS 主机地址
-#   DEPLOY_USER     — SSH 用户
-#   DEPLOY_KEY      — SSH 私钥
-#   GHCR_TOKEN      — GitHub Container Registry 访问令牌（细粒度 PAT）
-#   ADMIN_TOKEN     — 生产管理 Token
-#   DATABASE_URL    — 生产数据库连接串
-#
-# 回滚：
-#   旧容器的镜像标签保存在 docker compose 配置中，
-#   可通过 `docker compose up -d` + 手动指定旧标签回滚
-
-name: Deploy
 
 on:
   workflow_dispatch:
