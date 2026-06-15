@@ -218,7 +218,8 @@ export async function processImages(content: string, sourceType = 'rss'): Promis
   for (const [originalUrl, replacement] of imgUrls) {
     if (replacement) {
       const regex = new RegExp(`__IMG__${escapeRegex(originalUrl)}__IMG__`, 'g');
-      result = result.replace(regex, replacement);
+      // 包装为 Markdown 图片语法，确保前端渲染为 <img> 而非纯文本链接
+      result = result.replace(regex, `![image](${replacement})`);
     }
   }
   for (const [originalUrl, data] of mdImgUrls) {
