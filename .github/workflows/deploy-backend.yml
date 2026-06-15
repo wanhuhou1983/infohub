@@ -96,12 +96,19 @@ jobs:
             echo "=== 3. Restart container ==="
             docker stop infohub-backend 2>/dev/null || true
             docker rm infohub-backend 2>/dev/null || true
+            # Ensure .env.json exists (PG connection + cloud mode)
+            if [ ! -f /opt/infohub/.env.json ]; then
+              echo '{"DATABASE_URL":"postgres://infohub:InfoHub2026@infohub-postgres-cloud:5432/infohub","CLOUD_MODE":"true"}' > /opt/infohub/.env.json
+              chmod 600 /opt/infohub/.env.json
+            fi
             docker run -d \
               --name infohub-backend \
               --restart unless-stopped \
               -p 3001:3001 \
+              -e DATABASE_URL='postgres://infohub:InfoHub2026@infohub-postgres-cloud:5432/infohub' \
+              -e CLOUD_MODE=true \
               -v /opt/infohub/data:/app/data \
-              -v /opt/infohub/.env.json:/app/.env.json:ro \
+              -v /opt/infohub/.env.json:/.env.json:ro \
               --network infohub-net \
               --log-opt max-size=10m \
               --log-opt max-file=3 \
