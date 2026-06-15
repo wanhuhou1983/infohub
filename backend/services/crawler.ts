@@ -139,13 +139,23 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
       if (data.title && data.content && data.content.length > 20) {
         let content = data.content;
         content = stripCommentSection(content);
-        console.log("[WeChat service] OK: " + data.title.slice(0, 40) + ` (${content.length} chars)`);
-        return {
-          title: data.title,
-          content,
-          author: data.author || "",
-          publishDate: data.publish_date || "",
-        };
+
+        // 检查是否有图片（__IMG__ 标记）
+        const hasImages = content.includes('__IMG__');
+        console.log("[WeChat service] " + data.title.slice(0, 40) +
+          ` (${content.length} chars, images=${hasImages})`);
+
+        // 有图片直接返回；无图片则继续尝试下层 cheerio（带更好图片提取）
+        if (hasImages) {
+          return {
+            title: data.title,
+            content,
+            author: data.author || "",
+            publishDate: data.publish_date || "",
+          };
+        }
+        // 无图片时记录并继续降级
+        console.log("[WeChat service] no images, falling through to cheerio...");
       }
       if (data.error) {
         console.warn(`[WeChat service] ${data.error}: ${articleUrl.slice(0, 60)}`);

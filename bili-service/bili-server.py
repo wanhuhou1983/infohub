@@ -494,9 +494,24 @@ def fetch_wechat_article(url: str) -> dict:
             title = page.title() or ''
             title = title.strip()
             
-            # 提取正文
+            # 提取正文 HTML（含图片）
             content_el = page.query_selector('#js_content')
-            content = content_el.inner_text() if content_el else ''
+            if content_el:
+                # 用 inner_html 保留图片结构
+                content = content_el.inner_html()
+                # 将 <img> 标签替换为 __IMG__ 标记（兼容后端 saveArticleFile）
+                import re
+                content = re.sub(
+                    r'<img[^>]+src=["\'](https?://[^"\']+)["\'][^>]*>',
+                    r'__IMG__\1__IMG__',
+                    content
+                )
+                # 去除多余 HTML 标签，保留文本和 __IMG__ 标记
+                content = re.sub(r'<[^>]+>', '\n', content)
+                content = re.sub(r'\n{3,}', '\n\n', content)
+                content = content.strip()
+            else:
+                content = ''
             
             # 提取作者
             author = ''
