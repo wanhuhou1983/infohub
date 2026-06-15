@@ -45,12 +45,13 @@ export interface JtkFetchResult {
 }
 
 // Source type -> PG parent category mapping
+// NOTE: parentId must be looked up after DB migration (9大类 restructure)
 const SOURCE_MAP: Record<string, { type: string; parentId: number }> = {
-  '公众号':       { type: 'wechat',   parentId: 3 },
-  'B站投稿视频':  { type: 'bilibili', parentId: 4 },
-  '微博':         { type: 'weibo',    parentId: 9 },
-  '雪球动态':     { type: 'xueqiu',   parentId: 8 },
-  '小宇宙':       { type: 'podcast-channel', parentId: 5 },
+  '公众号':       { type: 'wechat',   parentId: 3 },    // 微信公众号
+  'B站投稿视频':  { type: 'bilibili', parentId: 2939 }, // 哔哩哔哩
+  '微博':         { type: 'weibo',    parentId: 2943 }, // 微博
+  '雪球动态':     { type: 'xueqiu',   parentId: 2942 }, // 雪球
+  '小宇宙':       { type: 'podcast-channel', parentId: 2941 }, // 播客
 };
 
 // ============ API Client ============
