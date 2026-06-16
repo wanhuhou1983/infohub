@@ -1,20 +1,20 @@
-/**
- * InfoHub 后端入口
+﻿/**
+ * InfoHub 閸氬海顏崗銉ュ經
  * 
- * 重构后的薄层路由注册，具体逻辑拆分到 routes/ 和 services/ 模块
+ * 闁插秵鐎崥搴ｆ畱閽栧嫬鐪扮捄顖滄暠濞夈劌鍞介敍灞藉徔娴ｆ捇鈧槒绶幏鍡楀瀻閸?routes/ 閸?services/ 濡€虫健
  * 
- * 模式：
- * - 本地模式（默认）：全功能，采集 + 管理 + OB 同步
- * - 云端模式（CLOUD_MODE=true）：只读展示，禁用采集/管理/OB，接受数据同步推送
+ * 濡€崇础閿?
+ * - 閺堫剙婀村Ο鈥崇础閿涘牓绮拋銈忕礆閿涙艾鍙忛崝鐔诲厴閿涘矂鍣伴梿?+ 缁狅紕鎮?+ OB 閸氬本顒?
+ * - 娴滄垹顏Ο鈥崇础閿涘湑LOUD_MODE=true閿涘绱伴崣顏囶嚢鐏炴洜銇氶敍宀€顩﹂悽銊╁櫚闂?缁狅紕鎮?OB閿涘本甯撮崣妤佹殶閹诡喖鎮撳銉﹀腹闁?
  * 
- * 修复：
- * - CORS 限制为指定域名
- * - 所有路由参数化查询，消除 sql.unsafe()
+ * 娣囶喖顦查敍?
+ * - CORS 闂勬劕鍩楁稉鐑樺瘹鐎规艾鐓欓崥?
+ * - 閹碘偓閺堝鐭鹃悽鍗炲棘閺佹澘瀵查弻銉嚄閿涘本绉烽梽?sql.unsafe()
  */
 
-// ⚠️ 必须在任何模块 import 之前加载 .env.json，
-// 否则 translate.ts 等模块中的常量（DEEPSEEK_API_KEY、LLAMA_BASE_URL 等）
-// 会在 import 时就初始化，导致 .env.json 里的配置不生效。
+// 閳跨媴绗?韫囧懘銆忛崷銊ゆ崲娴ｆ洘膩閸?import 娑斿澧犻崝鐘烘祰 .env.json閿?
+// 閸氾箑鍨?translate.ts 缁涘膩閸фぞ鑵戦惃鍕埗闁插骏绱橠EEPSEEK_API_KEY閵嗕俯LAMA_BASE_URL 缁涘绱?
+// 娴兼艾婀?import 閺冭泛姘ㄩ崚婵嗩潗閸栨牭绱濈€佃壈鍤?.env.json 闁插瞼娈戦柊宥囩枂娑撳秶鏁撻弫鍫涒偓?
 import { readFileSync as _readFileSync, existsSync as _existsSync } from 'fs';
 import { join as _join, dirname as _dirname } from 'path';
 import { fileURLToPath as _fileURLToPath } from 'url';
@@ -31,7 +31,7 @@ import { fileURLToPath as _fileURLToPath } from 'url';
       }
     }
   } catch (e) {
-    console.warn('[启动] 无法加载 .env.json:', (e as Error).message);
+    console.warn('[閸氼垰濮 閺冪姵纭堕崝鐘烘祰 .env.json:', (e as Error).message);
   }
 })();
 
@@ -74,7 +74,7 @@ const sql = postgres(process.env.DATABASE_URL!);
 
 const app = new Hono();
 
-// CORS：指定允许的前端域名（开发 + 生产 + Capacitor App）
+// CORS閿涙碍瀵氱€规艾鍘戠拋鍝ユ畱閸撳秶顏崺鐔锋倳閿涘牆绱戦崣?+ 閻㈢喍楠?+ Capacitor App閿?
 const ALLOWED_ORIGINS = [
   'http://localhost:3000',
   'http://localhost:3001',
@@ -85,13 +85,13 @@ const ALLOWED_ORIGINS = [
   'ionic://localhost',
   'http://localhost',
   'https://localhost',
-  // 生产环境域名通过环境变量配置
+  // 閻㈢喍楠囬悳顖氼暔閸╃喎鎮曢柅姘崇箖閻滎垰顣ㄩ崣姗€鍣洪柊宥囩枂
   ...(process.env.ALLOWED_ORIGIN ? process.env.ALLOWED_ORIGIN.split(',').map(s => s.trim()).filter(Boolean) : []),
 ];
 
 app.use('/api/*', cors({
   origin: (origin) => {
-    // 允许无 origin 的请求（如同源、curl）
+    // 閸忎浇顔忛弮?origin 閻ㄥ嫯顕Ч鍌︾礄婵″倸鎮撳┃鎰┾偓涔rl閿?
     if (!origin) return null;
     return ALLOWED_ORIGINS.includes(origin) ? origin : null;
   },
@@ -99,19 +99,19 @@ app.use('/api/*', cors({
   allowHeaders: ['Content-Type', 'Authorization'],
 }));
 
-// ============ 云端模式：禁用本地专属路由 ============
+// ============ 娴滄垹顏Ο鈥崇础閿涙氨顩﹂悽銊︽拱閸﹂绗撶仦鐐剁熅閻?============
 
-// 云端模式中间件：拦截采集/管理/OB 同步等本地专属路由
+// 娴滄垹顏Ο鈥崇础娑擃參妫挎禒璁圭窗閹凤附鍩呴柌鍥肠/缁狅紕鎮?OB 閸氬本顒炵粵澶嬫拱閸﹂绗撶仦鐐剁熅閻?
 function cloudGuard(): MiddlewareHandler {
   return async (c, next) => {
     if (!IS_CLOUD) return next();
-    return c.json({ error: '云端只读模式，此功能已禁用' }, 403);
+    return c.json({ error: '娴滄垹顏崣顏囶嚢濡€崇础閿涘本顒濋崝鐔诲厴瀹歌尙顩﹂悽? }, 403);
   };
 }
 
-// ============ 管理员认证中间件 ============
+// ============ 缁狅紕鎮婇崨妯款吇鐠囦椒鑵戦梻缈犳 ============
 
-// 管理员 Token 缓存：启动时加载一次，env 更新时刷新
+// 缁狅紕鎮婇崨?Token 缂傛挸鐡ㄩ敍姘儙閸斻劍妞傞崝鐘烘祰娑撯偓濞嗏槄绱漞nv 閺囧瓨鏌婇弮璺哄煕閺?
 let _cachedAdminToken: string | undefined = undefined;
 
 function getAdminToken(): string {
@@ -123,36 +123,36 @@ function getAdminToken(): string {
 function requireAdminAuth(c: Context): { valid: boolean; error?: string } {
   const adminToken = getAdminToken();
   
-  // 🔒 REQUIRE_AUTH 环境变量：强制要求管理员 Token，防止生产环境遗漏配置
+  // 棣冩晙 REQUIRE_AUTH 閻滎垰顣ㄩ崣姗€鍣洪敍姘繁閸掓儼顩﹀Ч鍌滎吀閻炲棗鎲?Token閿涘矂妲诲銏㈡晸娴溠呭箚婢у啴浠愬蹇涘帳缂?
   const requireAuth = process.env.REQUIRE_AUTH === 'true';
   if (!adminToken) {
     if (requireAuth) {
-      return { valid: false, error: '管理员 Token 未配置，REQUIRE_AUTH 模式下禁止写操作' };
+      return { valid: false, error: '缁狅紕鎮婇崨?Token 閺堫亪鍘ょ純顕嗙礉REQUIRE_AUTH 濡€崇础娑撳顩﹀銏犲晸閹垮秳缍? };
     }
-    // 本地开发模式：未配置 Token 时允许所有操作
+    // 閺堫剙婀村鈧崣鎴災佸蹇ョ窗閺堫亪鍘ょ純?Token 閺冭泛鍘戠拋鍛婂閺堝鎼锋担?
     return { valid: true };
   }
   
   const authHeader = c.req.header('Authorization');
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { valid: false, error: '缺少 Authorization 头' };
+    return { valid: false, error: '缂傚搫鐨?Authorization 婢? };
   }
   
   const token = authHeader.slice(7);
-  // 防时序攻击：长度不同时用空 Buffer 填充再比较，避免泄露长度差
+  // 闂冨弶妞傛惔蹇旀暰閸戜紮绱伴梹鍨娑撳秴鎮撻弮鍓佹暏缁?Buffer 婵夘偄鍘栭崘宥嗙槷鏉堝喛绱濋柆鍨帳濞夊嫰婀堕梹鍨瀹?
   const tokenBuf = Buffer.from(token);
   const adminBuf = Buffer.from(adminToken);
   if (tokenBuf.length !== adminBuf.length || !timingSafeEqual(tokenBuf, adminBuf)) {
-    return { valid: false, error: '管理员 Token 无效' };
+    return { valid: false, error: '缁狅紕鎮婇崨?Token 閺冪姵鏅? };
   }
   
   return { valid: true };
 }
 
 /**
- * 写操作鉴权中间件工厂函数
- * 对 POST/PATCH/DELETE 要求管理员 Token，GET 放行
- * 消除 9 次重复的 `const auth = requireAdminAuth(c); if (!auth.valid)...` 模式
+ * 閸愭瑦鎼锋担婊堝閺夊啩鑵戦梻缈犳瀹搞儱宸堕崙鑺ユ殶
+ * 鐎?POST/PATCH/DELETE 鐟曚焦鐪扮粻锛勬倞閸?Token閿涘瓘ET 閺€鎹愵攽
+ * 濞戝牓娅?9 濞嗭繝鍣告径宥囨畱 `const auth = requireAdminAuth(c); if (!auth.valid)...` 濡€崇础
  */
 function writeAuthGuard(): MiddlewareHandler {
   return async (c, next) => {
@@ -164,12 +164,12 @@ function writeAuthGuard(): MiddlewareHandler {
   };
 }
 
-// ============ 前端静态文件 ============
+// ============ 閸撳秶顏棃娆愨偓浣规瀮娴?============
 
 const FRONTEND_DIR = join(__dirname_env, 'frontend');
 
-// ============ 前端 JS 静态文件路由 ============
-// 提供 /js/api-client.js 供前端加载
+// ============ 閸撳秶顏?JS 闂堟瑦鈧焦鏋冩禒鎯扮熅閻?============
+// 閹绘劒绶?/js/api-client.js 娓氭稑澧犵粩顖氬鏉?
 app.get('/js/:filename', async (c) => {
   const filename = c.req.param('filename');
   if (filename.includes('..') || filename.includes('/')) {
@@ -184,20 +184,19 @@ app.get('/js/:filename', async (c) => {
   return c.body(readFileSync(filePath));
 });
 
-// ============ 图片静态文件路由 ============
-// 本地存储的图片通过此路由访问，URL 格式：/api/images/{source}/{filename}
-// 云端模式跳过：图片已在 COS，不需要本地图片服务
+// ============ 閸ュ墽澧栭棃娆愨偓浣规瀮娴犳儼鐭鹃悽?============
+// 閺堫剙婀寸€涙ê鍋嶉惃鍕禈閻楀洭鈧俺绻冨銈堢熅閻㈣精顔栭梻顕嗙礉URL 閺嶇厧绱￠敍?api/images/{source}/{filename}
+// 娴滄垹顏Ο鈥崇础鐠哄疇绻冮敍姘禈閻楀洤鍑￠崷?COS閿涘奔绗夐棁鈧憰浣规拱閸︽澘娴橀悧鍥ㄦ箛閸?
 const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml',
 };
 
-if (!IS_CLOUD) {
-  app.get('/api/images/:subdir/:filename', async (c) => {
+app.get('/api/images/:subdir/:filename', async (c) => {
     const subdir = c.req.param('subdir');
     const filename = c.req.param('filename');
-    // 安全：防止路径遍历
+    // 鐎瑰鍙忛敍姘舵Щ濮濄垼鐭惧鍕憾閸?
     if (subdir.includes('..') || filename.includes('..') || subdir.includes('/') || filename.includes('/')) {
       return c.text('Invalid path', 400);
     }
@@ -207,19 +206,18 @@ if (!IS_CLOUD) {
     const ext = extname(filename).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const buf = readFileSync(filePath);
-    // 长缓存：图片内容基于 MD5，不会变
+    // 闂€璺ㄧ处鐎涙﹫绱伴崶鍓у閸愬懎顔愰崺杞扮艾 MD5閿涘奔绗夋导姘綁
     c.header('Cache-Control', 'public, max-age=31536000, immutable');
     c.header('Content-Type', contentType);
     return c.body(buf);
   });
-}
 
-// 图片代理：服务端请求外部图片（如微信 mmbiz）并返回给前端，绕过防盗链
+// 閸ュ墽澧栨禒锝囨倞閿涙碍婀囬崝锛勵伂鐠囬攱鐪版径鏍劥閸ュ墽澧栭敍鍫濐洤瀵邦喕淇?mmbiz閿涘鑻熸潻鏂挎礀缂佹瑥澧犵粩顖ょ礉缂佹洝绻冮梼鑼磵闁?
 app.get('/api/image-proxy', async (c) => {
   const url = c.req.query('url');
   if (!url) return c.text('Missing url parameter', 400);
 
-  // 只允许代理特定域名
+  // 閸欘亜鍘戠拋闀愬敩閻炲棛澹掔€规艾鐓欓崥?
   const allowedHosts = ['mmbiz.qpic.cn', 'mmbiz.qlogo.cn', 'wx.qlogo.cn'];
   let parsedUrl: URL;
   try {
@@ -276,7 +274,7 @@ app.get('/admin', (c) => {
   return c.text('Admin page not found', 404);
 });
 
-// ============ 运行时环境配置（.env.json） ============
+// ============ 鏉╂劘顢戦弮鍓佸箚婢у啴鍘ょ純顕嗙礄.env.json閿?============
 
 const ENV_FILE = join(__dirname_env, '..', '.env.json');
 
@@ -290,15 +288,15 @@ function loadEnvConfig(): Record<string, string> {
 function saveEnvConfig(config: Record<string, string>): void {
   writeFileSync(ENV_FILE, JSON.stringify(config, null, 2), 'utf-8');
   try {
-    chmodSync(ENV_FILE, 0o600); // 🔒 隐患 6 修复：仅 owner 可读写，保护明文密钥
-  } catch { /* chmod 可能失败（如 Docker 挂载卷），不影响功能 */ }
+    chmodSync(ENV_FILE, 0o600); // 棣冩晙 闂呮劖鍋?6 娣囶喖顦查敍姘矌 owner 閸欘垵顕伴崘娆欑礉娣囨繃濮㈤弰搴㈡瀮鐎靛棝鎸?
+  } catch { /* chmod 閸欘垵鍏樻径杈Е閿涘牆顩?Docker 閹稿倽娴囬崡鍑ょ礆閿涘奔绗夎ぐ鍗炴惙閸旂喕鍏?*/ }
 }
 
-// 获取环境配置（合并 .env.json + process.env，.env.json 优先用于非敏感项）
+// 閼惧嘲褰囬悳顖氼暔闁板秶鐤嗛敍鍫濇値楠?.env.json + process.env閿?env.json 娴兼ê鍘涢悽銊ょ艾闂堢偞鏅遍幇鐔笺€嶉敍?
 app.get('/api/sources/config/env', async (c) => {
   const fileConfig = loadEnvConfig();
 
-  // 检查 Google OAuth 授权状态
+  // 濡偓閺?Google OAuth 閹哄牊娼堥悩鑸碘偓?
   let googleOAuthAuthorized = false;
   let googleOAuthUser = '';
   try {
@@ -310,18 +308,18 @@ app.get('/api/sources/config/env', async (c) => {
   } catch (_) { /* ignore */ }
 
   return c.json({
-    image_storage: 'local', // 当前图片存储方式
+    image_storage: 'local', // 瑜版挸澧犻崶鍓у鐎涙ê鍋嶉弬鐟扮础
     weflow_url: fileConfig.WEFLOW_URL || process.env.WEFLOW_URL || '',
     weflow_token: fileConfig.WEFLOW_TOKEN ? '******' : '',
     miniflux_url: fileConfig.MINIFLUX_URL || process.env.MINIFLUX_URL || '',
     miniflux_user: fileConfig.MINIFLUX_USER || process.env.MINIFLUX_USER || '',
-    // 翻译 API 配置
+    // 缂堟槒鐦?API 闁板秶鐤?
     google_translate_key: fileConfig.GOOGLE_TRANSLATE_KEY ? '******' : '',
     azure_translate_key: fileConfig.AZURE_TRANSLATE_KEY ? '******' : '',
     azure_translate_region: fileConfig.AZURE_TRANSLATE_REGION || 'eastasia',
     azure_translate_endpoint: fileConfig.AZURE_TRANSLATE_ENDPOINT || 'https://api.cognitive.microsofttranslator.com/',
     baidu_translate_configured: existsSync(join(process.env.HOME || '/root', '.workbuddy/keys/baidu_translate.json')),
-    // Google OAuth 配置状态
+    // Google OAuth 闁板秶鐤嗛悩鑸碘偓?
     google_oauth_client_id: fileConfig.GOOGLE_OAUTH_CLIENT_ID || '',
     google_oauth_configured: !!fileConfig.GOOGLE_OAUTH_CLIENT_ID,
     google_oauth_authorized: googleOAuthAuthorized,
@@ -329,12 +327,12 @@ app.get('/api/sources/config/env', async (c) => {
   });
 });
 
-// 更新环境配置（写入 .env.json，同时更新 process.env 使其立即生效）- 需管理员认证
-// 云端模式禁用：不应在云端修改配置
+// 閺囧瓨鏌婇悳顖氼暔闁板秶鐤嗛敍鍫濆晸閸?.env.json閿涘苯鎮撻弮鑸垫纯閺?process.env 娴ｅ灝鍙剧粩瀣祮閻㈢喐鏅ラ敍? 闂団偓缁狅紕鎮婇崨妯款吇鐠?
+// 娴滄垹顏Ο鈥崇础缁備胶鏁ら敍姘瑝鎼存柨婀禍鎴狀伂娣囶喗鏁奸柊宥囩枂
 app.patch('/api/sources/config/env', (c) => {
-  if (IS_CLOUD) return c.json({ error: '云端只读模式，环境配置不可修改' }, 403);
+  if (IS_CLOUD) return c.json({ error: '娴滄垹顏崣顏囶嚢濡€崇础閿涘瞼骞嗘晶鍐帳缂冾喕绗夐崣顖欐叏閺€? }, 403);
   return c.req.json().then(async (body: any) => {
-    // 管理员认证检查
+    // 缁狅紕鎮婇崨妯款吇鐠囦焦顥呴弻?
     const auth = requireAdminAuth(c);
     if (!auth.valid) return c.json({ error: auth.error }, 401);
     
@@ -342,14 +340,14 @@ app.patch('/api/sources/config/env', (c) => {
 
     const fileConfig = loadEnvConfig();
 
-    // 映射前端字段名到环境变量名
+    // 閺勭姴鐨犻崜宥囶伂鐎涙顔岄崥宥呭煂閻滎垰顣ㄩ崣姗€鍣洪崥?
     const mapping: Record<string, string> = {
       weflow_url: 'WEFLOW_URL',
       weflow_token: 'WEFLOW_TOKEN',
       miniflux_url: 'MINIFLUX_URL',
       miniflux_user: 'MINIFLUX_USER',
       miniflux_pass: 'MINIFLUX_PASS',
-      // 翻译 API
+      // 缂堟槒鐦?API
       google_translate_key: 'GOOGLE_TRANSLATE_KEY',
       azure_translate_key: 'AZURE_TRANSLATE_KEY',
       azure_translate_region: 'AZURE_TRANSLATE_REGION',
@@ -364,25 +362,25 @@ app.patch('/api/sources/config/env', (c) => {
       if (body[key] !== undefined && body[key] !== '******') {
         const val = String(body[key]);
         fileConfig[envKey] = val;
-        process.env[envKey] = val;  // 立即生效
+        process.env[envKey] = val;  // 缁斿宓嗛悽鐔告櫏
       }
     }
 
     saveEnvConfig(fileConfig);
-    invalidateEnvCache(); // 让 file-storage 下次重新读取
-    _cachedAdminToken = undefined; // 刷新 adminToken 缓存
+    invalidateEnvCache(); // 鐠?file-storage 娑撳顐奸柌宥嗘煀鐠囪褰?
+    _cachedAdminToken = undefined; // 閸掗攱鏌?adminToken 缂傛挸鐡?
     return c.json({ ok: true });
   }).catch(() => c.json({ error: 'Invalid JSON' }, 400));
 });
 
-// ============ 注册路由 ============
+// ============ 濞夈劌鍞界捄顖滄暠 ============
 
-// 测试路由
+// 濞村鐦捄顖滄暠
 app.get('/api/test', (c) => c.json({ msg: 'test ok', cloud: IS_CLOUD }));
 
-// ============ 路由注册 ============
+// ============ 鐠侯垳鏁卞▔銊ュ斀 ============
 
-// 所有路由模块通过工厂函数注册，统一接收 sql 实例
+// 閹碘偓閺堝鐭鹃悽杈侀崸妤呪偓姘崇箖瀹搞儱宸堕崙鑺ユ殶濞夈劌鍞介敍宀€绮烘稉鈧幒銉︽暪 sql 鐎圭偘绶?
 app.route('/api/sources', createSourcesRoutes(sql, requireAdminAuth));
 app.route('/api/articles', createArticlesRoutes(sql));
 
@@ -400,7 +398,7 @@ app.use('/api/wechat-group-admin/*', writeAuthGuard());
 app.use('/api/ai/*', writeAuthGuard());
 app.use('/api/scheduler/*', writeAuthGuard());
 
-// 云端模式：采集/管理/OB 相关路由全部拦截
+// 娴滄垹顏Ο鈥崇础閿涙岸鍣伴梿?缁狅紕鎮?OB 閻╃鍙х捄顖滄暠閸忋劑鍎撮幏锔藉焻
 app.use('/api/fetch/*', cloudGuard());
 app.use('/api/wechat-admin/*', cloudGuard());
 app.use('/api/wechat-group-admin/*', cloudGuard());
@@ -412,7 +410,7 @@ app.use('/api/twitter-admin/*', cloudGuard());
 app.use('/api/caixin/*', cloudGuard());
 app.use('/api/scheduler/*', cloudGuard());
 app.use('/api/auth/google/*', cloudGuard());
-// sync 写操作：云端只保留 GET（统计/日志），写操作拦截
+// sync 閸愭瑦鎼锋担婊愮窗娴滄垹顏崣顏冪箽閻?GET閿涘牏绮虹拋?閺冦儱绻旈敍澶涚礉閸愭瑦鎼锋担婊勫閹?
 app.use('/api/sync/files', cloudGuard());
 app.use('/api/sync/reconcile', cloudGuard());
 app.use('/api/sync/push', cloudGuard());
@@ -435,45 +433,45 @@ app.route('/api/ai', createAiRoutes(sql));
 app.route('/api/caixin', createCaixinRoutes(sql, requireAdminAuth));
 app.route('/api/scheduler', createSchedulerRoutes(sql));
 
-// ============ 云端模式：数据同步接收端点 ============
+// ============ 娴滄垹顏Ο鈥崇础閿涙碍鏆熼幑顔兼倱濮濄儲甯撮弨鍓侇伂閻?============
 
 if (IS_CLOUD) {
   import('./routes/cloud-sync.js').then(({ createCloudSyncRoutes }) => {
     app.route('/api/cloud-sync', createCloudSyncRoutes(sql));
-    console.log('[云端] 数据同步接收端点已注册: POST /api/cloud-sync/push');
+    console.log('[娴滄垹顏琞 閺佺増宓侀崥灞绢劄閹恒儲鏁圭粩顖滃仯瀹稿弶鏁為崘? POST /api/cloud-sync/push');
   }).catch((err) => {
-    console.warn('[云端] 无法加载 cloud-sync 路由:', err.message);
+    console.warn('[娴滄垹顏琞 閺冪姵纭堕崝鐘烘祰 cloud-sync 鐠侯垳鏁?', err.message);
   });
 }
 
-// ============ 启动 ============
+// ============ 閸氼垰濮?============
 
 const port = Number(process.env.PORT || 3001);
 
-// 🔒 启动时检查 ADMIN_TOKEN 配置
+// 棣冩晙 閸氼垰濮╅弮鑸殿梾閺?ADMIN_TOKEN 闁板秶鐤?
 if (!getAdminToken()) {
   if (process.env.REQUIRE_AUTH === 'true') {
-    console.error('🚨 [严重安全错误] REQUIRE_AUTH=true 但 ADMIN_TOKEN 未配置！');
-    console.error('请在环境变量或 .env.json 中配置 ADMIN_TOKEN，或移除 REQUIRE_AUTH');
+    console.error('棣冩瘍 [娑撱儵鍣哥€瑰鍙忛柨娆掝嚖] REQUIRE_AUTH=true 娴?ADMIN_TOKEN 閺堫亪鍘ょ純顕嗙磼');
+    console.error('鐠囧嘲婀悳顖氼暔閸欐﹢鍣洪幋?.env.json 娑擃參鍘ょ純?ADMIN_TOKEN閿涘本鍨ㄧ粔濠氭珟 REQUIRE_AUTH');
     process.exit(1);
   }
-  console.warn('⚠️  [安全警告] ADMIN_TOKEN 未配置，所有写操作不需要认证，仅适合本地开发！');
-  console.warn('   💡 生产环境请设置 ADMIN_TOKEN，或在环境变量中设置 REQUIRE_AUTH=true 强制启用认证');
+  console.warn('閳跨媴绗? [鐎瑰鍙忕拃锕€鎲 ADMIN_TOKEN 閺堫亪鍘ょ純顕嗙礉閹碘偓閺堝鍟撻幙宥勭稊娑撳秹娓剁憰浣筋吇鐠囦緤绱濇禒鍛粹偓鍌氭値閺堫剙婀村鈧崣鎴磼');
+  console.warn('   棣冩寱 閻㈢喍楠囬悳顖氼暔鐠囩柉顔曠純?ADMIN_TOKEN閿涘本鍨ㄩ崷銊у箚婢у啫褰夐柌蹇庤厬鐠佸墽鐤?REQUIRE_AUTH=true 瀵搫鍩楅崥顖滄暏鐠併倛鐦?);
 }
 
-// 🔒 P2-11：启动时检查 OB_DIR 是否存在，避免运行时静默失败（云端模式跳过）
+// 棣冩晙 P2-11閿涙艾鎯庨崝銊︽濡偓閺?OB_DIR 閺勵垰鎯佺€涙ê婀敍宀勪缉閸忓秷绻嶇悰灞炬闂堟瑩绮径杈Е閿涘牅绨粩顖浤佸蹇氱儲鏉╁浄绱?
 if (!IS_CLOUD) {
   const obDir = getObDir();
   if (!existsSync(obDir)) {
-    console.warn(`⚠️  [警告] OB_DIR 不存在: ${obDir}，Obsidian 文件写入将失败！`);
+    console.warn(`閳跨媴绗? [鐠€锕€鎲 OB_DIR 娑撳秴鐡ㄩ崷? ${obDir}閿涘bsidian 閺傚洣娆㈤崘娆忓弳鐏忓棗銇戠拹銉磼`);
   }
 }
 
-// ============ 内建定时调度器（每小时采集 + 云端同步） ============
+// ============ 閸愬懎缂撶€规碍妞傜拫鍐ㄥ閸ｎ煉绱欏В蹇撶毈閺冨爼鍣伴梿?+ 娴滄垹顏崥灞绢劄閿?============
 if (!IS_CLOUD) {
   const HOURLY_MS = 60 * 60 * 1000;
 
-  // 计算下一个整点偏移时刻（默认每小时 HH:10）
+  // 鐠侊紕鐣绘稉瀣╃娑擃亝鏆ｉ悙鐟颁焊缁夌粯妞傞崚浼欑礄姒涙顓诲В蹇撶毈閺?HH:10閿?
   function getNextRunTarget(offsetMin: number): Date {
     const now = new Date();
     const target = new Date(now);
@@ -486,7 +484,7 @@ if (!IS_CLOUD) {
 
   async function scheduleNextRun() {
     try {
-      // 下一小时 XX:10
+      // 娑撳绔寸亸蹇旀 XX:10
       const target = getNextRunTarget(10);
       const delayMs = target.getTime() - Date.now();
       const delayMin = Math.round(delayMs / 60000);
@@ -501,29 +499,30 @@ if (!IS_CLOUD) {
         } catch (e: any) {
           console.error('[scheduler] error:', e.message);
         }
-        // pushToCloud 已在 runDailyFetch 内部自动触发
+        // pushToCloud 瀹告彃婀?runDailyFetch 閸愬懘鍎撮懛顏勫З鐟欙箑褰?
         await scheduleNextRun();
       }, delayMs);
     } catch (e: any) {
       console.error('[scheduler] init error:', e.message);
-      setTimeout(scheduleNextRun, 60000); // 错误时 1 分钟后重试
+      setTimeout(scheduleNextRun, 60000); // 闁挎瑨顕ら弮?1 閸掑棝鎸撻崥搴ㄥ櫢鐠?
     }
   }
 
   scheduleNextRun();
-  // 启动后 30s 做一次初始云端同步
+  // 閸氼垰濮╅崥?30s 閸嬫矮绔村▎鈥冲灥婵绨粩顖氭倱濮?
   setTimeout(function() { pushToCloud(); }, 30000);
 }
 
 
-// 全局未捕获异常/拒绝处理，防止进程静默崩溃
+// 閸忋劌鐪張顏呭礋閼惧嘲绱撶敮?閹锋帞绮锋径鍕倞閿涘矂妲诲銏ｇ箻缁嬪娼ゆ妯虹┛濠?
 process.on('uncaughtException', (err, origin) => {
-  console.error(`[致命] uncaughtException (${origin}):`, err);
+  console.error(`[閼锋潙鎳 uncaughtException (${origin}):`, err);
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[致命] unhandledRejection:', reason);
+  console.error('[閼锋潙鎳 unhandledRejection:', reason);
 });
 
-console.log(`InfoHub API 启动: http://0.0.0.0:${port}（${IS_CLOUD ? '云端只读模式' : '本地全功能模式，局域网/Tailscale 可访问'}）`);
+console.log(`InfoHub API 閸氼垰濮? http://0.0.0.0:${port}閿?{IS_CLOUD ? '娴滄垹顏崣顏囶嚢濡€崇础' : '閺堫剙婀撮崗銊ュ閼宠姤膩瀵骏绱濈仦鈧崺鐔虹秹/Tailscale 閸欘垵顔栭梻?}閿涘ˇ);
 
 serve({ fetch: app.fetch, hostname: '0.0.0.0', port });
+
