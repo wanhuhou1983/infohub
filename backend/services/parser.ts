@@ -1,14 +1,14 @@
 /**
- * HTML 瑙ｆ瀽妯″潡
- * 浣跨敤 cheerio 鍋氱粨鏋勫寲瑙ｆ瀽锛屾浛浠ｈ剢寮辩殑姝ｅ垯鍖归厤
+ * HTML 解析模块
+ * 使用 cheerio 做结构化解析，替代脆弱的正则匹配
  */
 
 import * as cheerio from 'cheerio';
 
-// ============ CCTV 鏂伴椈鑱旀挱 ============
+// ============ CCTV 新闻联播 ============
 
 /**
- * 瑙ｆ瀽 CCTV 鏂伴椈鑱旀挱鍒楄〃椤碉紝鎻愬彇鏂囩珷閾炬帴鍜屾爣棰?
+ * 解析 CCTV 新闻联播列表页，提取文章链接和标题
  */
 export function parseXWLBListHtml(html: string, dateStr: string): Array<{
   title: string;
@@ -24,7 +24,7 @@ export function parseXWLBListHtml(html: string, dateStr: string): Array<{
   const day = dateStr.slice(6, 8);
   const publishedAt = `${year}-${month}-${day}T19:30:00`;
 
-  // 鏌ユ壘鎵€鏈夋寚鍚?VIDE 椤甸潰鐨勯摼鎺?
+  // 查找所有指向 VIDE 页面的链接
   $('a[href*="VIDE"]').each((_, el) => {
     const href = $(el).attr('href') || '';
     const title = ($(el).attr('alt') || $(el).attr('title') || $(el).text() || '').trim();
@@ -32,12 +32,12 @@ export function parseXWLBListHtml(html: string, dateStr: string): Array<{
     if (!href || !title) return;
     if (!href.match(/https?:\/\/tv\.cctv\.com\/\d{4}\/\d{2}\/\d{2}\/VIDE\w+\.shtml/)) return;
     
-    // 娓呯悊鏍囬
-    const cleanTitle = title.replace(/^\[瑙嗛\]\s*/, '');
-    if (!cleanTitle || cleanTitle.startsWith('銆婃柊闂昏仈鎾€?)) return;
-    if (cleanTitle.includes('瀹屾暣鐗?) && cleanTitle.includes('鏂伴椈鑱旀挱')) return;
+    // 清理标题
+    const cleanTitle = title.replace(/^\[视频\]\s*/, '');
+    if (!cleanTitle || cleanTitle.startsWith('《新闻联播》')) return;
+    if (cleanTitle.includes('完整版') && cleanTitle.includes('新闻联播')) return;
 
-    // 鍘婚噸
+    // 去重
     if (seen.has(href)) return;
     seen.add(href);
 
@@ -48,15 +48,15 @@ export function parseXWLBListHtml(html: string, dateStr: string): Array<{
 }
 
 /**
- * 瑙ｆ瀽 CCTV 鍗曟潯鏂伴椈椤甸潰姝ｆ枃
+ * 解析 CCTV 单条新闻页面正文
  */
 export function parseXWLBContentHtml(html: string): string | null {
   const $ = cheerio.load(html);
 
-  // 浼樺厛鍖归厤 id="content_area"
+  // 优先匹配 id="content_area"
   let contentEl = $('#content_area');
   if (contentEl.length === 0) {
-    // 澶囩敤锛歝lass="content_area"
+    // 备用：class="content_area"
     contentEl = $('.content_area');
   }
   if (contentEl.length === 0) return null;
@@ -64,15 +64,15 @@ export function parseXWLBContentHtml(html: string): string | null {
   return cleanHtmlToText($.html(contentEl) || contentEl.html() || '');
 }
 
-// ============ 浜烘皯鏃ユ姤 ============
+// ============ 人民日报 ============
 
 /**
- * 瑙ｆ瀽浜烘皯鏃ユ姤椤甸潰姝ｆ枃
+ * 解析人民日报页面正文
  */
 export function parseRMRBContentHtml(html: string): string | null {
   const $ = cheerio.load(html);
 
-  // 浜烘皯鏃ユ姤 PC 鐗堟枃绔犲唴瀹瑰尯鍩?- 姝ｇ‘鐨勯€夋嫨鍣?
+  // 人民日报 PC 版文章内容区域 - 正确的选择器
   let contentEl = $('#articleContent');
   if (contentEl.length === 0) {
     contentEl = $('#articleText');
@@ -84,17 +84,17 @@ export function parseRMRBContentHtml(html: string): string | null {
     contentEl = $('.text_con');
   }
   if (contentEl.length === 0) {
-    // 鍏滃簳锛氭煡鎵炬鏂囧尯鍩?
+    // 兜底：查找正文区域
     contentEl = $('article').first();
   }
   if (contentEl.length === 0) return null;
 
-  // 鑾峰彇鍏冪礌鍐呯殑 HTML 骞舵墜鍔ㄦ竻鐞?
+  // 获取元素内的 HTML 并手动清理
   const contentHtml = contentEl.html() || '';
-  console.log('[RMRB] contentHtml 闀垮害:', contentHtml.length);
+  console.log('[RMRB] contentHtml 长度:', contentHtml.length);
   if (!contentHtml.trim()) return null;
 
-  // 澶勭悊鍥剧墖
+  // 处理图片
   const $$ = cheerio.load(contentHtml);
   $$('img').each((_, el) => {
     const img = $$(el);
@@ -106,73 +106,73 @@ export function parseRMRBContentHtml(html: string): string | null {
     }
   });
 
-  // 鑾峰彇绾枃鏈?
+  // 获取纯文本
   let text = $$.root().text();
 
-  // HTML 瀹炰綋娓呯悊
+  // HTML 实体清理
   text = text
-    .replace(/鈥?g, '\u201C').replace(/鈥?g, '\u201D')
-    .replace(/鈥?g, '\u2018').replace(/鈥?g, '\u2019')
-    .replace(/鈥?g, '\u2014').replace(/鈥?g, '\u2013')
-    .replace(/鈥?g, '\u2026')
-    .replace(/聽/g, ' ')
+    .replace(/“/g, '\u201C').replace(/”/g, '\u201D')
+    .replace(/‘/g, '\u2018').replace(/’/g, '\u2019')
+    .replace(/—/g, '\u2014').replace(/–/g, '\u2013')
+    .replace(/…/g, '\u2026')
+    .replace(/ /g, ' ')
     .replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>')
     .replace(/"/g, '"');
 
-  // 娓呯悊澶氫綑绌鸿
+  // 清理多余空行
   text = text.replace(/\n{3,}/g, '\n\n').trim();
 
   return text || null;
 }
 
-// ============ 寰俊鍏紬鍙?============
+// ============ 微信公众号 ============
 
 /**
- * 瑙ｆ瀽寰俊鍏紬鍙烽〉闈㈡鏂?
- * 杩斿洖澶勭悊鍚庣殑鏂囨湰锛堝浘鐗囩敤 __IMG__url__IMG__ 鏍囪锛?
+ * 解析微信公众号页面正文
+ * 返回处理后的文本（图片用 __IMG__url__IMG__ 标记）
  */
 export function parseWechatContentHtml(html: string): string | null {
   const $ = cheerio.load(html);
 
-  // 浼樺厛鍖归厤 id="js_content"
+  // 优先匹配 id="js_content"
   let contentEl = $('#js_content');
   if (contentEl.length === 0) {
-    // 澶囩敤锛歝lass 鍚?rich_media_content
+    // 备用：class 含 rich_media_content
     contentEl = $('.rich_media_content').first();
   }
   if (contentEl.length === 0) return null;
 
-  // 澶勭悊鍥剧墖锛氬井淇＄敤 data-src 鎳掑姞杞?
+  // 处理图片：微信用 data-src 懒加载
   contentEl.find('img').each((_, el) => {
     const img = $(el);
-    // 浼樺厛鍙?data-src锛堝井淇℃噿鍔犺浇锛?
+    // 优先取 data-src（微信懒加载）
     let src = img.attr('data-src') || img.attr('src') || '';
     
-    // 璺宠繃鍗犱綅鍥惧拰鍥炬爣
+    // 跳过占位图和图标
     if (!src || src.includes('data:image')) {
       img.remove();
       return;
     }
 
-    // 鏇挎崲涓?__IMG__ 鏍囪
+    // 替换为 __IMG__ 标记
     img.replaceWith(`__IMG__${src}__IMG__`);
   });
 
   return cleanHtmlToText(contentEl.html() || '');
 }
 
-// ============ 閫氱敤 HTML 娓呯悊 ============
+// ============ 通用 HTML 清理 ============
 
 /**
- * 灏?HTML 鐗囨娓呯悊涓虹函鏂囨湰
- * 淇濈暀 __IMG__ 鏍囪锛屽叾浣欐爣绛捐浆涓烘枃鏈?
+ * 将 HTML 片段清理为纯文本
+ * 保留 __IMG__ 标记，其余标签转为文本
  */
 export function cleanHtmlToText(html: string): string {
   if (!html) return '';
 
   const $ = cheerio.load(html);
   
-  // <img> 鏍囩锛氬鏋滆繕娈嬬暀鏈澶勭悊鐨勶紝鎻愬彇 src 杞负 __IMG__ 鏍囪
+  // <img> 标签：如果还残留未被处理的，提取 src 转为 __IMG__ 标记
   $('img').each((_, el) => {
     const src = $(el).attr('src') || $(el).attr('data-src') || '';
     if (src && !src.startsWith('data:')) {
@@ -182,21 +182,21 @@ export function cleanHtmlToText(html: string): string {
     }
   });
 
-  // <p> 杞崲琛?
+  // <p> 转换行
   $('p').each((_, el) => {
     $(el).append('\n\n');
   });
 
-  // <br> 杞崲琛?
+  // <br> 转换行
   $('br').replaceWith('\n');
 
-  // <strong>/<b> 鍘绘爣绛剧暀鏂囧瓧
-  // cheerio 鐨?.text() 宸茶嚜鍔ㄥ鐞?
+  // <strong>/<b> 去标签留文字
+  // cheerio 的 .text() 已自动处理
 
-  // 鑾峰彇绾枃鏈?
+  // 获取纯文本
   let text = $.root().text();
 
-  // HTML 瀹炰綋锛坈heerio 宸插鐞嗗ぇ閮ㄥ垎锛岃繖閲岃ˉ鍏咃級
+  // HTML 实体（cheerio 已处理大部分，这里补充）
   text = text
     .replace(/&ldquo;/g, '\u201C').replace(/&rdquo;/g, '\u201D')
     .replace(/&lsquo;/g, '\u2018').replace(/&rsquo;/g, '\u2019')
@@ -206,19 +206,19 @@ export function cleanHtmlToText(html: string): string {
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"');
 
-  // 娓呯悊澶氫綑绌鸿
+  // 清理多余空行
   text = text.replace(/\n{3,}/g, '\n\n').trim();
 
   return text;
 }
 
-// ============ cn.govopendata.com 鏂伴椈鑱旀挱鍏ㄦ枃 ============
+// ============ cn.govopendata.com 新闻联播全文 ============
 
 /**
- * 瑙ｆ瀽 cn.govopendata.com 鏂伴椈鑱旀挱鍏ㄦ枃椤?
- * 杩斿洖姣忔潯鏂伴椈鐨勫畬鏁存爣棰樺拰姝ｆ枃
- * 缁撴瀯锛?article.content-section> 鈫?<h2.content-heading> + <div.content-body> 鈫?<p>
- * 澶辫触鏃惰繑鍥炵┖鏁扮粍
+ * 解析 cn.govopendata.com 新闻联播全文页
+ * 返回每条新闻的完整标题和正文
+ * 结构：<article.content-section> → <h2.content-heading> + <div.content-body> → <p>
+ * 失败时返回空数组
  */
 export function parseGovopendataXWLB(html: string): Array<{ title: string; body: string }> {
   const $ = cheerio.load(html);
@@ -238,4 +238,3 @@ export function parseGovopendataXWLB(html: string): Array<{ title: string; body:
 
   return items;
 }
-
