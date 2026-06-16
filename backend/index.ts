@@ -193,8 +193,6 @@ const MIME_TYPES: Record<string, string> = {
   '.webp': 'image/webp', '.svg': 'image/svg+xml',
 };
 
-};
-
 // Mac 本地 Tailscale IP，云端通过此地址回源获取图片
 // 可通过环境变量 MAC_TAILSCALE_IP 配置（云端部署时需要设置）
 const MAC_TAILSCALE_IP = process.env.MAC_TAILSCALE_IP || '100.114.3.62';
