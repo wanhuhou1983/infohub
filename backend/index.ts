@@ -186,32 +186,60 @@ app.get('/js/:filename', async (c) => {
 
 // ============ 图片静态文件路由 ============
 // 本地存储的图片通过此路由访问，URL 格式：/api/images/{source}/{filename}
-// 云端模式跳过：图片已在 COS，不需要本地图片服务
+// 云端模式下，优先尝试本地文件，不存在时通过 Tailscale 回源到 Mac 本地
 const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml',
 };
 
-app.get('/api/images/:subdir/:filename', async (c) => {
-    const subdir = c.req.param('subdir');
-    const filename = c.req.param('filename');
-    // 安全：防止路径遍历
-    if (subdir.includes('..') || filename.includes('..') || subdir.includes('/') || filename.includes('/')) {
-      return c.text('Invalid path', 400);
-    }
-    const filePath = join(getImagesDir(), subdir, filename);
-    if (!existsSync(filePath)) return c.text('Not found', 404);
+};
 
+// Mac 本地 Tailscale IP，云端通过此地址回源获取图片
+// 可通过环境变量 MAC_TAILSCALE_IP 配置（云端部署时需要设置）
+const MAC_TAILSCALE_IP = process.env.MAC_TAILSCALE_IP || '100.114.3.62';
+
+app.get('/api/images/:subdir/:filename', async (c) => {
+  const subdir = c.req.param('subdir');
+  const filename = c.req.param('filename');
+  // 安全：防止路径遍历
+  if (subdir.includes('..') || filename.includes('..') || subdir.includes('/') || filename.includes('/')) {
+    return c.text('Invalid path', 400);
+  }
+  const filePath = join(getImagesDir(), subdir, filename);
+
+  // 本地有文件则直接返回（本地模式、或云端后台已有同步文件）
+  if (existsSync(filePath)) {
     const ext = extname(filename).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
     const buf = readFileSync(filePath);
-    // 长缓存：图片内容基于 MD5，不会变
     c.header('Cache-Control', 'public, max-age=31536000, immutable');
     c.header('Content-Type', contentType);
     return c.body(buf);
-  });
+  }
 
+  // 云端模式：文件不存在时通过 Tailscale 回源到 Mac 本地
+  if (IS_CLOUD) {
+    try {
+      const proxyUrl = `http://${MAC_TAILSCALE_IP}:3001/api/images/${encodeURIComponent(subdir)}/${encodeURIComponent(filename)}`;
+      const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
+      if (resp.ok) {
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const ext = extname(filename).toLowerCase();
+        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+        c.header('Cache-Control', 'public, max-age=31536000, immutable');
+        c.header('Content-Type', contentType);
+        return c.body(buf);
+      }
+    } catch {
+      // fall through to 404
+    }
+  }
+
+  return c.text('Not found', 404);
+});
+
+// 图片代理：服务端请求外部图片（如微信 mmbiz）并返回给前端，绕过防盗链
 // 图片代理：服务端请求外部图片（如微信 mmbiz）并返回给前端，绕过防盗链
 app.get('/api/image-proxy', async (c) => {
   const url = c.req.query('url');
