@@ -467,6 +467,13 @@ def _extract_tweets(data: dict, out: list):
 # 微信公众号文章采集
 # ═══════════════════════════════════════════
 
+def normalize_url(url: str) -> str:
+    """将协议相对 URL (//mmbiz...) 转为完整 HTTPS URL"""
+    if url.startswith('//'):
+        return 'https:' + url
+    return url
+
+
 def fetch_wechat_article(url: str) -> dict:
     """使用 Playwright 抓取微信公众号文章全文"""
     launch_args = {'headless': True}
@@ -497,13 +504,22 @@ def fetch_wechat_article(url: str) -> dict:
             # 提取正文 HTML（含图片）
             content_el = page.query_selector('#js_content')
             if content_el:
+                import re
                 # 用 inner_html 保留图片结构
                 content = content_el.inner_html()
-                # 将 <img> 标签替换为 __IMG__ 标记（兼容后端 saveArticleFile）
-                import re
+                
+                # 微信公众号图片用 data-src 做懒加载，需要优先匹配 data-src
+                # 处理顺序：先 data-src（微信懒加载），再普通 src
+                # 1. 提取 data-src 中的图片 URL（微信主要格式）
                 content = re.sub(
-                    r'<img[^>]+src=["\'](https?://[^"\']+)["\'][^>]*>',
-                    r'__IMG__\1__IMG__',
+                    r'<img[^>]*\bdata-src=["\']((?:https?:)?//[^"\']+)["\'][^>]*>',
+                    lambda m: '__IMG__' + normalize_url(m.group(1)) + '__IMG__',
+                    content
+                )
+                # 2. 提取剩余的普通 src 图片（非微信标准格式）
+                content = re.sub(
+                    r'<img[^>]*\bsrc=["\']((?:https?:)?//[^"\']+)["\'][^>]*>',
+                    lambda m: '__IMG__' + normalize_url(m.group(1)) + '__IMG__',
                     content
                 )
                 # 去除多余 HTML 标签，保留文本和 __IMG__ 标记
