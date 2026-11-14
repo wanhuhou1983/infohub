@@ -1,0 +1,30 @@
+# 凭据绝不进镜像：配置一律通过 /opt/infohub/.env.json 挂载 + --env-file 注入
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+
+# 版本控制与本地工作区数据
+.git
+.gitignore
+.github
+.workbuddy
+data/
+tmp/
+*.log
+
+# 依赖与大体积本地数据（镜像内由 bun install 重装）
+**/node_modules
+backend/data/
+backend/obsidian/
+backend/obsidian-local/
+backend/frontend/data/
+backend/*.db
+backend/*.sqlite*
+
+# 采集产物与临时文件
+**/__pycache__
+**/*.pyc
+**/.DS_Store
+**/._*
