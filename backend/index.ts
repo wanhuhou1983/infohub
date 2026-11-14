@@ -46,6 +46,7 @@ import { createCaixinRoutes } from './routes/caixin.js';
 import { createSystemRoutes } from './routes/system.js';
 import { createSchedulerRoutes, runDailyFetch, pushToCloud } from './services/scheduler.js';
 import { startCloudCollector } from './services/cloud-collector.js';
+import { startDailyBriefing } from './services/daily-briefing.js';
 import { invalidateEnvCache, getImagesDir, getObDir } from './file-storage.js';
 import { fail } from './shared/response.js';
 
@@ -557,6 +558,8 @@ if (!IS_CLOUD) {
 // 云端文本采集模式：只跑文本类源，写云端 PG + COS 归档，不触发 pushToCloud
 if (IS_COLLECTOR) {
   startCloudCollector(sql);
+  // 每日简报：北京时间 21:50 汇总当天文本源生成 LLM 简报
+  startDailyBriefing(sql);
 }
 
 

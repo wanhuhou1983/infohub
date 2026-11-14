@@ -26,7 +26,8 @@ export async function pushToCloud(): Promise<void> {
   try {
     console.log('[cloud-sync] 开始 PG 直连同步...');
     const syncScript = join(__dirname_scheduler, '..', '..', 'scripts', 'sync-pg-to-cloud.ts');
-    const proc = Bun.spawn(['bun', 'run', syncScript], {
+    // 用自身可执行文件绝对路径，避免 PATH 缺失时 "Executable not found: bun"
+    const proc = Bun.spawn([process.execPath || 'bun', 'run', syncScript], {
       stdout: 'pipe',
       stderr: 'pipe',
     });
