@@ -14,7 +14,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Pack tracked source (no secrets, no data)
-        run: git archive --format=tar.gz -o /tmp/infohub-src.tar.gz HEAD
+        # scp-action 的 source 必须相对 GITHUB_WORKSPACE，绝对路径会打出空包
+        run: git archive --format=tar.gz -o infohub-src.tar.gz HEAD
 
       - name: Upload source to VPS
         uses: appleboy/scp-action@v0.1.7
@@ -23,8 +24,9 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_KEY }}
           port: ${{ secrets.DEPLOY_PORT || '22' }}
-          source: /tmp/infohub-src.tar.gz
+          source: infohub-src.tar.gz
           target: /tmp/
+          overwrite: true
 
       - name: Overlay source and restart backend
         uses: appleboy/ssh-action@v1
