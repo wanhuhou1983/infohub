@@ -107,6 +107,7 @@ jobs:
             # 凭据不落仓库；文件缺失直接失败，避免静默使用错误配置。
             test -f /opt/infohub/.env.json || { echo "missing /opt/infohub/.env.json"; exit 1; }
             sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+            sudo chown $(id -u):$(id -g) /opt/infohub/backend.env
             docker run -d \
               --name infohub-backend \
               --restart unless-stopped \

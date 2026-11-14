@@ -59,6 +59,7 @@ jobs:
               fi
               echo "=== prepare env-file from /opt/infohub/.env.json ==="
               sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+              sudo chown $(id -u):$(id -g) /opt/infohub/backend.env
               echo "=== restart backend with new image ==="
               docker stop infohub-backend 2>/dev/null || true
               docker rm infohub-backend 2>/dev/null || true

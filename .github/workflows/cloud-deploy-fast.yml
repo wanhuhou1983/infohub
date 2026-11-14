@@ -1,0 +1,77 @@
+name: InfoHub Cloud Fast Deploy
+
+# 跨境 docker pull GHCR 大镜像层经常 EOF。云端已有基础镜像时，
+# 只把「源码层」覆盖上去本地构建，几 MB 传输 + 秒级 build，完全不拉大层。
+# 适用于代码更新；若基础镜像依赖变化，改用 deploy-backend.yml 全量构建。
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Fast deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pack tracked source (no secrets, no data)
+        run: git archive --format=tar.gz -o /tmp/infohub-src.tar.gz HEAD
+
+      - name: Upload source to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          source: /tmp/infohub-src.tar.gz
+          target: /tmp/
+
+      - name: Overlay source and restart backend
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || '22' }}
+          script_stop: true
+          command_timeout: '15m'
+          script: |
+            set -e
+            echo "=== 1. Unpack source ==="
+            sudo mkdir -p /opt/infohub/src
+            sudo tar xzf /tmp/infohub-src.tar.gz -C /opt/infohub/src
+            sudo chown -R $(id -u):$(id -g) /opt/infohub/src
+            cd /opt/infohub/src
+            printf 'FROM ghcr.io/wanhuhou1983/infohub/infohub-backend:latest\nRUN rm -f /app/.env /app/.env.json\nCOPY backend/ /app/\nCOPY frontend/ /app/frontend/\n' > Dockerfile.fast
+            echo "=== 2. Build overlay image (uses cached base, no downloads) ==="
+            docker build -f Dockerfile.fast -t infohub-backend:cloud .
+            echo "=== 3. Prepare env-file ==="
+            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+            sudo chown $(id -u):$(id -g) /opt/infohub/backend.env
+            echo "=== 4. Restart backend ==="
+            docker stop infohub-backend 2>/dev/null || true
+            docker rm infohub-backend 2>/dev/null || true
+            docker run -d \
+              --name infohub-backend \
+              --restart unless-stopped \
+              -p 3001:3001 \
+              --env-file /opt/infohub/backend.env \
+              -e CLOUD_MODE=true \
+              -e TZ=Asia/Shanghai \
+              -v /opt/infohub/data:/app/data \
+              -v /opt/infohub/.env.json:/.env.json:ro \
+              --network infohub-net \
+              --log-opt max-size=10m \
+              --log-opt max-file=3 \
+              infohub-backend:cloud
+            echo "=== 5. Health ==="
+            sleep 8
+            curl -fsS --max-time 10 http://localhost:3001/api/test
+            echo ""
+            echo "=== effective env (names only) ==="
+            docker inspect infohub-backend --format '{{range .Config.Env}}{{println .}}{{end}}' \
+              | sed 's/=.*/=<set>/' \
+              | grep -E 'COLLECTOR_MODE|JTK_USER|COS_BUCKET|INTERNAL_FETCH_TOKEN|OB_WRITE_ENABLED|WECHAT_SERVICE_URL|TZ=' | sort || true
+            echo "=== collector logs ==="
+            docker logs --tail 80 infohub-backend 2>&1 | grep -iE 'cloud-collector|error' | tail -20 || true
+            echo "Done!"
