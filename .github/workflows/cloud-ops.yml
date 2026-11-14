@@ -12,6 +12,7 @@ on:
         options:
           - ensure-services
           - status
+          - deploy
 
 jobs:
   ops:
@@ -25,7 +26,7 @@ jobs:
           key: ${{ secrets.DEPLOY_KEY }}
           port: ${{ secrets.DEPLOY_PORT || '22' }}
           script_stop: true
-          command_timeout: '10m'
+          command_timeout: '20m'
           script: |
             set -e
             ACTION='${{ inputs.action }}'
@@ -42,6 +43,39 @@ jobs:
               else
                 echo "wechat-service already running"
               fi
+            fi
+            if [ "$ACTION" = "deploy" ]; then
+              echo "=== pull new image (3 attempts, 300s timeout each) ==="
+              PULLED=0
+              for i in 1 2 3; do
+                if timeout 300 docker pull ghcr.io/${{ github.repository }}/infohub-backend:latest; then PULLED=1; break; fi
+                echo "pull attempt $i failed"
+                sleep 3
+              done
+              if [ "$PULLED" != "1" ]; then
+                echo "PULL_FAILED - local images:"
+                docker images --format '{{.Repository}}:{{.Tag}}|{{.ID}}|{{.Size}}' | head -10
+                exit 1
+              fi
+              echo "=== prepare env-file from /opt/infohub/.env.json ==="
+              sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+              echo "=== restart backend with new image ==="
+              docker stop infohub-backend 2>/dev/null || true
+              docker rm infohub-backend 2>/dev/null || true
+              docker run -d \
+                --name infohub-backend \
+                --restart unless-stopped \
+                -p 3001:3001 \
+                --env-file /opt/infohub/backend.env \
+                -e CLOUD_MODE=true \
+                -e TZ=Asia/Shanghai \
+                -v /opt/infohub/data:/app/data \
+                -v /opt/infohub/.env.json:/.env.json:ro \
+                --network infohub-net \
+                --log-opt max-size=10m \
+                --log-opt max-file=3 \
+                ghcr.io/${{ github.repository }}/infohub-backend:latest
+              sleep 8
             fi
             echo "=== containers ==="
             docker ps --format '{{.Names}}|{{.Status}}|{{.Image}}'
