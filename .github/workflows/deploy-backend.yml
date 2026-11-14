@@ -106,7 +106,8 @@ jobs:
             # 部署时派生为 docker --env-file，使模块顶层常量在求值时即可读到。
             # 凭据不落仓库；文件缺失直接失败，避免静默使用错误配置。
             test -f /opt/infohub/.env.json || { echo "missing /opt/infohub/.env.json"; exit 1; }
-            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+            # 云端 RSS 默认关闭（该路由依赖本地翻译/播客转录能力）
+            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); d['CLOUD_RSS_ENABLED']='false'; f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
             sudo chown $(id -u):$(id -g) /opt/infohub/backend.env
             docker run -d \
               --name infohub-backend \

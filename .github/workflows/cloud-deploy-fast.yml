@@ -48,7 +48,8 @@ jobs:
             echo "=== 2. Build overlay image (uses cached base, no downloads) ==="
             docker build -f Dockerfile.fast -t infohub-backend:cloud .
             echo "=== 3. Prepare env-file ==="
-            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
+            # 部署层强制关闭云端 RSS：该路由依赖翻译/播客转录等本地能力，云端会超时
+            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); d['CLOUD_RSS_ENABLED']='false'; f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
             sudo chown $(id -u):$(id -g) /opt/infohub/backend.env
             echo "=== 4. Restart backend ==="
             docker stop infohub-backend 2>/dev/null || true

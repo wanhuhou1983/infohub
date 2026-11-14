@@ -395,7 +395,8 @@ app.get('/api/test', (c) => c.json({
   msg: 'test ok',
   cloud: IS_CLOUD,
   collector: IS_COLLECTOR,
-  localTextFetch: process.env.LOCAL_TEXT_FETCH !== 'false',
+  localTextFetch: !IS_COLLECTOR && process.env.LOCAL_TEXT_FETCH !== 'false',
+  textFetch: IS_COLLECTOR ? 'cloud' : (process.env.LOCAL_TEXT_FETCH !== 'false' ? 'local' : 'off'),
 }));
 
 // ============ 路由注册 ============

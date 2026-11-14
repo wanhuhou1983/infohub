@@ -19,10 +19,10 @@
  *   LOCAL_DB_URL        本地 PG 连接串（默认从 .env.json 读取）
  *   CLOUD_DB_URL        云端 PG 连接串（默认通过 SSH 隧道 localhost:15432）
  *   SYNC_ARTICLE_TYPES  逗号分隔的 sources.type 白名单。默认已收窄为本地负责的
- *                       音视频类型：bilibili,podcast-channel,youtube-updates,
- *                       twitter-updates,magazine。
- *                       文本类 rss_news/rss-feed/wechat/weibo/xueqiu/rmrb/dapenti/xwlb
- *                       由云端自行采集，绝不在白名单内，否则会覆盖云端新数据。
+ *                       本地负责的类型：bilibili,podcast-channel,youtube-updates,
+ *                       twitter-updates,magazine 以及 rss/rss-feed/rss_news。
+ *                       云端自行采集的 wechat/weibo/xueqiu/rmrb/dapenti/xwlb
+ *                       绝不在白名单内，否则会覆盖云端新数据。
  *                       设为 all 时临时恢复全量同步（仅用于灾备回灌）。
  */
 
@@ -86,7 +86,9 @@ const DRY_RUN = args.includes('--dry-run');
 // 脱钩后本地只负责音视频，默认白名单收窄为本地专属类型。
 // 云端是文本类权威源，本地文本旧记录若继续同步会经 ON CONFLICT DO UPDATE 覆盖云端新数据。
 // 需要临时全量同步（如灾备回灌）时显式设置 SYNC_ARTICLE_TYPES=all。
-const DEFAULT_SYNC_TYPES = 'bilibili,podcast-channel,youtube-updates,twitter-updates,magazine';
+// RSS 文本也在本地采集（/api/fetch/rss 依赖翻译与播客转录等本地能力），
+// 云端采集器默认不跑 RSS，因此这些类型由本地单向同步，不会与云端写入冲突。
+const DEFAULT_SYNC_TYPES = 'bilibili,podcast-channel,youtube-updates,twitter-updates,magazine,rss,rss-feed,rss_news';
 const rawTypes = process.env.SYNC_ARTICLE_TYPES ?? DEFAULT_SYNC_TYPES;
 const SYNC_TYPES = (rawTypes === 'all' ? '' : rawTypes)
   .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);

@@ -72,7 +72,7 @@ async function fetchApi(path: string, body?: any): Promise<any> {
       method: 'POST',
       headers,
       body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(300_000),
+      signal: AbortSignal.timeout(90_000),
     });
     return await resp.json();
   } catch (e: any) {
@@ -92,6 +92,18 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
   const yesterday = bjParts(-86400_000);
   const sources: CloudSourceResult[] = [];
   const tasks: Promise<void>[] = [];
+
+  // 归档基线：本轮开始前的最大文章 id。
+  // 不能用 fetched_at >= NOW()-1h —— 云端 PG 的 NOW() 是 UTC，而历史数据（本地同步）
+  // 的 fetched_at 存的是北京时间，两者差 8 小时，会把 9 小时内的历史数据全当新增归档。
+  // 用自增 id 作为水位则与时区无关，且精确覆盖本轮新增。
+  let baselineId = 0;
+  try {
+    const [row] = await sql`SELECT COALESCE(MAX(id), 0) AS max_id FROM articles`;
+    baselineId = Number(row.max_id) || 0;
+  } catch (e: any) {
+    console.warn(`[cloud-collector] 无法读取归档基线: ${e.message}`);
+  }
 
   // 人民日报：10 点后出当天版面，无新增则回退昨天
   if (today.hour >= 10) {
@@ -134,8 +146,11 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
     }
   })());
 
-  // RSS 文本源（播客频道 podcast-channel 仍归本地）
-  if (process.env.CLOUD_RSS_ENABLED !== 'false') {
+  // RSS 默认不搬：/api/fetch/rss 还串着翻译、图片下载、播客音频转录等本地能力，
+  // 云端网络/凭据下 3 个 feed 各会超时 300s 且全部失败。RSS 文本仍由本地采集后
+  // 经 PG 同步上云（同步白名单包含 rss 类型，云端不写这些类型，无覆盖冲突）。
+  // 确需云端接管时显式设置 CLOUD_RSS_ENABLED=true。
+  if (process.env.CLOUD_RSS_ENABLED === 'true') {
     tasks.push((async () => {
       try {
         const feeds = await sql`
@@ -167,8 +182,7 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
     }
   }
 
-  // 本轮新增文章归档到 COS。
-  // 用数据库侧 NOW() 比较，避开 timestamp without time zone 与 JS Date 的时区错位；
+  // 本轮新增文章归档到 COS：按 id 水位而非时间，避免两地时区混用；
   // 归档 key 由 content_hash 决定，重复归档幂等。
   let archived = { uploaded: 0, failed: 0, skipped: 0, candidates: 0 };
   try {
@@ -177,7 +191,7 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
              a.published_at, a.fetched_at, a.category, a.tags, a.extra, a.content_hash,
              s.name AS source_name, s.type AS source_type
       FROM articles a LEFT JOIN sources s ON s.id = a.source_id
-      WHERE a.fetched_at >= (NOW() - INTERVAL '1 hour')
+      WHERE a.id > ${baselineId}
       ORDER BY a.id
     `;
     const textRows = rows.filter((r: any) => CLOUD_TEXT_TYPES.has(String(r.source_type || '').toLowerCase()));
