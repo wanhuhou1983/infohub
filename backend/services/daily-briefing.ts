@@ -166,6 +166,12 @@ export async function runDailyBriefing(sql?: Sql, dateBjOverride?: string): Prom
   const dateBj = dateBjOverride || bjNow().date;
   let result = { ok: false, date: dateBj, groups: 0, articles: 0, inserted: false, error: undefined as string | undefined };
   try {
+    // 未配置 LLM key 时静默跳过：不重试、不写错误日志，等配置好后自动恢复
+    if (!DEEPSEEK_API_KEY) {
+      result.error = 'DEEPSEEK_API_KEY 未配置，跳过简报';
+      console.log('[briefing] DEEPSEEK_API_KEY 未配置，本轮跳过');
+      return result;
+    }
     const articles = await loadTodayArticles(ownSql, dateBj);
     result.articles = articles.length;
     if (articles.length === 0) {
@@ -264,7 +270,8 @@ export async function runDailyBriefing(sql?: Sql, dateBjOverride?: string): Prom
 export function startDailyBriefing(sql: Sql): void {
   const attemptRun = async (retriesLeft: number) => {
     const r = await runDailyBriefing(sql);
-    if (!r.ok && retriesLeft > 0 && r.error !== '今日无参与简报的文章') {
+    const noRetry = r.error === '今日无参与简报的文章' || String(r.error).includes('未配置');
+    if (!r.ok && retriesLeft > 0 && !noRetry) {
       console.warn(`[briefing] 40 分钟后重试（剩余 ${retriesLeft - 1} 次）`);
       setTimeout(() => attemptRun(retriesLeft - 1), 40 * 60_000);
     }
