@@ -53,7 +53,10 @@ jobs:
               | sed 's/=.*/=<set>/' \
               | grep -E 'CLOUD_MODE|COLLECTOR_MODE|TZ=|JTK_USER|COS_BUCKET|OB_WRITE_ENABLED|WECHAT_SERVICE_URL|INTERNAL_FETCH_TOKEN' | sort || true
             echo "=== wechat-service health (from backend container) ==="
+            sleep 5
             docker exec infohub-backend sh -c 'wget -qO- --timeout=6 http://wechat-service:8978/health' 2>&1 | head -c 300 || true
             echo ""
+            echo "=== wechat-service logs ==="
+            docker logs --tail 15 wechat-service 2>&1 | tail -15 || true
             echo "=== cloud-collector logs ==="
             docker logs --tail 150 infohub-backend 2>&1 | grep -iE 'cloud-collector|collector|error' | tail -30 || true
