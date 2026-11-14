@@ -240,7 +240,7 @@ app.get('/api/image-proxy', async (c) => {
   } catch {
     return c.text('Invalid URL', 400);
   }
-  if (!allowedHosts.some(h => parsedUrl.hostname.endsWith(h))) {
+  if (!allowedHosts.some(h => parsedUrl.hostname === h || parsedUrl.hostname.endsWith('.' + h))) {
     return c.text('Domain not allowed', 403);
   }
 
@@ -433,6 +433,7 @@ app.use('/api/twitter-admin/*', writeAuthGuard());
 app.use('/api/wechat-group-admin/*', writeAuthGuard());
 app.use('/api/ai/*', writeAuthGuard());
 app.use('/api/scheduler/*', writeAuthGuard());
+app.use('/api/youtube/*', writeAuthGuard());
 
 // 云端模式：采集/管理/OB 相关路由全部拦截
 app.use('/api/fetch/*', cloudGuard());
@@ -443,6 +444,7 @@ app.use('/api/bilibili-admin/uppers/*', cloudGuard());
 app.use('/api/youtube-admin/*', cloudGuard());
 app.use('/api/podcast-admin/*', cloudGuard());
 app.use('/api/twitter-admin/*', cloudGuard());
+app.use('/api/youtube/*', cloudGuard());
 app.use('/api/caixin/*', cloudGuard());
 app.use('/api/scheduler/*', cloudGuard());
 app.use('/api/auth/google/*', cloudGuard());

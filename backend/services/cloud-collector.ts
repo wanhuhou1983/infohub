@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * 云端文本类采集器（COLLECTOR_MODE=true 时启用）
  *
@@ -97,12 +96,14 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
   // 不能用 fetched_at >= NOW()-1h —— 云端 PG 的 NOW() 是 UTC，而历史数据（本地同步）
   // 的 fetched_at 存的是北京时间，两者差 8 小时，会把 9 小时内的历史数据全当新增归档。
   // 用自增 id 作为水位则与时区无关，且精确覆盖本轮新增。
-  let baselineId = 0;
+  // ⚠️ 基线读取失败时必须跳过本轮归档：回退到 0 会把全库文本文章
+  // （含本地同步的 12w+ rss_news）全部归档到 COS，造成海量请求。
+  let baselineId: number | null = null;
   try {
-    const [row] = await sql`SELECT COALESCE(MAX(id), 0) AS max_id FROM articles`;
-    baselineId = Number(row.max_id) || 0;
+    const rows = await sql`SELECT COALESCE(MAX(id), 0) AS max_id FROM articles`;
+    baselineId = Number(rows[0]?.max_id) || 0;
   } catch (e: any) {
-    console.warn(`[cloud-collector] 无法读取归档基线: ${e.message}`);
+    console.error(`[cloud-collector] 归档基线读取失败，本轮跳过 COS 归档: ${e.message}`);
   }
 
   // 人民日报：10 点后出当天版面，无新增则回退昨天
@@ -182,27 +183,30 @@ export async function runCloudTextFetch(sql: Sql): Promise<CloudFetchReport> {
     }
   }
 
-  // 本轮新增文章归档到 COS：按 id 水位而非时间，避免两地时区混用；
-  // 归档 key 由 content_hash 决定，重复归档幂等。
   let archived = { uploaded: 0, failed: 0, skipped: 0, candidates: 0 };
-  try {
-    const rows = await sql`
-      SELECT a.id, a.source_id, a.title, a.content, a.summary, a.url, a.author,
-             a.published_at, a.fetched_at, a.category, a.tags, a.extra, a.content_hash,
-             s.name AS source_name, s.type AS source_type
-      FROM articles a LEFT JOIN sources s ON s.id = a.source_id
-      WHERE a.id > ${baselineId}
-      ORDER BY a.id
-    `;
-    const textRows = rows.filter((r: any) => CLOUD_TEXT_TYPES.has(String(r.source_type || '').toLowerCase()));
-    const result = await archiveArticles(textRows as ArchiveEntry[]);
-    archived = {
-      uploaded: result.uploaded, failed: result.failed, skipped: result.skipped,
-      candidates: textRows.length,
-    };
-    console.log(`[cloud-collector] COS 归档 ${result.uploaded}/${textRows.length} 篇（跳过非文本类 ${rows.length - textRows.length} 篇）`);
-  } catch (e: any) {
-    console.error(`[cloud-collector] COS 归档失败: ${e.message}`);
+  if (baselineId === null) {
+    // 基线不可用：宁可不归档（下轮水位仍幂等补上），也不能全量重放
+    console.error('[cloud-collector] COS 归档跳过（无有效基线）');
+  } else {
+    try {
+      const rows = await sql`
+        SELECT a.id, a.source_id, a.title, a.content, a.summary, a.url, a.author,
+               a.published_at, a.fetched_at, a.category, a.tags, a.extra, a.content_hash,
+               s.name AS source_name, s.type AS source_type
+        FROM articles a LEFT JOIN sources s ON s.id = a.source_id
+        WHERE a.id > ${baselineId}
+        ORDER BY a.id
+      `;
+      const textRows = rows.filter((r: any) => CLOUD_TEXT_TYPES.has(String(r.source_type || '').toLowerCase()));
+      const result = await archiveArticles(textRows as ArchiveEntry[]);
+      archived = {
+        uploaded: result.uploaded, failed: result.failed, skipped: result.skipped,
+        candidates: textRows.length,
+      };
+      console.log(`[cloud-collector] COS 归档 ${result.uploaded}/${textRows.length} 篇（跳过非文本类 ${rows.length - textRows.length} 篇）`);
+    } catch (e: any) {
+      console.error(`[cloud-collector] COS 归档失败: ${e.message}`);
+    }
   }
 
   // 采集日志
@@ -241,7 +245,10 @@ export function startCloudCollector(sql: Sql): void {
         const detail = report.sources.map(s => `${s.source}×${s.inserted}`).join(' ');
         console.log(`[cloud-collector] 本轮完成 | ${detail} | COS ${report.archived.uploaded}`);
       } catch (e: any) {
-        console.error(`[cloud-collector] 本轮失败: ${e.message}`);
+        // 与启动补采并发时静默跳过，不写错误日志（content_hash 幂等，下轮自动补上）
+        if (!String(e.message).includes('already running')) {
+          console.error(`[cloud-collector] 本轮失败: ${e.message}`);
+        }
       }
       schedule();
     }, delay);
