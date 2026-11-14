@@ -93,5 +93,5 @@ jobs:
             echo ""
             echo "=== wechat-service logs ==="
             docker logs --tail 15 wechat-service 2>&1 | tail -15 || true
-            echo "=== cloud-collector logs ==="
-            docker logs --tail 150 infohub-backend 2>&1 | grep -iE 'cloud-collector|collector|error' | tail -30 || true
+            echo "=== backend logs (last 80 lines) ==="
+            docker logs --tail 80 infohub-backend 2>&1 | tail -80 || true
