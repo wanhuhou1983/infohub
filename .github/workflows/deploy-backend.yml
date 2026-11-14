@@ -120,7 +120,22 @@ jobs:
               --log-opt max-size=10m \
               --log-opt max-file=3 \
               ghcr.io/${{ github.repository }}/infohub-backend:latest
+            # 微信正文四层降级的第一层；镜像由 cloud-ops 流程构建一次，这里保证容器常驻。
+            if ! docker ps --format '{{.Names}}' | grep -qx 'wechat-service'; then
+              docker rm -f wechat-service 2>/dev/null || true
+              if docker image inspect infohub-wechat-service:latest >/dev/null 2>&1; then
+                docker run -d --name wechat-service --restart unless-stopped \
+                  --network infohub-net infohub-wechat-service:latest
+                echo "wechat-service started"
+              else
+                echo "WARN: wechat-service image missing, WeChat fetch will use degraded layers"
+              fi
+            fi
             echo "=== 4. Health check ==="
             sleep 3
             curl -f http://localhost:3001/api/test
+            echo ""
+            echo "=== 5. Collector logs (first 20s) ==="
+            sleep 20
+            docker logs --tail 60 infohub-backend 2>&1 | grep -iE 'cloud-collector|error' | tail -20 || true
             echo "Done!"
