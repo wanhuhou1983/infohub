@@ -57,7 +57,10 @@ async function fetchRssFeed(
   }
 
   const items = feed?.items || [];
-  if (items.length === 0) return { fetched: 0, inserted: 0, translated: 0 };
+  // 播客类 feed（含音频附件）：只取最新 20 条，避免首次采集回填几百期旧节目
+  const isPodcastFeed = items.some((it: any) => it.enclosure?.url);
+  const selectedItems = isPodcastFeed ? items.slice(0, 20) : items;
+  if (selectedItems.length === 0) return { fetched: 0, inserted: 0, translated: 0 };
 
   const feedType = 'rss';
 
@@ -65,7 +68,7 @@ async function fetchRssFeed(
   let inserted = 0;
   let translated = 0;
 
-  const results = await Promise.all(items.map((item: any) => limit(async () => {
+  const results = await Promise.all(selectedItems.map((item: any) => limit(async () => {
     try {
       const title = item.title || '无标题';
       const url = item.link || item.guid || '';
@@ -81,8 +84,13 @@ async function fetchRssFeed(
 
       const contentHash = hashString(url);
 
+      // 早期去重：已入库的条目直接跳过，避免重复爬正文/翻译（英文源尤其耗时）
+      const [existingRow] = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash} LIMIT 1`;
+      if (existingRow) return { inserted: false, translated: false };
+
       let fullContent = rssContent;
-      if (url) {
+      // 播客条目（含音频附件）不爬网页：show notes 已在 description 中，网页多为 JS 渲染页
+      if (url && !enclosureUrl) {
         try {
           const fetchedContent = await crawlArticleContent(url);
           if (fetchedContent && fetchedContent.length > rssContent.length) {
@@ -219,9 +227,21 @@ export function createRssRoutes(sql: Sql): Hono {
       }
 
       const items = (feed?.items || []).slice(0, maxItems);
+      // 播客类 feed（含音频附件）：只取最新 20 条，避免首次采集回填几百期旧节目
+      const isPodcastFeed = items.some((it: any) => it.enclosure?.url);
+      const selectedItems = isPodcastFeed ? items.slice(0, 20) : items;
+
+      // 批量预去重：已入库条目直接跳过，避免逐条爬正文/翻译浪费大量时间（串行处理下尤其致命）
+      const hashList = selectedItems.map((it: any) => hashString(it.link || it.guid || ''));
+      const existingHashes = new Set<string>();
+      if (hashList.length > 0) {
+        const existRows = await sql`SELECT content_hash FROM articles WHERE content_hash IN ${sql(hashList)}`;
+        for (const r of existRows) existingHashes.add(r.content_hash);
+      }
+
       let fetched = 0, inserted = 0, translated = 0;
 
-      for (const item of items) {
+      for (const item of selectedItems) {
         const url = item.link || item.guid || '';
         const title = item.title?.trim() || '(无标题)';
         const rssContent = item.content || item.contentSnippet || item.description || '';
@@ -232,9 +252,10 @@ export function createRssRoutes(sql: Sql): Hono {
         const enclosureLength = item.enclosure?.length || '';
         const contentHash = hashString(url);
 
-        // 全文抓取
+        // 全文抓取（已入库条目跳过；播客条目不爬网页——show notes 已在 description 中）
+        if (existingHashes.has(contentHash)) { fetched++; continue; }
         let fullContent = rssContent;
-        if (url) {
+        if (url && !enclosureUrl) {
           try {
             const fc = await crawlArticleContent(url);
             if (fc && fc.length > rssContent.length) fullContent = fc;

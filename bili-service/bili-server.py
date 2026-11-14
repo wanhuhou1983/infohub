@@ -13,6 +13,11 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 from playwright.sync_api import sync_playwright
 
+try:
+    from bs4 import BeautifulSoup, Tag, NavigableString
+except ImportError:
+    BeautifulSoup = None  # 后面会检查
+
 PORT = int(os.environ.get('PORT', '8979'))
 CHROMIUM_PATH = os.environ.get('CHROMIUM_EXECUTABLE_PATH', '')
 
@@ -474,12 +479,448 @@ def normalize_url(url: str) -> str:
     return url
 
 
+# ═══════════════════════════════════════════
+# 微信公众号正文 HTML → Markdown 转换（BeautifulSoup DOM 递归遍历）
+# ═══════════════════════════════════════════
+
+# 真正的块级标签：产生段落分隔
+_WX_BLOCK_TAGS = frozenset(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
+                            "pre", "ul", "ol", "li", "hr", "table", "tr", "thead",
+                            "tbody"])
+# 内联标签：不产生换行
+_WX_INLINE_TAGS = frozenset(["span", "a", "strong", "b", "em", "i", "code", "font",
+                             "small", "sub", "sup", "u", "s", "del", "ins", "mark",
+                             "abbr", "cite", "q", "label", "time", "big", "tt"])
+# 结构性容器（微信大量用 section/div 做样式包裹）
+_WX_CONTAINER_TAGS = frozenset(["section", "div"])
+
+
+def _wx_is_block(node):
+    """判断一个 Tag 是否是真正的块级元素（产生段落分隔）"""
+    if not isinstance(node, Tag):
+        return False
+    return node.name.lower() in _WX_BLOCK_TAGS
+
+
+def _wx_has_block_descendant(node):
+    """检查 node 内部是否包含真正的块级标签（用于判断 section/div 是否充当段落）"""
+    if not isinstance(node, Tag):
+        return False
+    for child in node.children:
+        if isinstance(child, Tag):
+            if child.name.lower() in _WX_BLOCK_TAGS:
+                return True
+            if child.name.lower() in _WX_CONTAINER_TAGS and _wx_has_block_descendant(child):
+                return True
+    return False
+
+
+def _wx_render_children(node):
+    """递归渲染子节点列表，返回 (parts_list) —— 每个 part 是一个字符串片段"""
+    parts = []
+    for child in node.children:
+        if isinstance(child, NavigableString):
+            text = str(child)
+            if text.strip():
+                parts.append(("text", text.strip()))
+        elif isinstance(child, Tag):
+            tag = child.name.lower() if child.name else ""
+            style = (child.get("style") or "").replace(" ", "")
+            if "display:none" in style or "visibility:hidden" in style:
+                continue
+
+            if tag == "img":
+                src = child.get("data-src") or child.get("src") or ""
+                src = normalize_url(src)
+                if src and not src.startswith("data:"):
+                    parts.append(("block", f"__IMG__{src}__IMG__"))
+
+            elif tag == "br":
+                parts.append(("newline", "\n"))
+
+            elif tag == "hr":
+                parts.append(("block", "---"))
+
+            elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+                lv = int(tag[1])
+                inline = _wx_render_inline(child)
+                if inline:
+                    parts.append(("block", f"{'#' * lv} {inline}"))
+
+            elif tag == "pre":
+                ct = _wx_raw(child).strip()
+                if ct:
+                    parts.append(("block", f"```\n{ct}\n```"))
+
+            elif tag == "code" and not (child.parent and child.parent.name == "pre"):
+                ct = _wx_raw(child).strip()
+                if ct:
+                    parts.append(("inline", f"`{ct}`"))
+
+            elif tag == "li":
+                inline = _wx_render_inline(child)
+                if inline:
+                    parts.append(("list_item", inline))
+
+            elif tag == "blockquote":
+                inner_parts = _wx_render_children(child)
+                inner_text = _wx_parts_to_text(inner_parts)
+                for line in inner_text.strip().split("\n"):
+                    if line.strip():
+                        parts.append(("block", f"> {line.strip()}"))
+
+            elif tag == "table":
+                rows = []
+                for tr in child.find_all("tr", recursive=False):
+                    cells = [_wx_render_inline(td) for td in tr.find_all(["td", "th"], recursive=False)]
+                    rows.append(" | ".join(cells))
+                if rows:
+                    parts.append(("block", "\n".join(rows)))
+
+            elif tag in _WX_INLINE_TAGS:
+                inline = _wx_render_inline(child)
+                if inline:
+                    parts.append(("inline", inline))
+
+            elif tag in _WX_CONTAINER_TAGS:
+                # section/div：检查是否包含真正的块级子元素
+                if _wx_has_block_descendant(child):
+                    # 有块级子元素 → 递归渲染子节点
+                    sub_parts = _wx_render_children(child)
+                    parts.extend(sub_parts)
+                else:
+                    # 纯内联容器 → 提取内联文本，但按 <br> 和句末标点分句
+                    inline = _wx_render_inline(child)
+                    if inline:
+                        # 如果文本较长（>150字符），尝试按句末标点分句
+                        if len(inline) > 150:
+                            sentences = _wx_split_sentences(inline)
+                            for s in sentences:
+                                if s.strip():
+                                    parts.append(("text", s.strip()))
+                        else:
+                            parts.append(("text", inline))
+
+            else:
+                # 未知标签：尝试内联渲染
+                inline = _wx_render_inline(child)
+                if inline:
+                    parts.append(("text", inline))
+    return parts
+
+
+def _wx_render_inline(node):
+    """渲染一个节点为纯内联文本（不做段落分隔），处理格式标签"""
+    if isinstance(node, NavigableString):
+        return str(node).strip()
+    if not isinstance(node, Tag):
+        return ""
+    tag = node.name.lower() if node.name else ""
+    style = (node.get("style") or "").replace(" ", "")
+    if "display:none" in style or "visibility:hidden" in style:
+        return ""
+
+    if tag == "img":
+        src = node.get("data-src") or node.get("src") or ""
+        src = normalize_url(src)
+        if src and not src.startswith("data:"):
+            return f"__IMG__{src}__IMG__"
+        return ""
+
+    if tag == "br":
+        return "\n"
+
+    # 内联格式标签
+    if tag in ("strong", "b"):
+        t = _wx_render_inline_children(node)
+        return f"**{t}**" if t else ""
+    if tag in ("em", "i"):
+        t = _wx_render_inline_children(node)
+        return f"*{t}*" if t else ""
+    if tag == "code":
+        ct = _wx_raw(node).strip()
+        return f"`{ct}`" if ct else ""
+    if tag == "a":
+        href = node.get("href", "")
+        t = _wx_render_inline_children(node)
+        if t and href and not href.startswith(("javascript:", "#")):
+            return f"[{t}]({href})"
+        return t
+
+    # section/div/span 等容器 → 递归取内联文本
+    return _wx_render_inline_children(node)
+
+
+def _wx_render_inline_children(node):
+    """递归渲染子节点为内联文本（拼接，不插入段落分隔）"""
+    parts = []
+    for child in node.children:
+        t = _wx_render_inline(child)
+        if t:
+            parts.append(t)
+    return "".join(parts)
+
+
+def _wx_split_sentences(text):
+    """将长文本按中文句末标点（。！？；）和图片标记分割成句子/段落"""
+    if not text:
+        return []
+    # 先保护 __IMG__ 标记和代码块，不让它们被拆开
+    placeholders = {}
+    def protect(m):
+        key = f"\x00PLACEHOLDER{len(placeholders)}\x00"
+        placeholders[key] = m.group(0)
+        return key
+    text = re.sub(r'__IMG__[^_]+__IMG__', protect, text)
+    text = re.sub(r'```[\s\S]*?```', protect, text)
+    text = re.sub(r'\*\*[^*]+\*\*', protect, text)  # 保护粗体
+
+    # 按句末标点分句（保留标点）
+    sentences = re.split(r'(?<=[。！？；…\n])', text)
+    
+    # 恢复占位符
+    result = []
+    for s in sentences:
+        for key, val in placeholders.items():
+            s = s.replace(key, val)
+        if s.strip():
+            result.append(s.strip())
+    return result
+
+
+def _wx_parts_to_text(parts):
+    """将 render_children 返回的 parts 列表转换为最终文本。
+    
+    核心策略：
+    - block 类型（pre, hr, table, 图片等）→ 独立段落
+    - list_item → 独立段落（带 - 前缀）
+    - text/inline → 累积到当前段落缓冲区
+    - newline → 刷新当前缓冲区
+    每个段落之间用 \\n\\n 分隔（标准 Markdown 段落间距）
+    """
+    paragraphs = []
+    current_parts = []
+
+    def flush():
+        if current_parts:
+            text = "".join(str(p[1]) for p in current_parts).strip()
+            if text:
+                paragraphs.append(text)
+            current_parts.clear()
+
+    for ptype, pval in parts:
+        if ptype == "block":
+            flush()
+            val = str(pval).strip()
+            if val:
+                paragraphs.append(val)
+        elif ptype == "list_item":
+            flush()
+            paragraphs.append(f"- {pval}")
+        elif ptype == "newline":
+            flush()
+        else:  # text / inline
+            current_parts.append((ptype, pval))
+    flush()
+    return "\n\n".join(paragraphs)
+
+
+def _wx_node_to_md(node):
+    """递归遍历 DOM 节点，将微信 HTML 转为 Markdown"""
+    parts = _wx_render_children(node)
+    return _wx_parts_to_text(parts)
+
+
+def _wx_raw(node):
+    """获取节点的原始文本内容（保留空白和换行）"""
+    parts = []
+    for c in node.children:
+        if isinstance(c, NavigableString):
+            parts.append(str(c))
+        elif isinstance(c, Tag):
+            parts.append(_wx_raw(c))
+    return "".join(parts)
+
+
+def _wx_clean(text):
+    """清理 Markdown 文本：HTML实体、多余空格、规范化换行"""
+    # HTML 实体清理
+    for entity, char in [
+        ("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"),
+        ("&quot;", '"'), ("&apos;", "'"), ("&ldquo;", "\u201C"),
+        ("&rdquo;", "\u201D"), ("&mdash;", "\u2014"), ("&ndash;", "\u2013"),
+        ("&hellip;", "\u2026"), ("&copy;", "\u00A9"), ("&reg;", "\u00AE"),
+        ("&trade;", "\u2122"), ("&deg;", "\u00B0"), ("\u00A0", " "),
+        ("\u200B", ""), ("\uFEFF", ""),
+    ]:
+        text = text.replace(entity, char)
+    text = re.sub(r"&#(\d+);", lambda m: chr(int(m.group(1))), text)
+    text = re.sub(r"&#x([0-9a-fA-F]+);", lambda m: chr(int(m.group(1), 16)), text)
+
+    # 规范化空格（但保留代码块内的格式）
+    lines = text.split("\n")
+    cleaned_lines = []
+    in_code_block = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            cleaned_lines.append(stripped)
+            continue
+        if not in_code_block:
+            # 代码块外：压缩多余空格
+            cleaned_lines.append(re.sub(r" {2,}", " ", stripped))
+        else:
+            # 代码块内：保留原样
+            cleaned_lines.append(line)
+
+    text = "\n".join(cleaned_lines)
+    # 清理 Markdown 格式标记异常（微信 strong 嵌套导致）
+    text = re.sub(r'\*{4,}', '**', text)  # **** → **
+    text = re.sub(r'\*\*\*\*', '**', text)  # **** → **
+    text = re.sub(r'(\*\*)\1+', r'\1', text)  # 连续 ** 去重
+    text = re.sub(r'^\*\*', '', text, flags=re.MULTILINE)  # 行首孤立 **
+    text = re.sub(r'\*\*$', '', text, flags=re.MULTILINE)  # 行尾孤立 **
+    # 压缩超过 2 个的连续换行
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
 def fetch_wechat_article(url: str) -> dict:
-    """使用 Playwright 抓取微信公众号文章全文"""
+    """使用 Playwright + BeautifulSoup 抓取微信公众号文章全文"""
+    if BeautifulSoup is None:
+        # bs4 不可用时，降级到旧的 inner_html + 正则方式
+        return _fetch_wechat_fallback(url)
+
     launch_args = {'headless': True}
     if CHROMIUM_PATH:
         launch_args['executable_path'] = CHROMIUM_PATH
-    
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(**launch_args)
+        # 使用微信客户端 UA，降低被风控概率
+        context = browser.new_context(
+            viewport={"width": 414, "height": 896},
+            user_agent=(
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 "
+                "MicroMessenger/8.0.42"
+            ),
+            locale="zh-CN",
+            extra_http_headers={"Referer": "https://mp.weixin.qq.com/"},
+        )
+        page = context.new_page()
+
+        try:
+            print(f"[WeChat] Fetching {url[:80]}", flush=True)
+
+            # 使用 domcontentloaded 而非 networkidle，避免长超时
+            try:
+                page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            except Exception:
+                try:
+                    page.goto(url, wait_until='load', timeout=15000)
+                except Exception:
+                    pass
+
+            # 检测验证页
+            page_title = page.title() or ''
+            if '验证' in page_title:
+                print(f"[WeChat] Verification page detected", flush=True)
+                return {'error': 'verification_required'}
+
+            # 等待 #js_content 出现
+            try:
+                page.wait_for_selector('#js_content', timeout=15000)
+            except Exception:
+                html_check = page.content()
+                if '验证' in html_check and len(html_check) < 10000:
+                    print(f"[WeChat] Verification page detected (after wait)", flush=True)
+                    return {'error': 'verification_required'}
+                print(f"[WeChat] #js_content not found", flush=True)
+
+            # 滚动触发懒加载图片
+            page.evaluate("window.scrollBy(0, 300)")
+            page.wait_for_timeout(800)
+            page.evaluate("window.scrollBy(0, 600)")
+            page.wait_for_timeout(500)
+
+            title = (page.title() or '').strip()
+            # 清理标题前缀
+            title = re.sub(r'^(原创|转载)\s*', '', title).strip()
+
+            # 获取完整 HTML 并用 BeautifulSoup 解析
+            html = page.content()
+            soup = BeautifulSoup(html, 'html.parser')
+
+            # 再次检查验证页
+            if soup.title and '验证' in (soup.title.string or ''):
+                return {'error': 'verification_required'}
+
+            # 提取元数据
+            og_title = soup.select_one('meta[property="og:title"]')
+            if og_title:
+                og_title_val = (og_title.get('content') or '').strip()
+                if og_title_val:
+                    title = re.sub(r'^(原创|转载)\s*', '', og_title_val).strip()
+
+            author = ''
+            author_el = soup.select_one('#js_name') or soup.select_one('#js_author_name')
+            if author_el:
+                author = author_el.get_text(strip=True)
+
+            og_desc = soup.select_one('meta[property="og:description"]')
+            desc = (og_desc.get('content') or '').strip() if og_desc else ''
+
+            # 获取正文
+            content_div = soup.select_one('#js_content')
+            if not content_div:
+                print(f"[WeChat] No #js_content, returning summary", flush=True)
+                return {
+                    'title': title,
+                    'content': desc or title,
+                    'author': author,
+                    'publish_date': '',
+                }
+
+            # 清除隐藏元素、广告、二维码等
+            for h in content_div.select(
+                '[style*="display:none"], [style*="display: none"], '
+                '[style*="visibility:hidden"], script, style, '
+                '.qr_code_pc, .reward_area, .rich_media_tool, '
+                '.profile_container, .media_profile_meta'
+            ):
+                h.decompose()
+
+            # 递归遍历 DOM 转换为 Markdown
+            md = _wx_node_to_md(content_div)
+            md = _wx_clean(md)
+
+            if not md.strip() or len(md.strip()) < 20:
+                # DOM 遍历结果太短，可能是特殊排版，用 desc 兜底
+                md = desc or title
+
+            print(f"[WeChat] OK: {title[:40]} ({len(md)} chars, img={'yes' if '__IMG__' in md else 'no'})", flush=True)
+
+            return {
+                'title': title,
+                'content': md,
+                'author': author,
+                'publish_date': '',
+            }
+        except Exception as e:
+            print(f"[WeChat] Error: {e}", flush=True)
+            return {'error': str(e)}
+        finally:
+            browser.close()
+
+
+def _fetch_wechat_fallback(url: str) -> dict:
+    """旧版降级方案：inner_html + 正则（bs4 不可用时使用）"""
+    launch_args = {'headless': True}
+    if CHROMIUM_PATH:
+        launch_args['executable_path'] = CHROMIUM_PATH
+
     with sync_playwright() as p:
         browser = p.chromium.launch(**launch_args)
         context = browser.new_context(
@@ -490,72 +931,40 @@ def fetch_wechat_article(url: str) -> dict:
             ),
         )
         page = context.new_page()
-        
+
         try:
-            print(f"[WeChat] Fetching {url[:80]}", flush=True)
             page.goto(url, wait_until='networkidle', timeout=30000)
-            
-            # 等待文章内容加载
             page.wait_for_selector('#js_content', timeout=10000)
-            
-            title = page.title() or ''
-            title = title.strip()
-            
-            # 提取正文 HTML（含图片）
+
+            title = (page.title() or '').strip()
             content_el = page.query_selector('#js_content')
             if content_el:
                 import re
-                # 用 inner_html 保留图片结构
                 content = content_el.inner_html()
-                
-                # 微信公众号图片用 data-src 做懒加载，需要优先匹配 data-src
-                # 处理顺序：先 data-src（微信懒加载），再普通 src
-                # 1. 提取 data-src 中的图片 URL（微信主要格式）
                 content = re.sub(
                     r'<img[^>]*\bdata-src=["\']((?:https?:)?//[^"\']+)["\'][^>]*>',
                     lambda m: '__IMG__' + normalize_url(m.group(1)) + '__IMG__',
                     content
                 )
-                # 2. 提取剩余的普通 src 图片（非微信标准格式）
                 content = re.sub(
                     r'<img[^>]*\bsrc=["\']((?:https?:)?//[^"\']+)["\'][^>]*>',
                     lambda m: '__IMG__' + normalize_url(m.group(1)) + '__IMG__',
                     content
                 )
-                # 去除多余 HTML 标签，保留文本和 __IMG__ 标记
                 content = re.sub(r'<[^>]+>', '\n', content)
                 content = re.sub(r'\n{3,}', '\n\n', content)
                 content = content.strip()
             else:
                 content = ''
-            
-            # 提取作者
+
             author = ''
-            author_el = page.query_selector('#js_name') or page.query_selector('.rich_media_meta_text')
+            author_el = page.query_selector('#js_name')
             if author_el:
                 author = author_el.inner_text().strip()
-            
-            print(f"[WeChat] OK: {title[:40]} ({len(content)} chars)", flush=True)
-            
-            return {
-                'title': title,
-                'content': content,
-                'author': author,
-                'publish_date': '',
-            }
+
+            return {'title': title, 'content': content, 'author': author, 'publish_date': ''}
         except Exception as e:
-            print(f"[WeChat] Error: {e}", flush=True)
-            try:
-                content_el = page.query_selector('#js_content')
-                content = content_el.inner_text() if content_el else ''
-                return {
-                    'title': page.title() or '',
-                    'content': content,
-                    'author': '',
-                    'publish_date': '',
-                }
-            except:
-                return {'error': str(e)}
+            return {'error': str(e)}
         finally:
             browser.close()
 

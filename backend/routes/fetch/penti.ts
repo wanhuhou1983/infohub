@@ -27,7 +27,7 @@ export function createPentiRoutes(sql: Sql): Hono {
       const sourceId = 2891;
 
       const listUrl = `https://www.dapenti.com/blog/blog.asp?subjectid=70&name=xilei`;
-      const resp = await fetch(listUrl, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const resp = await fetch(listUrl, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' } });
       const buf = await resp.arrayBuffer();
       const html = new TextDecoder('gbk').decode(buf);
 
@@ -44,7 +44,7 @@ export function createPentiRoutes(sql: Sql): Hono {
       if (!targetUrl) return c.json({ ok: false, error: `未找到 ${date} 的喷嚏图卦` }, 404);
 
       const base = 'https://www.dapenti.com/blog/';
-      const artResp = await fetch(base + targetUrl.href, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const artResp = await fetch(base + targetUrl.href, { signal: AbortSignal.timeout(300000), headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36' } });
       const artBuf = await artResp.arrayBuffer();
       const artHtml = new TextDecoder('gbk').decode(artBuf);
 

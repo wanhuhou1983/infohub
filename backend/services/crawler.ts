@@ -128,46 +128,66 @@ export async function crawlArticleContent(articleUrl: string): Promise<string | 
 // ============ 微信公众号文章抓取（四层降级） ============
 export async function crawlWechatArticle(articleUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> {
   // ---- 第一层：wechat-service Playwright 容器（独立 IP + 真实浏览器，S 级） ----
-  try {
-    const encodedUrl = encodeURIComponent(articleUrl);
-    const resp = await fetch(`${WECHAT_SERVICE_URL}/fetch?url=${encodedUrl}`, {
-      signal: AbortSignal.timeout(60000),
-    });
+  const _fetchFromService = async (serviceUrl: string): Promise<{ title: string; content: string; author: string; publishDate: string } | null> => {
+    try {
+      const encodedUrl = encodeURIComponent(articleUrl);
+      const resp = await fetch(`${serviceUrl}/fetch?url=${encodedUrl}`, {
+        signal: AbortSignal.timeout(60000),
+      });
 
-    if (resp.ok) {
-      const data = await resp.json() as any;
-      if (data.title && data.content && data.content.length > 20) {
-        let content = data.content;
-        content = stripCommentSection(content);
-
-        // 检查是否有图片（__IMG__ 标记）
-        const hasImages = content.includes('__IMG__');
-        console.log("[WeChat service] " + data.title.slice(0, 40) +
-          ` (${content.length} chars, images=${hasImages})`);
-
-        // 有图片直接返回；无图片则继续尝试下层 cheerio（带更好图片提取）
-        if (hasImages) {
-          return {
-            title: data.title,
-            content,
-            author: data.author || "",
-            publishDate: data.publish_date || "",
-          };
+      if (resp.ok) {
+        const data = await resp.json() as any;
+        if (data.error) {
+          console.warn(`[WeChat service] ${data.error}: ${articleUrl.slice(0, 60)}`);
+          return null;
         }
-        // 无图片时记录并继续降级
-        console.log("[WeChat service] no images, falling through to cheerio...");
-      }
-      if (data.error) {
-        console.warn(`[WeChat service] ${data.error}: ${articleUrl.slice(0, 60)}`);
+        if (data.title && data.content && data.content.length > 20) {
+          let content = data.content;
+          content = stripCommentSection(content);
+
+          const hasImages = content.includes('__IMG__');
+          console.log("[WeChat service] " + data.title.slice(0, 40) +
+            ` (${content.length} chars, images=${hasImages})`);
+
+          if (hasImages) {
+            return {
+              title: data.title,
+              content,
+              author: data.author || "",
+              publishDate: data.publish_date || "",
+            };
+          }
+          // 无图片时也返回（某些文章确实没有图片），但记录日志
+          if (content.length > 100) {
+            console.log("[WeChat service] no images but content OK, keeping it");
+            return {
+              title: data.title,
+              content,
+              author: data.author || "",
+              publishDate: data.publish_date || "",
+            };
+          }
+          console.log("[WeChat service] content too short, falling through...");
+        } else {
+          console.warn(`[WeChat service] empty content: ${articleUrl.slice(0, 60)}`);
+        }
       } else {
-        console.warn(`[WeChat service] empty content: ${articleUrl.slice(0, 60)}`);
+        console.warn(`[WeChat service] HTTP ${resp.status}: ${articleUrl.slice(0, 60)}`);
       }
-    } else {
-      console.warn(`[WeChat service] HTTP ${resp.status}: ${articleUrl.slice(0, 60)}`);
+    } catch (e: any) {
+      console.warn(`[WeChat service] unreachable: ${e.message}`);
     }
-  } catch (e: any) {
-    console.warn(`[WeChat service] unreachable: ${e.message}`);
+    return null;
+  };
+
+  // 第一层尝试（最多 2 次）
+  let firstResult = await _fetchFromService(WECHAT_SERVICE_URL);
+  if (!firstResult) {
+    // 等待 2 秒后重试一次（微信风控有时是暂时的）
+    await new Promise(r => setTimeout(r, 2000));
+    firstResult = await _fetchFromService(WECHAT_SERVICE_URL);
   }
+  if (firstResult) return firstResult;
 
   // ---- 第二层：Python Spider（requests + BeautifulSoup，解析质量更高） ----
   try {
@@ -278,7 +298,17 @@ export async function crawlWechatArticle(articleUrl: string): Promise<{ title: s
       .replace(/&lt;/g, "<")
       .replace(/&gt;/g, ">")
       .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&ldquo;/g, "\u201C")
+      .replace(/&rdquo;/g, "\u201D")
+      .replace(/&mdash;/g, "\u2014")
+      .replace(/&ndash;/g, "\u2013")
+      .replace(/&hellip;/g, "\u2026")
+      .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n)); } catch { return ""; } })
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ""; } })
       .replace(/\u00A0/g, " ")
+      .replace(/\u200B/g, "")  // 零宽空格
+      .replace(/\uFEFF/g, "")  // BOM
       .trim();
 
     console.log("[WeChat cheerio] OK: " + title.slice(0, 40));

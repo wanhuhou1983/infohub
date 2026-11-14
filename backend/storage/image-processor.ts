@@ -115,18 +115,25 @@ async function downloadAndSaveImage(imageUrl: string, sourceType: string): Promi
 
     const localUrl = `/api/images/${subdir}/${filename}`;
 
-    // 保存到 Web 图片目录（用于 API 图片服务）
-    if (!existsSync(filePath)) {
-      await mkdir(dirPath, { recursive: true });
-      await writeFile(filePath, buffer);
-    }
+    // 保存到 Web 图片目录（用于 API 图片服务）。
+    // 云端容器可能没有可写的 Obsidian 挂载，本地写失败不能阻断 COS 上传。
+    try {
+      if (!existsSync(filePath)) {
+        await mkdir(dirPath, { recursive: true });
+        await writeFile(filePath, buffer);
+      }
+    } catch { /* 本地镜像目录不可写时忽略，继续走 COS */ }
 
-    // 同时保存到 Obsidian 附件目录（用于 OB 本地图片显示）
-    const obAttachDir = join(getObAttachmentsDir(), subdir);
-    const obFilePath = join(obAttachDir, filename);
-    if (!existsSync(obFilePath)) {
-      await mkdir(obAttachDir, { recursive: true });
-      await writeFile(obFilePath, buffer);
+    // 同时保存到 Obsidian 附件目录（仅本地模式需要）
+    if (process.env.OB_WRITE_ENABLED !== 'false') {
+      try {
+        const obAttachDir = join(getObAttachmentsDir(), subdir);
+        const obFilePath = join(obAttachDir, filename);
+        if (!existsSync(obFilePath)) {
+          await mkdir(obAttachDir, { recursive: true });
+          await writeFile(obFilePath, buffer);
+        }
+      } catch { /* ignore */ }
     }
 
     const cosKey = `images/${subdir}/${filename}`;
@@ -241,6 +248,25 @@ export async function processImages(content: string, sourceType = 'rss'): Promis
       (_, localPath) => `${cosBase}/images/${localPath.replace(/^\/api\/images\//, '')}`
     );
   }
+
+  // 最终清理：HTML 实体（确保所有层级的采集都产出干净文本）
+  result = result
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&ldquo;/g, '\u201C')
+    .replace(/&rdquo;/g, '\u201D')
+    .replace(/&mdash;/g, '\u2014')
+    .replace(/&ndash;/g, '\u2013')
+    .replace(/&hellip;/g, '\u2026')
+    .replace(/&#(\d+);/g, (_, n) => { try { return String.fromCodePoint(parseInt(n)); } catch { return ""; } })
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ""; } })
+    .replace(/\u00A0/g, ' ')    // nbsp 字符
+    .replace(/\u200B/g, '')     // 零宽空格
+    .replace(/\uFEFF/g, '');    // BOM
 
   return result;
 }

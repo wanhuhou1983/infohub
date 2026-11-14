@@ -12,29 +12,9 @@
  * - 所有路由参数化查询，消除 sql.unsafe()
  */
 
-// ⚠️ 必须在任何模块 import 之前加载 .env.json，
-// 否则 translate.ts 等模块中的常量（DEEPSEEK_API_KEY、LLAMA_BASE_URL 等）
-// 会在 import 时就初始化，导致 .env.json 里的配置不生效。
-import { readFileSync as _readFileSync, existsSync as _existsSync } from 'fs';
-import { join as _join, dirname as _dirname } from 'path';
-import { fileURLToPath as _fileURLToPath } from 'url';
-(() => {
-  try {
-    const _dir = _dirname(_fileURLToPath(import.meta.url));
-    const _p = _join(_dir, '..', '.env.json');
-    if (_existsSync(_p)) {
-      const envConfig = JSON.parse(_readFileSync(_p, 'utf-8'));
-      for (const [key, value] of Object.entries(envConfig)) {
-        if (typeof value === 'string' && !process.env[key]) {
-          process.env[key] = value;
-        }
-      }
-    }
-  } catch (e) {
-    console.warn('[启动] 无法加载 .env.json:', (e as Error).message);
-  }
-})();
-
+// ⚠️ 必须是第一个 import：依赖模块的顶层常量会在入口模块体执行前求值。
+// 详见 load-env.ts 注释。云端 /.env.json 的凭据靠它注入到所有模块。
+import './load-env.js';
 import 'dotenv/config';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
@@ -63,12 +43,17 @@ import { createAiRoutes } from './routes/ai.js';
 import { createPodcastTranscribeRoutes } from './routes/podcast-transcribe.js';
 import { createTwitterAdminRoutes } from './routes/twitter-admin.js';
 import { createCaixinRoutes } from './routes/caixin.js';
+import { createSystemRoutes } from './routes/system.js';
 import { createSchedulerRoutes, runDailyFetch, pushToCloud } from './services/scheduler.js';
+import { startCloudCollector } from './services/cloud-collector.js';
 import { invalidateEnvCache, getImagesDir, getObDir } from './file-storage.js';
 import { fail } from './shared/response.js';
 
 
 const IS_CLOUD = process.env.CLOUD_MODE === 'true';
+// 云端文本采集模式：与 CLOUD_MODE 同时开启，云端自身成为文本数据的权威源
+const IS_COLLECTOR = IS_CLOUD && process.env.COLLECTOR_MODE === 'true';
+const INTERNAL_FETCH_TOKEN = process.env.INTERNAL_FETCH_TOKEN || '';
 const __dirname_env = dirname(fileURLToPath(import.meta.url));
 const sql = postgres(process.env.DATABASE_URL!);
 
@@ -96,15 +81,37 @@ app.use('/api/*', cors({
     return ALLOWED_ORIGINS.includes(origin) ? origin : null;
   },
   allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'X-Internal-Fetch'],
 }));
 
 // ============ 云端模式：禁用本地专属路由 ============
+
+/**
+ * 云端采集器的内部回环调用判定。
+ * 只认 INTERNAL_FETCH_TOKEN（存于云端 .env.json），不依赖 ADMIN_TOKEN，
+ * 避免云端把管理员令牌只放在配置文件、而进程环境变量为空时内部调用被 401。
+ */
+function isInternalCollectorRequest(c: Context): boolean {
+  if (!IS_COLLECTOR || !INTERNAL_FETCH_TOKEN || c.req.method !== 'POST') return false;
+  const token = c.req.header('X-Internal-Fetch') || '';
+  const a = Buffer.from(token);
+  const b = Buffer.from(INTERNAL_FETCH_TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+const INTERNAL_TEXT_FETCH_PATHS = [
+  '/api/fetch/rmrb', '/api/fetch/xwlb', '/api/fetch/penti',
+  '/api/fetch/jintiankansha', '/api/fetch/rss',
+];
 
 // 云端模式中间件：拦截采集/管理/OB 同步等本地专属路由
 function cloudGuard(): MiddlewareHandler {
   return async (c, next) => {
     if (!IS_CLOUD) return next();
+    // 仅对文本类采集端点放行内部回环调用；其余写操作仍对公网关闭。
+    if (isInternalCollectorRequest(c) && INTERNAL_TEXT_FETCH_PATHS.includes(c.req.path)) {
+      return next();
+    }
     return c.json({ error: '云端只读模式，此功能已禁用' }, 403);
   };
 }
@@ -156,6 +163,9 @@ function requireAdminAuth(c: Context): { valid: boolean; error?: string } {
  */
 function writeAuthGuard(): MiddlewareHandler {
   return async (c, next) => {
+    // 云端采集器内部回环调用凭 INTERNAL_FETCH_TOKEN 放行，
+    // 且同样限定在文本采集端点，防止该令牌被挪用于其他写接口
+    if (isInternalCollectorRequest(c) && INTERNAL_TEXT_FETCH_PATHS.includes(c.req.path)) return next();
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(c.req.method)) {
       const auth = requireAdminAuth(c);
       if (!auth.valid) return fail(c, auth.error!, 401);
@@ -186,16 +196,12 @@ app.get('/js/:filename', async (c) => {
 
 // ============ 图片静态文件路由 ============
 // 本地存储的图片通过此路由访问，URL 格式：/api/images/{source}/{filename}
-// 云端模式下，优先尝试本地文件，不存在时通过 Tailscale 回源到 Mac 本地
+// 脱钩后云端不再回源 Mac：图片统一由采集链路写入 COS，正文 URL 也替换为 COS 绝对地址。
 const MIME_TYPES: Record<string, string> = {
   '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.png': 'image/png', '.gif': 'image/gif',
   '.webp': 'image/webp', '.svg': 'image/svg+xml',
 };
-
-// Mac 本地 Tailscale IP，云端通过此地址回源获取图片
-// 可通过环境变量 MAC_TAILSCALE_IP 配置（云端部署时需要设置）
-const MAC_TAILSCALE_IP = process.env.MAC_TAILSCALE_IP || '100.114.3.62';
 
 app.get('/api/images/:subdir/:filename', async (c) => {
   const subdir = c.req.param('subdir');
@@ -216,24 +222,7 @@ app.get('/api/images/:subdir/:filename', async (c) => {
     return c.body(buf);
   }
 
-  // 云端模式：文件不存在时通过 Tailscale 回源到 Mac 本地
-  if (IS_CLOUD) {
-    try {
-      const proxyUrl = `http://${MAC_TAILSCALE_IP}:3001/api/images/${encodeURIComponent(subdir)}/${encodeURIComponent(filename)}`;
-      const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(8000) });
-      if (resp.ok) {
-        const buf = Buffer.from(await resp.arrayBuffer());
-        const ext = extname(filename).toLowerCase();
-        const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-        c.header('Cache-Control', 'public, max-age=31536000, immutable');
-        c.header('Content-Type', contentType);
-        return c.body(buf);
-      }
-    } catch {
-      // fall through to 404
-    }
-  }
-
+  // 历史图片已补传 COS；此处只服务容器内本地文件，不再跨机器回源。
   return c.text('Not found', 404);
 });
 
@@ -402,7 +391,12 @@ app.patch('/api/sources/config/env', (c) => {
 // ============ 注册路由 ============
 
 // 测试路由
-app.get('/api/test', (c) => c.json({ msg: 'test ok', cloud: IS_CLOUD }));
+app.get('/api/test', (c) => c.json({
+  msg: 'test ok',
+  cloud: IS_CLOUD,
+  collector: IS_COLLECTOR,
+  localTextFetch: process.env.LOCAL_TEXT_FETCH !== 'false',
+}));
 
 // ============ 路由注册 ============
 
@@ -411,6 +405,21 @@ app.route('/api/sources', createSourcesRoutes(sql, requireAdminAuth));
 app.route('/api/articles', createArticlesRoutes(sql));
 
 app.use('/api/fetch/*', writeAuthGuard());
+
+// 脱钩后的最后一道防线：切换完成后，无论自动化、旧脚本还是手动 curl，
+// 本地都不再执行文本类采集。RSS 不在此列，由 scheduler 按类型白名单保留播客频道。
+const LOCAL_TEXT_FETCH_PATHS = [
+  '/api/fetch/rmrb', '/api/fetch/xwlb', '/api/fetch/penti', '/api/fetch/jintiankansha',
+];
+if (!IS_CLOUD && process.env.LOCAL_TEXT_FETCH === 'false') {
+  app.use('/api/fetch/*', async (c, next) => {
+    if (c.req.method === 'POST' && LOCAL_TEXT_FETCH_PATHS.includes(c.req.path)) {
+      return c.json({ ok: true, skipped: true, inserted: 0, message: '文本类采集已迁至云端' });
+    }
+    return next();
+  });
+}
+
 app.use('/api/articles/*', writeAuthGuard());
 app.use('/api/sync/*', writeAuthGuard());
 app.use('/api/wechat-admin/*', writeAuthGuard());
@@ -458,10 +467,13 @@ app.route('/api/auth/google', createGoogleAuthRoutes(sql));
 app.route('/api/ai', createAiRoutes(sql));
 app.route('/api/caixin', createCaixinRoutes(sql, requireAdminAuth));
 app.route('/api/scheduler', createSchedulerRoutes(sql));
+app.route('/api/system', createSystemRoutes(sql, requireAdminAuth));
 
 // ============ 云端模式：数据同步接收端点 ============
 
-if (IS_CLOUD) {
+// 脱钩后两地只保留 PG 同步；HTTP 接收端点仅在纯只读展示实例上保留，
+// 采集模式下不再注册，避免云端出现第二条数据写入通道。
+if (IS_CLOUD && !IS_COLLECTOR) {
   import('./routes/cloud-sync.js').then(({ createCloudSyncRoutes }) => {
     app.route('/api/cloud-sync', createCloudSyncRoutes(sql));
     console.log('[云端] 数据同步接收端点已注册: POST /api/cloud-sync/push');
@@ -535,8 +547,13 @@ if (!IS_CLOUD) {
   }
 
   scheduleNextRun();
-  // 启动后 30s 做一次初始云端同步
+  // 启动后 30s 做一次初始云端同步（本地音视频数据 → 云端 PG，两地唯一互动）
   setTimeout(function() { pushToCloud(); }, 30000);
+}
+
+// 云端文本采集模式：只跑文本类源，写云端 PG + COS 归档，不触发 pushToCloud
+if (IS_COLLECTOR) {
+  startCloudCollector(sql);
 }
 
 
@@ -548,6 +565,11 @@ process.on('unhandledRejection', (reason) => {
   console.error('[致命] unhandledRejection:', reason);
 });
 
-console.log(`InfoHub API 启动: http://0.0.0.0:${port}（${IS_CLOUD ? '云端只读模式' : '本地全功能模式，局域网/Tailscale 可访问'}）`);
+const MODE_LABEL = IS_COLLECTOR
+  ? '云端文本采集模式（文本权威 + COS 归档）'
+  : IS_CLOUD
+    ? '云端只读模式'
+    : '本地音视频模式（LOCAL_TEXT_FETCH 控制文本采集）';
+console.log(`InfoHub API 启动: http://0.0.0.0:${port}（${MODE_LABEL}）`);
 
 serve({ fetch: app.fetch, hostname: '0.0.0.0', port });

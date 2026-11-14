@@ -35,14 +35,14 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       const [youtubeSource] = await sql`SELECT id, config FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
       if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
 
-      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
-      if (updatesSource.length === 0) return c.json({ uppers: [], total: 0 });
-
+      // 频道直接挂在 YouTube 根下。type=youtube-updates 且含 channelId 的为真实频道；
+      // 历史遗留的「YouTube更新」分组节点无 channelId，需排除。
       const uppers = await sql`
         SELECT s.id, s.name, s.enabled, s.config->>'channelId' AS channel_id,
                (SELECT MAX(published_at) FROM articles WHERE author = s.name) AS latest_video_at
         FROM sources s
-        WHERE s.type = 'youtube-updates' AND s.parent_id = ${updatesSource[0]!.id}
+        WHERE s.type = 'youtube-updates' AND s.parent_id = ${youtubeSource.id}
+          AND s.config->>'channelId' IS NOT NULL
         ORDER BY s.enabled DESC, s.name ASC
       `;
 
@@ -66,9 +66,6 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
     try {
       const [youtubeSource] = await sql`SELECT id FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
       if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
-
-      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
-      if (updatesSource.length === 0) return c.json({ error: 'YouTube "更新"源未配置' }, 400);
 
       const body = await c.req.json();
       let { name, channelId, url } = body;
@@ -110,16 +107,16 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       // 检查是否已存在
       const [existing] = await sql`
         SELECT id FROM sources 
-        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND config->>'channelId' = ${channelId}
+        WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} AND config->>'channelId' = ${channelId}
       `;
       if (existing) {
         return c.json({ error: '该 UP 主已存在' }, 400);
       }
 
-      // 插入新 UP 主（默认禁用）
+      // 插入新 UP 主（默认禁用，直接挂在 YouTube 根下）
       const [inserted] = await sql`
         INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-        VALUES (${name}, 'youtube-updates', ${updatesSource[0]!.id}, ${sql.json({ channelId })}, false, NOW())
+        VALUES (${name}, 'youtube-updates', ${youtubeSource.id}, ${sql.json({ channelId })}, false, NOW())
         RETURNING id, name, config
       `;
 
@@ -221,9 +218,6 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       const [youtubeSource] = await sql`SELECT id FROM sources WHERE type = 'youtube' AND parent_id IS NULL LIMIT 1`;
       if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
 
-      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
-      if (updatesSource.length === 0) return c.json({ error: 'YouTube "更新"源未配置' }, 400);
-
       // 获取每个频道的详情（获取 channelId 对应的名称）
       const accessToken = await getValidAccessToken(sql);
       const imported: string[] = [];
@@ -233,7 +227,7 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
         // 检查是否已存在
         const [existing] = await sql`
           SELECT id FROM sources
-          WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND config->>'channelId' = ${channelId}
+          WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} AND config->>'channelId' = ${channelId}
         `;
         if (existing) {
           skipped.push(channelId);
@@ -260,7 +254,7 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
 
         await sql`
           INSERT INTO sources (name, type, parent_id, config, enabled, created_at)
-          VALUES (${name}, 'youtube-updates', ${updatesSource[0]!.id}, ${sql.json({ channelId })}, false, NOW())
+          VALUES (${name}, 'youtube-updates', ${youtubeSource.id}, ${sql.json({ channelId })}, false, NOW())
         `;
         imported.push(name);
       }
@@ -280,15 +274,14 @@ export function createYoutubeAdminRoutes(sql: Sql): Hono {
       if (!youtubeSource) return c.json({ error: 'YouTube 信息源未配置' }, 400);
 
       const apiKey = youtubeSource.config?.apiKey;
-      if (!apiKey) return c.json({ error: 'YouTube API Key 未配置，请先在数据库 sources 表（id=1530）的 config 字段中添加 apiKey' }, 400);
+      if (!apiKey) return c.json({ error: 'YouTube API Key 未配置，请先在数据库 sources 表（type=youtube 根节点）的 config 字段中添加 apiKey' }, 400);
 
-      const updatesSource = await sql`SELECT id FROM sources WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} LIMIT 1`;
-      if (updatesSource.length === 0) return c.json({ error: 'YouTube "更新"源未配置' }, 400);
-
+      // 频道直接挂在 YouTube 根下（含 channelId 的为真实频道，排除历史遗留分组节点）
       const enabledUppers = await sql`
         SELECT id, name, config->>'channelId' AS channel_id
         FROM sources
-        WHERE type = 'youtube-updates' AND parent_id = ${updatesSource[0]!.id} AND enabled = true
+        WHERE type = 'youtube-updates' AND parent_id = ${youtubeSource.id} AND enabled = true
+          AND config->>'channelId' IS NOT NULL
       `;
 
       if (enabledUppers.length === 0) {

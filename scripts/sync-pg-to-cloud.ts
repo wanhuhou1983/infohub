@@ -1,18 +1,29 @@
 /**
  * sync-pg-to-cloud.ts
- * 
- * 本地 PG → 云端 PG 增量同步脚本
- * 通过 SSH 隧道直连云端 PG，高效同步 sources + articles
- * 
+ *
+ * 本地 PG → 云端 PG 增量同步脚本（本地 / 云端脱钩后两地唯一的互动通道）
+ *
+ * 职责边界：
+ *   云端 = 文本类采集与权威数据（自行写云端 PG + COS 归档）
+ *   本地 = 音视频类采集整理（写本地 PG）
+ *   本脚本只负责把本地音视频类文章单向推到云端 PG 供展示，
+ *   绝不能用本地的文本类旧记录覆盖云端新采集的文本数据。
+ *
  * 用法：
  *   bun scripts/sync-pg-to-cloud.ts              # 增量同步（默认）
  *   bun scripts/sync-pg-to-cloud.ts --full        # 全量同步
  *   bun scripts/sync-pg-to-cloud.ts --dry-run     # 预览（不写入）
  *   bun scripts/sync-pg-to-cloud.ts --full --dry-run
- * 
+ *
  * 环境变量：
- *   LOCAL_DB_URL   本地 PG 连接串（默认从 .env.json 读取）
- *   CLOUD_DB_URL   云端 PG 连接串（默认通过 SSH 隧道 localhost:15432）
+ *   LOCAL_DB_URL        本地 PG 连接串（默认从 .env.json 读取）
+ *   CLOUD_DB_URL        云端 PG 连接串（默认通过 SSH 隧道 localhost:15432）
+ *   SYNC_ARTICLE_TYPES  可选，逗号分隔的 sources.type 白名单。
+ *                       切换完成后应设为本地负责的类型（按实测 sources.type）：
+ *                       bilibili,podcast-channel,youtube-updates,twitter-updates,magazine
+ *                       文本类 rss_news/rss-feed/wechat/weibo/xueqiu/rmrb/dapenti/xwlb
+ *                       由云端自行采集，绝不在白名单内，否则会覆盖云端新数据。
+ *                       未设置时保持全量同步（灰度期行为）。
  */
 
 import postgres from 'postgres';
@@ -72,6 +83,9 @@ if (!CLOUD_DB) {
 const args = process.argv.slice(2);
 const FULL = args.includes('--full');
 const DRY_RUN = args.includes('--dry-run');
+// 只同步本地负责的来源类型；留空 = 全量（灰度期）
+const SYNC_TYPES = (process.env.SYNC_ARTICLE_TYPES || '')
+  .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
 
 // ========== 工具 ==========
 function now(): string {
@@ -209,6 +223,20 @@ async function main() {
         WHERE fetched_at > ${lastSync} OR (translated_at IS NOT NULL AND translated_at > ${lastSync})
         ORDER BY id
       `;
+    }
+
+    // 脱钩保护：只推本地负责的音视频/导入类来源，避免覆盖云端文本权威数据。
+    // sources 已在第 2 步全量同步，此处用本地 sources.type 判定归属。
+    if (SYNC_TYPES.length > 0) {
+      const localSources = await localSql`SELECT id, type FROM sources`;
+      const allowedIds = new Set<number>(
+        localSources
+          .filter((s: any) => SYNC_TYPES.includes(String(s.type || '').toLowerCase()))
+          .map((s: any) => Number(s.id))
+      );
+      const before = localArticles.length;
+      localArticles = localArticles.filter((a: any) => allowedIds.has(Number(a.source_id)));
+      log(`  来源类型过滤 [${SYNC_TYPES.join(',')}]: ${before} -> ${localArticles.length} 条`);
     }
 
     log(`  待同步 articles: ${localArticles.length} 条`);

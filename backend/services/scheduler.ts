@@ -144,6 +144,11 @@ async function fetchApi(path: string, body?: any): Promise<any> {
   if (adminToken) {
     headers['Authorization'] = `Bearer ${adminToken}`;
   }
+  // 云端采集模式：内部回环调用带此头，cloudGuard 才放行 /api/fetch/*
+  const internalToken = process.env.INTERNAL_FETCH_TOKEN || '';
+  if (internalToken && process.env.COLLECTOR_MODE === 'true') {
+    headers['X-Internal-Fetch'] = internalToken;
+  }
   try {
     const resp = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
@@ -195,6 +200,16 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
   const settings = await loadCollectionSettings(sql);
   const s = settings.sources;
 
+  // 本地 / 云端脱钩：LOCAL_TEXT_FETCH=false 时本地不再采任何文本类源，
+  // 只保留音视频（播客/B站/YouTube/推特）与播客频道 RSS。
+  // 默认 true，灰度期本地仍需采文本用于比对；切换完成后在本地环境设为 false。
+  const TEXT_ENABLED = process.env.LOCAL_TEXT_FETCH !== 'false';
+  if (!TEXT_ENABLED) {
+    for (const key of ['rmrb', 'xwlb', 'penti', 'wechat']) {
+      if (s[key]) s[key] = { ...s[key], enabled: false };
+    }
+  }
+
   const now = new Date();
   const todayCompact = now.toISOString().slice(0, 10).replace(/-/g, '');
   const todayDash = now.toISOString().slice(0, 10);
@@ -224,8 +239,9 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
     })()] : []),
     ...(s.wechat?.enabled !== false ? [(async () => {
       try {
-        const r = await fetchAllJtkSources(sql);
-        return { source: '公众号(JTK)', success: true, inserted: r.inserted, fetched: r.total, error: r.errors > 0 ? `${r.errors} errors` : undefined };
+        // 脱钩后本地只采 JTK 音视频专栏（B站投稿/小宇宙），文本类专栏归云端
+        const r = await fetchAllJtkSources(sql, TEXT_ENABLED ? undefined : ['B站投稿视频', '小宇宙']);
+        return { source: TEXT_ENABLED ? '公众号(JTK)' : 'JTK音视频', success: true, inserted: r.inserted, fetched: r.total, error: r.errors > 0 ? `${r.errors} errors` : undefined };
       } catch (e: any) {
         return { source: '公众号(JTK)', success: false, inserted: 0, error: e.message };
       }
@@ -243,10 +259,14 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
   // RSS: query enabled sources, then fetch each
   let rssAgg: FetchResult = { source: 'RSS', success: true, inserted: 0 };
   try {
+    // 脱钩后本地只保留播客频道 RSS；纯文本 RSS 由云端采集器负责
+    const rssTypes = TEXT_ENABLED
+      ? ['rss', 'rss-feed', 'rss_news', 'podcast-channel']
+      : ['podcast-channel'];
     const rssSources = await sql`
       SELECT id, name, config->>'feed_url' AS feed_url
       FROM sources
-      WHERE enabled = true AND LOWER(type) IN ('rss', 'rss-feed', 'rss_news', 'podcast-channel')
+      WHERE enabled = true AND LOWER(type) = ANY(${rssTypes})
     `;
     const rssFetches = rssSources
       .filter(s => s.feed_url)
@@ -1236,6 +1256,16 @@ export function createSchedulerRoutes(sql: Sql): Hono {
   // POST /trigger-source-fetch/:sourceType — 立即采集指定类型的信息源（复用内部 fetchApi）
   router.post('/trigger-source-fetch/:sourceType', async (c) => {
     const sourceType = c.req.param('sourceType');
+    // 脱钩保护：本地自动化（curl trigger-source-fetch/*）不走 phase1 开关，
+    // 因此在这里单独拦截，避免切换后仍在本地采文本类源。
+    const LOCAL_TEXT_OFF = process.env.LOCAL_TEXT_FETCH === 'false';
+    const TEXT_TRIGGER_TYPES = new Set(['xwlb', 'magazine', 'rmrb', 'penti', 'wechat']);
+    if (LOCAL_TEXT_OFF && TEXT_TRIGGER_TYPES.has(sourceType)) {
+      return c.json({
+        ok: true, skipped: true,
+        message: `文本类源 ${sourceType} 已迁至云端采集（LOCAL_TEXT_FETCH=false）`,
+      });
+    }
     const body = await c.req.json().catch(() => ({}));
     const now = new Date();
     const todayCompact = now.toISOString().slice(0, 10).replace(/-/g, '');
@@ -1259,10 +1289,14 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     // RSS: 查询所有已启用源，非阻塞并发采集
     if (sourceType === 'rss') {
       try {
+        // 切换后本地只保留播客频道 RSS，纯文本 RSS 归云端
+        const rssTypes = LOCAL_TEXT_OFF
+          ? ['podcast-channel']
+          : ['rss', 'rss_news', 'rss-feed', 'podcast-channel'];
         const rssSources = await sql`
           SELECT id, name, COALESCE(config->>'feed_url', config->>'feedUrl', config->>'url') AS feed_url
           FROM sources
-          WHERE enabled = true AND LOWER(type) IN ('rss', 'rss_news', 'rss-feed', 'podcast-channel')
+          WHERE enabled = true AND LOWER(type) = ANY(${rssTypes})
         `;
         const sources = rssSources.filter((s: any) => s.feed_url);
         if (sources.length === 0) {

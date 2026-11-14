@@ -96,17 +96,18 @@ jobs:
             echo "=== 3. Restart container ==="
             docker stop infohub-backend 2>/dev/null || true
             docker rm infohub-backend 2>/dev/null || true
-            # Ensure .env.json exists (PG connection + cloud mode)
-            if [ ! -f /opt/infohub/.env.json ]; then
-              echo '{"DATABASE_URL":"postgres://infohub:InfoHub2026@infohub-postgres-cloud:5432/infohub","CLOUD_MODE":"true"}' > /opt/infohub/.env.json
-              chmod 600 /opt/infohub/.env.json
-            fi
+            # 配置统一维护在 /opt/infohub/.env.json（含 DATABASE_URL 与全部凭据），
+            # 部署时派生为 docker --env-file，使模块顶层常量在求值时即可读到。
+            # 凭据不落仓库；文件缺失直接失败，避免静默使用错误配置。
+            test -f /opt/infohub/.env.json || { echo "missing /opt/infohub/.env.json"; exit 1; }
+            sudo python3 -c "import json,os; d=json.load(open('/opt/infohub/.env.json')); f=open('/opt/infohub/backend.env','w'); [f.write('%s=%s\n'%(k,v)) for k,v in d.items() if isinstance(v,(str,int,float,bool))]; f.close(); os.chmod('/opt/infohub/backend.env',0o600)"
             docker run -d \
               --name infohub-backend \
               --restart unless-stopped \
               -p 3001:3001 \
-              -e DATABASE_URL='postgres://infohub:InfoHub2026@infohub-postgres-cloud:5432/infohub' \
+              --env-file /opt/infohub/backend.env \
               -e CLOUD_MODE=true \
+              -e TZ=Asia/Shanghai \
               -v /opt/infohub/data:/app/data \
               -v /opt/infohub/.env.json:/.env.json:ro \
               --network infohub-net \

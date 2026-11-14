@@ -170,6 +170,8 @@ export function createPodcastAdminRoutes(sql: Sql): Hono {
       }
 
       // Call /fetch/rss for each channel (internal HTTP, same as scheduler)
+      const apiBase = process.env.API_BASE || 'http://localhost:3001/api';
+      const adminToken = process.env.ADMIN_TOKEN || '';
       let totalFetched = 0;
       let totalInserted = 0;
       const errors: string[] = [];
@@ -177,11 +179,13 @@ export function createPodcastAdminRoutes(sql: Sql): Hono {
       for (const channel of enabledChannels) {
         if (!channel.feed_url) continue;
         try {
-          const resp = await fetch('http://127.0.0.1:3002/api/fetch/rss', {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          if (adminToken) headers['Authorization'] = `Bearer ${adminToken}`;
+          const resp = await fetch(`${apiBase}/fetch/rss`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers,
             body: JSON.stringify({ feedUrl: channel.feed_url, sourceName: channel.name, feedType: 'podcast-channel' }),
-            signal: AbortSignal.timeout(120000),
+            signal: AbortSignal.timeout(300000),
           });
           const data: any = await resp.json();
           if (data.ok) {

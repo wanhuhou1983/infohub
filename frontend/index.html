@@ -2305,8 +2305,8 @@ async function triggerYoutubeSubtitle(articleId) {
     if (checkResult.cached) {
       // 走下面的下载流程
     } else if (!checkResult.hasSubs) {
-      // 无原生字幕 → 询问是否转录
-      const confirmed = confirm('该视频没有原生字幕，是否下载视频后使用 AI 语音转录？\n（可能需要 2-10 分钟，视视频长度而定）');
+      // 无可用字幕 → 仍尝试一次
+      const confirmed = confirm('该视频没有可用字幕（含自动生成），仍要尝试提取并翻译成中文吗？\n（若确实无字幕将提示失败）');
       if (!confirmed) {
         text.textContent = '已取消';
         return;
@@ -2330,7 +2330,21 @@ async function triggerYoutubeSubtitle(articleId) {
       body: JSON.stringify({ article_id: articleId }),
     });
     text.textContent = result.subtitle || '（无结果）';
-    if (status) status.textContent = result.cached ? '（缓存）' : '';
+    if (status) status.textContent = result.cached ? '（缓存）' : (result.translated ? '（已译中文）' : '');
+    // 导出下载链接
+    if (result.files) {
+      const oldBar = container.querySelector('.sub-dl-bar');
+      if (oldBar) oldBar.remove();
+      const bar = document.createElement('div');
+      bar.className = 'sub-dl-bar mt-3 flex flex-wrap items-center gap-2 text-xs';
+      const mk = (href, label) => `<a href="${href}" class="px-2 py-1 rounded border border-sky-500/30 text-sky-400 hover:bg-sky-500/10" download>⬇ ${label}</a>`;
+      bar.innerHTML = `<span class="text-muted">导出：</span>` +
+        (result.files.srt ? mk(result.files.srt, 'SRT 字幕') : '') +
+        (result.files.md ? mk(result.files.md, 'Markdown') : '') +
+        (result.files.txt ? mk(result.files.txt, '纯文本') : '') +
+        (result.translated ? `<span class="text-muted">· 已译为中文</span>` : `<span class="text-muted">· 原文 ${result.lang || ''}</span>`);
+      container.appendChild(bar);
+    }
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg> 刷新字幕`;

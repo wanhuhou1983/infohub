@@ -65,6 +65,7 @@ tailwind.config = {
     <div class="flex gap-1 mb-4 border-b border-border">
       <button id="tab-sources" class="px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition" onclick="switchTab('sources')">数据源管理</button>
       <button id="tab-stats" class="px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition" onclick="switchTab('stats')">更新日志</button>
+      <button id="tab-health" class="px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition" onclick="switchTab('health')">系统监控</button>
     </div>
 
     <div id="tab-sources-content">
@@ -81,6 +82,23 @@ tailwind.config = {
         <p class="text-muted text-sm">加载中...</p>
       </div>
       <div id="statsCards" class="space-y-3"></div>
+    </div>
+
+    <div id="tab-health-content" class="hidden">
+      <div id="healthLoading" class="text-center py-16">
+        <div class="spinner inline-block w-8 h-8 border-2 border-accent border-t-transparent rounded-full mb-3"></div>
+        <p class="text-muted text-sm">加载中...</p>
+      </div>
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-base font-semibold">系统监控</h2>
+        <button id="healthCheckBtn" class="bg-accent hover:bg-accent2 text-white text-sm px-4 py-1.5 rounded-lg transition" onclick="checkNow()">立即检查</button>
+      </div>
+      <div id="healthSpark" class="mb-4"></div>
+      <div id="healthBody" class="space-y-4"></div>
+      <div class="mt-6">
+        <h3 class="text-sm font-medium text-muted mb-2">异常事件（近 24 小时）</h3>
+        <div id="healthEvents"></div>
+      </div>
     </div>
   </div>
 
@@ -598,18 +616,138 @@ function syncAllFollowings() { syncYoutubeFollowings(); }
 
 // ====== Tab switching ======
 var currentTab = 'sources';
+var TAB_ACTIVE = 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition';
+var TAB_INACTIVE = 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition';
+var healthTimer = null;
+
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tab-sources').className = tab === 'sources'
-    ? 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition'
-    : 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition';
-  document.getElementById('tab-stats').className = tab === 'stats'
-    ? 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-accent bg-surface text-fg transition'
-    : 'px-4 py-2 text-sm font-medium rounded-t-lg border border-b-0 border-transparent bg-transparent text-muted hover:text-fg transition';
+  document.getElementById('tab-sources').className = tab === 'sources' ? TAB_ACTIVE : TAB_INACTIVE;
+  document.getElementById('tab-stats').className = tab === 'stats' ? TAB_ACTIVE : TAB_INACTIVE;
+  document.getElementById('tab-health').className = tab === 'health' ? TAB_ACTIVE : TAB_INACTIVE;
   document.getElementById('tab-sources-content').classList.toggle('hidden', tab !== 'sources');
   document.getElementById('tab-stats-content').classList.toggle('hidden', tab !== 'stats');
+  document.getElementById('tab-health-content').classList.toggle('hidden', tab !== 'health');
   if (tab === 'sources' && !document.getElementById('cards').children.length) load();
   if (tab === 'stats') loadStats();
+  if (tab === 'health') { loadHealth(); startHealthTimer(); } else { stopHealthTimer(); }
+}
+
+function startHealthTimer() {
+  stopHealthTimer();
+  healthTimer = setInterval(loadHealth, 30000);
+}
+function stopHealthTimer() {
+  if (healthTimer) { clearInterval(healthTimer); healthTimer = null; }
+}
+
+// ====== Health / 系统监控 ======
+function loadHealth() {
+  if (currentTab !== 'health') return;
+  api('/system/health').then(function(d) {
+    renderHealth(d);
+    document.getElementById('healthLoading').classList.add('hidden');
+  }).catch(function(e) {
+    document.getElementById('healthLoading').classList.add('hidden');
+    document.getElementById('healthBody').innerHTML = '<div class="text-danger text-sm p-4">加载失败: ' + e.message + '</div>';
+  });
+  api('/system/health/history').then(function(h) {
+    renderHealthHistory(h);
+  }).catch(function() {});
+}
+
+function renderHealth(d) {
+  var body = document.getElementById('healthBody');
+  if (!d || !d.available) {
+    body.innerHTML = '<div class="text-muted text-sm p-4">' + ((d && d.message) || '暂无数据') + '</div>';
+    return;
+  }
+  var overallBadge = d.overall === 'ok'
+    ? '<span class="text-success font-semibold">● 运行正常</span>'
+    : '<span class="text-danger font-semibold">● 存在异常</span>';
+
+  var html = '<div class="flex items-center justify-between mb-4">';
+  html += '  <div class="text-sm text-muted">最近更新：' + (d.updated_at || '-') + '</div>';
+  html += '  <div class="text-sm">' + overallBadge + '</div>';
+  html += '</div>';
+
+  html += '<div class="grid grid-cols-2 md:grid-cols-3 gap-3 mb-6">';
+  (d.services || []).forEach(function(s) {
+    var c = s.ok ? 'border-success/40 bg-success/5' : 'border-danger/40 bg-danger/5';
+    var ind = s.ok ? 'bg-success' : 'bg-danger';
+    var lat = (s.latency_ms != null && s.latency_ms !== '') ? (Math.round(s.latency_ms * 100) / 100) + ' ms' : '—';
+    html += '<div class="rounded-xl border ' + c + ' bg-surface p-3">';
+    html += '  <div class="flex items-center gap-2 mb-1"><span class="w-2 h-2 rounded-full ' + ind + '"></span><span class="text-sm font-medium">' + s.name + '</span></div>';
+    html += '  <div class="text-xs text-muted">' + (s.detail || '') + '</div>';
+    html += '  <div class="text-xs text-muted mt-1">延迟 ' + lat + '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+
+  var sys = d.system || {};
+  html += '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">';
+  html += resCard('磁盘占用', (sys.disk_pct != null ? sys.disk_pct + '%' : '-'));
+  html += resCard('内存占用', (sys.mem_used_pct != null ? sys.mem_used_pct + '%' : '-'));
+  html += resCard('数据目录', sys.data_size || '-');
+  html += resCard('最近备份', sys.last_backup ? (sys.last_backup + (sys.last_backup_age_h != null ? ' (' + sys.last_backup_age_h + 'h前)' : '')) : '无');
+  html += '</div>';
+
+  body.innerHTML = html;
+  renderEvents(d.events || []);
+}
+
+function resCard(label, val) {
+  return '<div class="rounded-xl border border-border bg-surface p-3"><div class="text-xs text-muted mb-1">' + label + '</div><div class="text-lg font-semibold">' + val + '</div></div>';
+}
+
+function renderEvents(events) {
+  var el = document.getElementById('healthEvents');
+  if (!events.length) { el.innerHTML = '<div class="text-xs text-muted">近 24 小时无异常</div>'; return; }
+  var h = '<div class="space-y-2">';
+  events.slice().reverse().forEach(function(e) {
+    var col = e.level === 'error' ? 'text-danger' : (e.level === 'warn' ? 'text-warn' : 'text-muted');
+    h += '<div class="text-xs ' + col + '"><span class="text-muted mr-2">' + e.time + '</span>' + e.msg + '</div>';
+  });
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+function renderHealthHistory(h) {
+  var points = (h && h.points) || [];
+  document.getElementById('healthSpark').innerHTML = buildSparkline(points);
+}
+
+function buildSparkline(points) {
+  if (!points.length) return '<div class="text-xs text-muted">暂无趋势数据（等待首个采集周期）</div>';
+  var w = 600, hh = 80, pad = 6;
+  var n = points.length;
+  var step = (w - pad * 2) / Math.max(1, n - 1);
+  var vals = points.map(function(p) { return p.ok ? 1 : 0; });
+  var d = '';
+  for (var i = 0; i < n; i++) {
+    var x = pad + i * step;
+    var y = hh - pad - vals[i] * (hh - pad * 2);
+    d += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ' ' + y.toFixed(1) + ' ';
+  }
+  var last = vals[n - 1];
+  var stroke = last ? '#22c55e' : '#ef4444';
+  return '<svg viewBox="0 0 ' + w + ' ' + hh + '" width="100%" height="' + hh + '" preserveAspectRatio="none" style="background:#1a1d27;border-radius:8px">' +
+    '<path d="' + d + '" fill="none" stroke="' + stroke + '" stroke-width="2"/>' +
+    '<text x="8" y="16" fill="#8b8fa3" font-size="11">近 24h 可用率趋势（' + n + ' 点）</text></svg>';
+}
+
+function checkNow() {
+  var btn = document.getElementById('healthCheckBtn');
+  btn.disabled = true;
+  btn.textContent = '检查中...';
+  api('/system/health/check', { method: 'POST' }).then(function(r) {
+    loadHealth();
+  }).catch(function(e) {
+    alert('检查失败: ' + ((e && e.message) || e));
+  }).finally(function() {
+    btn.disabled = false;
+    btn.textContent = '立即检查';
+  });
 }
 
 // ====== Stats / 更新日志 ======

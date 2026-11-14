@@ -394,6 +394,13 @@ export async function saveArticleFile(
     }
 
     const processedContent = await processImages(content, meta.source_type);
+
+    // 云端采集模式：只保留图片处理（下载 + 上传 COS + 替换正文 URL），不写 Obsidian 文件。
+    // 各采集路由会把 processedContent 回写 articles.content，正文内容不受影响。
+    if (process.env.OB_WRITE_ENABLED === 'false') {
+      return { filePath: null, processedContent };
+    }
+
     const obPath = getObSubdir(meta);
     const filename = sanitizeFilename(meta);
     const dirPath = join(OB_DIR, obPath);

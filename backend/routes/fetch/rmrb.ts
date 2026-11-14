@@ -27,7 +27,9 @@ export function createRmrbRoutes(sql: Sql): Hono {
       const sourceId = 2892;
 
       const rmrbDir = process.env.RMRB_DIR || path.resolve(__dirname, '../../skills/rmrb-daily');
-      const python = process.env.PYTHON_PATH || '/Users/linhu/.workbuddy/binaries/python/envs/default/bin/python3';
+      // Mac 本地沿用 WorkBuddy Python 环境；云端容器不存在该路径，回退到镜像内置的 python3
+      const MAC_PYTHON = '/Users/linhu/.workbuddy/binaries/python/envs/default/bin/python3';
+      const python = process.env.PYTHON_PATH || (existsSync(MAC_PYTHON) ? MAC_PYTHON : 'python3');
       const outputMd = `/tmp/rmrb_${date.replace(/-/g,'')}.md`;
 
       const proc = spawn(python, [path.join(rmrbDir, 'rmrb_daily.py'), date, ...(full ? ['--full', '--output', outputMd] : ['--output', outputMd])], { timeout: 120000 });

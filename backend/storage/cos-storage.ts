@@ -18,13 +18,29 @@ let _envConfig: Record<string, string> | null = null;
 
 function getEnvConfig(): Record<string, string> {
   if (!_envConfig) {
-    try {
-      const envFile = join(__dirname, '..', '.env.json');
-      if (existsSync(envFile)) {
-        _envConfig = JSON.parse(readFileSync(envFile, 'utf-8'));
-      }
-    } catch { /* ignore */ }
-    _envConfig = _envConfig || {};
+    const merged: Record<string, string> = {};
+    // 云端把 /opt/infohub/.env.json 挂到 /.env.json（镜像 WORKDIR=/app，
+    // 原路径 /app/.env.json 在云端并不存在），因此这里要覆盖多个候选位置。
+    const candidates = [
+      join(__dirname, '..', '.env.json'),
+      join(__dirname, '.env.json'),
+      '/.env.json',
+      join(process.cwd(), '.env.json'),
+    ];
+    for (const file of candidates) {
+      try {
+        if (!existsSync(file)) continue;
+        const parsed = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
+        for (const [key, value] of Object.entries(parsed)) {
+          if (typeof value === 'string' && !merged[key]) merged[key] = value;
+        }
+      } catch { /* ignore 单个文件解析失败，不影响其他来源 */ }
+    }
+    // 真实环境变量（docker -e / --env-file）优先级最高
+    for (const key of ['COS_SECRET_ID', 'COS_SECRET_KEY', 'COS_BUCKET', 'COS_REGION']) {
+      if (process.env[key]) merged[key] = process.env[key]!;
+    }
+    _envConfig = merged;
   }
   return _envConfig;
 }
@@ -107,20 +123,23 @@ function getCosClient(): any {
  * 上传文件到 COS
  * @returns 成功返回 COS URL，失败返回 null
  */
-export async function uploadToCOS(key: string, body: Buffer): Promise<string | null> {
+export async function uploadToCOS(key: string, body: Buffer, contentType?: string): Promise<string | null> {
   const client = getCosClient();
   const cfg = loadCosConfig();
   if (!client || !cfg) return null;
 
+  const params: any = {
+    Bucket: cfg.bucket,
+    Region: cfg.region,
+    Key: key,
+    Body: body,
+    ContentLength: body.length,
+  };
+  if (contentType) params.ContentType = contentType;
+
   return new Promise((resolve) => {
     client.putObject(
-      {
-        Bucket: cfg.bucket,
-        Region: cfg.region,
-        Key: key,
-        Body: body,
-        ContentLength: body.length,
-      },
+      params,
       (err: any) => {
         if (err) {
           resolve(null);

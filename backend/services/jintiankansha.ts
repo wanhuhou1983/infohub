@@ -10,12 +10,15 @@ import { createHash } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { crawlWechatArticle } from './crawler.js';
 import { saveArticleFile, hashString } from '../file-storage.js';
+import { createConcurrencyPool } from './translate.js';
 
 // ============ Config ============
 const JTK_BASE = 'http://www.jintiankansha.me/api3';
 const JTK_USER = process.env.JTK_USER || '';
 const JTK_TOKEN = process.env.JTK_TOKEN || '';
-const JTK_ARTICLES_PER_COLUMN = 8; // 每次每个专栏最多抓 8 篇
+const JTK_ARTICLES_PER_COLUMN = 20; // 每次每个专栏最多抓 20 篇（防止积压遗漏）
+const JTK_STALENESS_THRESHOLD_HOURS = 36; // 超过此时间无新文章则触发补偿采集
+const JTK_STALENESS_FETCH_COUNT = 50;     // 补偿采集时取的文章数
 const JTK_PAGE_SIZE = 20;
 
 function checkJtkConfig() {
@@ -55,20 +58,33 @@ const SOURCE_MAP: Record<string, { type: string; parentId: number }> = {
 };
 
 // ============ API Client ============
-async function jtkApi(pathQuery: string): Promise<any> {
+async function jtkApi(pathQuery: string, retries = 1): Promise<any> {
   checkJtkConfig();
   const sep = pathQuery.includes('?') ? '&' : '?';
   const url = `${JTK_BASE}${pathQuery}${sep}token=${encodeURIComponent(JTK_TOKEN)}&user=${encodeURIComponent(JTK_USER)}`;
-  const resp = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' },
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!resp.ok) throw new Error(`JTK ${resp.status}: ${pathQuery}`);
-  const json = await resp.json();
-  if (json.status !== 'success') {
-    throw new Error(`JTK API error: ${json.data?.message || 'unknown'}`);
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (resp.status === 503 && retries > 0) {
+      // JTK 限流，等 1s 后重试
+      await new Promise(r => setTimeout(r, 1000));
+      return jtkApi(pathQuery, retries - 1);
+    }
+    if (!resp.ok) throw new Error(`JTK ${resp.status}: ${pathQuery}`);
+    const json = await resp.json();
+    if (json.status !== 'success') {
+      throw new Error(`JTK API error: ${json.data?.message || 'unknown'}`);
+    }
+    return json.data;
+  } catch (e: any) {
+    if (retries > 0 && (e.message?.includes('503') || e.name === 'TimeoutError')) {
+      await new Promise(r => setTimeout(r, 1000));
+      return jtkApi(pathQuery, retries - 1);
+    }
+    throw e;
   }
-  return json.data;
 }
 
 /**
@@ -89,10 +105,12 @@ export async function fetchAllColumns(): Promise<JtkColumn[]> {
 
 /**
  * 获取某个专栏的最近文章
+ * @param slug 专栏标识
+ * @param limit 取文章数，默认 JTK_ARTICLES_PER_COLUMN
  */
-async function fetchColumnArticles(slug: string): Promise<JtkArticle[]> {
+async function fetchColumnArticles(slug: string, limit: number = JTK_ARTICLES_PER_COLUMN): Promise<JtkArticle[]> {
   try {
-    const articles: JtkArticle[] = await jtkApi(`/query/get_topics_by_one_column?slug=${slug}&limit=${JTK_ARTICLES_PER_COLUMN}`);
+    const articles: JtkArticle[] = await jtkApi(`/query/get_topics_by_one_column?slug=${slug}&limit=${limit}`);
     return articles || [];
   } catch (e: any) {
     console.error(`[JTK] fetch failed for ${slug}: ${e.message}`);
@@ -102,7 +120,7 @@ async function fetchColumnArticles(slug: string): Promise<JtkArticle[]> {
 
 // ============ Process single column ============
 async function fetchColumn(
-  sql: Sql, col: JtkColumn,
+  sql: Sql, col: JtkColumn, articleLimit?: number,
 ): Promise<{ total: number; inserted: number; skipped: number }> {
   const mapping = SOURCE_MAP[col.source];
   if (!mapping) {
@@ -124,7 +142,7 @@ async function fetchColumn(
     console.log(`[JTK] Created source #${sourceId}: ${col.name} (${mapping.type})`);
   }
 
-  const articles = await fetchColumnArticles(col.slug);
+  const articles = await fetchColumnArticles(col.slug, articleLimit);
   if (articles.length === 0) return { total: 0, inserted: 0, skipped: 0 };
 
   let inserted = 0, skipped = 0;
@@ -138,8 +156,8 @@ async function fetchColumn(
     const dup = await sql`SELECT id FROM articles WHERE content_hash = ${contentHash}`;
     if (dup.length > 0) { skipped++; continue; }
 
-    const title = a.name || a.title || '';
-    const author = a.author || '';
+    const title = (a.name || a.title || '').replace(/\u0000/g, '');
+    const author = (a.author || '').replace(/\u0000/g, '');
 
     let publishedAt: string | null = null;
     const pt = a.publish_time;
@@ -151,8 +169,8 @@ async function fetchColumn(
     // WeChat: 用 crawlWechatArticle 抓正文（已有四层降级含 Playwright）
     if (mapping.type === 'wechat' && url.includes('mp.weixin.qq.com')) {
       try {
-        const result = await crawlWechatArticle(url);
-        if (result) content = result.content;
+        const crawled = await crawlWechatArticle(url);
+        if (crawled) content = crawled.content;
       } catch (e: any) {
         console.error(`[JTK] Crawl error ${url}: ${e.message}`);
       }
@@ -161,6 +179,7 @@ async function fetchColumn(
     if (!content) {
       content = `${title}\n\n来源：${col.name}\n链接：${url}`;
     }
+    content = content.replace(/\u0000/g, '');
 
     try {
       const extra: Record<string, any> = {};
@@ -205,12 +224,43 @@ async function fetchColumn(
   return { total: articles.length, inserted, skipped };
 }
 
+// ============ Staleness Detection ============
+/**
+ * 检查某个 source 是否"过期"（最近一篇文章距今超过阈值）。
+ * 返回需要补偿采集的文章数，null 表示无需补偿。
+ */
+async function checkStaleness(sql: Sql, col: JtkColumn): Promise<number | null> {
+  const mapping = SOURCE_MAP[col.source];
+  if (!mapping) return null;
+
+  const rows = await sql`
+    SELECT MAX(fetched_at) as last_fetched
+    FROM articles a
+    JOIN sources s ON a.source_id = s.id
+    WHERE s.type = ${mapping.type} AND s.name = ${col.name}
+  `;
+  const lastFetched = rows[0]?.last_fetched;
+  if (!lastFetched) return JTK_STALENESS_FETCH_COUNT; // 从未采过，触发首次全量
+
+  const ageMs = Date.now() - new Date(lastFetched).getTime();
+  const ageHours = ageMs / 3600_000;
+  if (ageHours >= JTK_STALENESS_THRESHOLD_HOURS) {
+    console.log(`[JTK] Staleness: ${col.name} 上次入库 ${Math.round(ageHours)}h 前，触发补偿采集`);
+    return JTK_STALENESS_FETCH_COUNT;
+  }
+  return null;
+}
+
 // ============ Main ============
 /**
  * 从今天看啥 API 抓取所有专栏的最新文章。
- * 目前专注于微信公众号 (type=wechat)，其他类型已由调度器独立处理。
+ * 并发采集（最多5个专栏同时跑），并对长期未更新的专栏自动补偿。
  */
-export async function fetchAllJtkSources(sql: Sql): Promise<JtkFetchResult> {
+/**
+ * @param allowedSources 可选，只采集指定来源类型的专栏（如 ['公众号']）。
+ *   不传则采集全部专栏，保持本地全功能模式的行为。
+ */
+export async function fetchAllJtkSources(sql: Sql, allowedSources?: string[]): Promise<JtkFetchResult> {
   console.log('[JTK] Fetching all columns...');
   let columns: JtkColumn[];
   try {
@@ -219,26 +269,57 @@ export async function fetchAllJtkSources(sql: Sql): Promise<JtkFetchResult> {
     console.error(`[JTK] Columns: ${e.message}`);
     return { total: 0, inserted: 0, skipped: 0, errors: 1 };
   }
+  if (allowedSources && allowedSources.length > 0) {
+    columns = columns.filter(c => allowedSources.includes(c.source));
+    console.log(`[JTK] 已按来源过滤: ${allowedSources.join(',')}`);
+  }
   console.log(`[JTK] Got ${columns.length} columns`);
 
+  // 先检测每个专栏是否需要 staleness 补偿
+  const tasks: { col: JtkColumn; limit: number | undefined }[] = [];
+  for (const col of columns) {
+    let limit: number | undefined = undefined;
+    try {
+      const staleLimit = await checkStaleness(sql, col);
+      if (staleLimit) limit = staleLimit;
+    } catch {
+      // staleness 检测失败不阻塞正常采集
+    }
+    tasks.push({ col, limit });
+  }
+
+  const staleCount = tasks.filter(t => t.limit).length;
+  if (staleCount > 0) {
+    console.log(`[JTK] ${staleCount} 个专栏触发补偿采集`);
+  }
+
+  // 并发采集，最多 3 个专栏同时（JTK API 对高频请求返回 503）
+  const pool = createConcurrencyPool(3);
   let total = 0, inserted = 0, skipped = 0, errors = 0;
   const sourceBreakdown: { source: string; count: number }[] = [];
 
-  for (const col of columns) {
-    try {
-      const r = await fetchColumn(sql, col);
-      total += r.total;
-      inserted += r.inserted;
-      skipped += r.skipped;
-      if (r.inserted > 0) {
-        sourceBreakdown.push({ source: col.name, count: r.inserted });
+  const results = await Promise.allSettled(
+    tasks.map(({ col, limit }) => pool(async () => {
+      const r = await fetchColumn(sql, col, limit);
+      // 每个专栏之间留 300ms 间隔，降低 JTK 503 概率
+      await new Promise(resolve => setTimeout(resolve, 300));
+      return r;
+    }))
+  );
+
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status === 'fulfilled') {
+      total += r.value.total;
+      inserted += r.value.inserted;
+      skipped += r.value.skipped;
+      if (r.value.inserted > 0) {
+        sourceBreakdown.push({ source: tasks[i].col.name, count: r.value.inserted });
       }
-    } catch (e: any) {
-      console.error(`[JTK] ${col.name}: ${e.message}`);
+    } else {
+      console.error(`[JTK] ${tasks[i].col.name}: ${r.reason?.message || r.reason}`);
       errors++;
     }
-    // 稍等以免触发频次限制
-    await new Promise(r => setTimeout(r, 500));
   }
 
   console.log(`[JTK] Done: ${total} total, ${inserted} new, ${skipped} dup, ${errors} err`);
