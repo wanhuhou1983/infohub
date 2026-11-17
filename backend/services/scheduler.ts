@@ -204,9 +204,12 @@ async function phase1ParallelFetch(sql: Sql): Promise<FetchResult[]> {
   // 本地 / 云端脱钩：LOCAL_TEXT_FETCH=false 时本地不再采任何文本类源，
   // 只保留音视频（播客/B站/YouTube/推特）与播客频道 RSS。
   // 默认 true，灰度期本地仍需采文本用于比对；切换完成后在本地环境设为 false。
+  // 注意：不能关 wechat —— phase1 的 JTK 任务挂在这个开关上，
+  // 而该任务内部已按 TEXT_ENABLED 自动切换白名单（false 时只采 B站投稿/小宇宙）。
+  // 关掉 wechat 会连同本地音视频专栏一起停掉（本地每轮 0 源）。
   const TEXT_ENABLED = process.env.LOCAL_TEXT_FETCH !== 'false';
   if (!TEXT_ENABLED) {
-    for (const key of ['rmrb', 'xwlb', 'penti', 'wechat']) {
+    for (const key of ['rmrb', 'xwlb', 'penti']) {
       if (s[key]) s[key] = { ...s[key], enabled: false };
     }
   }
@@ -1260,7 +1263,9 @@ export function createSchedulerRoutes(sql: Sql): Hono {
     // 脱钩保护：本地自动化（curl trigger-source-fetch/*）不走 phase1 开关，
     // 因此在这里单独拦截，避免切换后仍在本地采文本类源。
     const LOCAL_TEXT_OFF = process.env.LOCAL_TEXT_FETCH === 'false';
-    const TEXT_TRIGGER_TYPES = new Set(['xwlb', 'magazine', 'rmrb', 'penti', 'wechat']);
+    // wechat 不在拦截集合内：其 endpoint 是 /fetch/jintiankansha，
+    // 该路由在 LOCAL_TEXT_FETCH=false 时只采 B站投稿/小宇宙（本地音视频职责）。
+    const TEXT_TRIGGER_TYPES = new Set(['xwlb', 'magazine', 'rmrb', 'penti']);
     if (LOCAL_TEXT_OFF && TEXT_TRIGGER_TYPES.has(sourceType)) {
       return c.json({
         ok: true, skipped: true,

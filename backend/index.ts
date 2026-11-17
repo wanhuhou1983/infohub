@@ -410,8 +410,10 @@ app.use('/api/fetch/*', writeAuthGuard());
 
 // 脱钩后的最后一道防线：切换完成后，无论自动化、旧脚本还是手动 curl，
 // 本地都不再执行文本类采集。RSS 不在此列，由 scheduler 按类型白名单保留播客频道。
+// 注意：/api/fetch/jintiankansha 不在此列 —— 该路由内部已按 LOCAL_TEXT_FETCH
+// 自动切换白名单（false 时只采 B站投稿/小宇宙），把它当文本源拦掉会切断本地音视频链路。
 const LOCAL_TEXT_FETCH_PATHS = [
-  '/api/fetch/rmrb', '/api/fetch/xwlb', '/api/fetch/penti', '/api/fetch/jintiankansha',
+  '/api/fetch/rmrb', '/api/fetch/xwlb', '/api/fetch/penti',
 ];
 if (!IS_CLOUD && process.env.LOCAL_TEXT_FETCH === 'false') {
   app.use('/api/fetch/*', async (c, next) => {
