@@ -31,6 +31,16 @@ tailwind.config = {
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
   body { font-family: 'Noto Sans SC', sans-serif; }
+  /* ===== 阅读尺寸：默认随视口自适应，可由「设置 → 阅读显示」覆盖 =====
+     none = 不设上限；列表用 clamp 兼顾窄屏与宽屏 */
+  :root {
+    --app-max-width: none;
+    --list-width: clamp(300px, 26vw, 460px);
+    --read-max-width: none;
+  }
+  #appHeaderInner, #appShell { max-width: var(--app-max-width); }
+  #mainContent { max-width: var(--list-width); }
+  #detailColumnContent { max-width: var(--read-max-width); margin-left: auto; margin-right: auto; }
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: #1a1d27; }
   ::-webkit-scrollbar-thumb { background: #2e3244; border-radius: 3px; }
@@ -566,6 +576,54 @@ tailwind.config = {
         </button>
       </div>
 
+      <!-- 阅读显示（纯前端偏好，即时生效，仅存本浏览器） -->
+      <div class="mb-6">
+        <h3 class="text-sm font-medium text-accent2 mb-1 flex items-center gap-2">
+          <span>🖥️</span> 阅读显示
+        </h3>
+        <p class="text-xs text-muted mb-3">调整后即时生效，仅保存在本浏览器；默认随屏幕宽度自适应铺满。</p>
+        <div class="space-y-3">
+          <div>
+            <label class="text-xs text-muted block mb-1">页面最大宽度</label>
+            <select id="cfgAppWidth" onchange="onReadPrefChange()" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option value="0">自适应铺满（推荐）</option>
+              <option value="1280">1280px（旧版）</option>
+              <option value="1600">1600px</option>
+              <option value="1920">1920px</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">正文最大宽度</label>
+            <div class="flex gap-2">
+              <select id="cfgReadWidth" onchange="onReadPrefChange()" class="flex-1 bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+                <option value="0">不限 / 跟随窗口（推荐）</option>
+                <option value="800">800px</option>
+                <option value="1000">1000px</option>
+                <option value="1200">1200px</option>
+                <option value="custom">自定义…</option>
+              </select>
+              <input id="cfgReadWidthCustom" type="number" min="400" max="4000" placeholder="px" oninput="onReadPrefChange()"
+                class="w-24 bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent hidden">
+            </div>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">左侧列表宽度</label>
+            <select id="cfgListWidth" onchange="onReadPrefChange()" class="w-full bg-surface2 border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-accent">
+              <option value="0">自适应（推荐）</option>
+              <option value="320">320px</option>
+              <option value="380">380px</option>
+              <option value="460">460px</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-xs text-muted block mb-1">正文字号 <span id="cfgFontSizeLabel" class="text-accent2">130%</span></label>
+            <input id="cfgFontSize" type="range" min="70" max="200" step="10" value="130" oninput="onReadPrefChange()"
+              class="w-full accent-indigo-500">
+          </div>
+          <button onclick="resetReadPrefs()" class="text-xs text-muted hover:text-fg transition">↺ 恢复默认</button>
+        </div>
+      </div>
+
       <!-- WeFlow 配置 -->
       <div class="mb-6">
         <h3 class="text-sm font-medium text-accent2 mb-3 flex items-center gap-2">
@@ -634,7 +692,7 @@ tailwind.config = {
 </div>
 
 <header class="sticky top-0 z-50 bg-surface/95 backdrop-blur-sm border-b border-border">
-  <div class="max-w-7xl mx-auto px-4 h-14 flex items-center justify-between">
+  <div id="appHeaderInner" class="w-full mx-auto px-4 h-14 flex items-center justify-between">
     <div class="flex items-center gap-3">
       <!-- 汉堡菜单按钮（移动端） -->
       <button id="mobileSidebarToggle" class="md:hidden text-muted hover:text-fg transition p-1 -ml-1" onclick="toggleMobileSidebar()" title="菜单">
@@ -720,7 +778,7 @@ tailwind.config = {
   </div>
 </div>
 
-<div class="max-w-7xl mx-auto px-4 py-4 flex gap-0">
+<div id="appShell" class="w-full mx-auto px-4 py-4 flex gap-0">
   <!-- 左侧边栏（桌面端显示） -->
   <aside id="desktopSidebar" class="hidden md:block w-64 shrink-0 sticky top-20 h-fit max-h-[calc(100vh-7rem)] overflow-y-auto transition-all duration-300 ease-in-out" style="min-width: 256px;">
     <div class="bg-surface rounded-xl p-4 mb-4 border border-border">
@@ -745,7 +803,7 @@ tailwind.config = {
 
   <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
   <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
-    <main id="mainContent" class="flex-1 min-w-0 max-w-sm overflow-y-auto">
+    <main id="mainContent" class="flex-1 min-w-0 overflow-y-auto">
       <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-0 bg-bg z-40">
         <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
         <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
@@ -786,6 +844,74 @@ let selectedArticleId = null;
 let offset = 0;
 const PAGE_SIZE = 30;
 let detailFontSize = 130; // 详情正文字号百分比
+
+// ===== 阅读显示偏好（纯前端，localStorage 持久化，即时生效） =====
+const READ_PREFS_KEY = 'infohub.readPrefs';
+const READ_PREFS_DEFAULT = { appWidth: 0, readWidth: 0, listWidth: 0, fontSize: 130 };
+let readPrefs = loadReadPrefs();
+
+function loadReadPrefs() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(READ_PREFS_KEY) || '{}');
+    const p = { ...READ_PREFS_DEFAULT, ...saved };
+    for (const k of ['appWidth', 'readWidth', 'listWidth']) {
+      p[k] = Math.max(0, Math.min(4000, Number(p[k]) || 0));
+    }
+    p.fontSize = Math.max(70, Math.min(200, Number(p.fontSize) || 130));
+    return p;
+  } catch (e) { return { ...READ_PREFS_DEFAULT }; }
+}
+function saveReadPrefs() {
+  try { localStorage.setItem(READ_PREFS_KEY, JSON.stringify(readPrefs)); } catch (e) {}
+}
+function applyReadPrefs() {
+  const root = document.documentElement.style;
+  root.setProperty('--app-max-width', readPrefs.appWidth ? readPrefs.appWidth + 'px' : 'none');
+  root.setProperty('--read-max-width', readPrefs.readWidth ? readPrefs.readWidth + 'px' : 'none');
+  // 页面宽度受限时用更紧凑的列表，避免正文被挤窄；用户显式设值优先
+  const autoList = readPrefs.appWidth ? 'clamp(300px, 24vw, 384px)' : 'clamp(300px, 26vw, 460px)';
+  root.setProperty('--list-width', readPrefs.listWidth ? readPrefs.listWidth + 'px' : autoList);
+  detailFontSize = readPrefs.fontSize;
+  const bodyEl = document.getElementById('articleBodyContent');
+  if (bodyEl) bodyEl.style.fontSize = detailFontSize + '%';
+  const label = document.getElementById('cfgFontSizeLabel');
+  if (label) label.textContent = detailFontSize + '%';
+}
+function onReadPrefChange() {
+  const rwSel = document.getElementById('cfgReadWidth');
+  const custom = document.getElementById('cfgReadWidthCustom');
+  custom.classList.toggle('hidden', rwSel.value !== 'custom');
+  const rw = rwSel.value === 'custom'
+    ? Math.max(400, Math.min(4000, Number(custom.value) || 1200))
+    : Number(rwSel.value) || 0;
+  readPrefs = {
+    appWidth: Number(document.getElementById('cfgAppWidth').value) || 0,
+    readWidth: rw,
+    listWidth: Number(document.getElementById('cfgListWidth').value) || 0,
+    fontSize: Math.max(70, Math.min(200, Number(document.getElementById('cfgFontSize').value) || 130)),
+  };
+  saveReadPrefs();
+  applyReadPrefs();
+}
+function initReadPrefs() {
+  const preset = [0, 800, 1000, 1200];
+  const rwSel = document.getElementById('cfgReadWidth');
+  const custom = document.getElementById('cfgReadWidthCustom');
+  if (preset.includes(readPrefs.readWidth)) rwSel.value = String(readPrefs.readWidth);
+  else { rwSel.value = 'custom'; custom.value = readPrefs.readWidth; }
+  custom.classList.toggle('hidden', rwSel.value !== 'custom');
+  document.getElementById('cfgAppWidth').value = String(readPrefs.appWidth);
+  document.getElementById('cfgListWidth').value = String(readPrefs.listWidth);
+  document.getElementById('cfgFontSize').value = readPrefs.fontSize;
+  applyReadPrefs();
+}
+function resetReadPrefs() {
+  readPrefs = { ...READ_PREFS_DEFAULT };
+  saveReadPrefs();
+  initReadPrefs();
+  showToast('阅读显示已恢复默认', 'success');
+}
+
 // sidebarCollapsed removed
 // 移动端侧边栏
 function toggleMobileSidebar() {
@@ -1566,7 +1692,7 @@ function renderGroupDailyDetail(day) {
   const detailCol = document.getElementById('detailColumn');
   if (detailCol) detailCol.classList.remove('hidden');
   document.getElementById('mainContent').classList.remove('max-w-2xl');
-  document.getElementById('mainContent').classList.add('w-[420px]','shrink-0');
+  document.getElementById('mainContent').classList.add('shrink-0');
 
   const msgList = (day.messages || []).map(m => {
     const time = m.time ? new Date(m.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -2949,8 +3075,14 @@ document.addEventListener('keydown', (e) => {
 // ===== 字体缩放 =====
 function adjustFontSize(delta) {
   detailFontSize = Math.max(70, Math.min(200, detailFontSize + delta * 10));
+  readPrefs.fontSize = detailFontSize;
+  saveReadPrefs();
   const fontIndicator = document.getElementById('detailFontIndicator');
   if (fontIndicator) fontIndicator.textContent = detailFontSize + '%';
+  const slider = document.getElementById('cfgFontSize');
+  if (slider) slider.value = detailFontSize;
+  const label = document.getElementById('cfgFontSizeLabel');
+  if (label) label.textContent = detailFontSize + '%';
   const bodyEl = document.getElementById('articleBodyContent');
   if (bodyEl) bodyEl.style.fontSize = detailFontSize + '%';
 }
@@ -4393,6 +4525,7 @@ async function addPodcastChannel() {
 }
 
 // ===== 初始化 =====
+initReadPrefs();
 loadSources();
 renderCategories();
 loadArticles();
