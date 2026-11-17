@@ -760,7 +760,7 @@ tailwind.config = {
     </main>
 
     <!-- 文章详情列（始终可见） -->
-    <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto">
+    <div id="detailColumn" class="flex-1 min-w-0 overflow-y-auto relative" style="overflow-anchor: none">
       <div id="detailColumnContent" class="p-4 md:p-6">
         <div class="flex flex-col items-center justify-center h-full text-center text-muted py-32">
           <div class="text-4xl mb-4">📖</div>
@@ -1563,7 +1563,8 @@ async function selectGroupDaily(id) {
 }
 
 function renderGroupDailyDetail(day) {
-  document.getElementById('detailPanel').classList.remove('hidden');
+  const detailCol = document.getElementById('detailColumn');
+  if (detailCol) detailCol.classList.remove('hidden');
   document.getElementById('mainContent').classList.remove('max-w-2xl');
   document.getElementById('mainContent').classList.add('w-[420px]','shrink-0');
 
@@ -1607,7 +1608,7 @@ function renderGroupDailyDetail(day) {
       ${msgList || '<div class="text-muted text-sm">暂无消息</div>'}
     </div>
   `;
-  document.getElementById('detailColumnContent').scrollTop = 0;
+  resetDetailScroll();
 }
 
 // ===== 统计 =====
@@ -1620,6 +1621,17 @@ async function loadStats() {
 }
 
 // ===== 文章详情 =====
+// #detailColumn 才是真正的滚动容器（overflow-y-auto）。历史代码里的
+// detailPanel / detailColumnContent 都不是滚动元素，对它们设 scrollTop 无效，
+// 这正是「切换文章后停留在上一篇位置」的根因。
+function resetDetailScroll() {
+  const col = document.getElementById('detailColumn');
+  if (!col) return;
+  col.scrollTop = 0;
+  // 内容替换后布局可能异步稳定，下一帧再兜底一次
+  requestAnimationFrame(() => { col.scrollTop = 0; });
+}
+
 async function selectArticle(id) {
   selectedArticleId = id;
   const article = await api(`/articles/${id}`);
@@ -1824,11 +1836,12 @@ async function selectArticle(id) {
 
 
 
+  // 切换文章时立即归位，必须放在所有后续副作用之前，
+  // 否则 renderToc 等异常会中断函数，滚动位置就停留在上一篇。
+  resetDetailScroll();
+
   // ====== TOC 导航渲染 ======
   renderToc(article, id);
-
-  // 切换文章时滚动到顶部
-  document.getElementById('detailPanel').scrollTop = 0;
 
   loadArticles(); // 刷新列表的已读状态
   loadStats();
@@ -1909,6 +1922,8 @@ function navigateArticle(direction) {
 function renderToc(article, articleId) {
   const tocPanel = document.getElementById('tocPanel');
   const tocNav = document.getElementById('tocNav');
+  // 目录面板在布局重构后已移除：静默跳过，不能抛错中断 selectArticle
+  if (!tocPanel || !tocNav) return;
   const sections = window._currentSections || [];
 
   if (!sections || sections.length < 2) {
@@ -1924,16 +1939,17 @@ function renderToc(article, articleId) {
   tocPanel.classList.remove('hidden');
 
   // 移除旧的 scroll spy，添加新的
-  const detailPanel = document.getElementById('detailPanel');
+  const detailCol = document.getElementById('detailColumn');
+  if (!detailCol) return;
   if (window._tocScrollHandler) {
-    detailPanel.removeEventListener('scroll', window._tocScrollHandler);
+    detailCol.removeEventListener('scroll', window._tocScrollHandler);
   }
   window._tocScrollHandler = function() {
-    updateActiveTocItem(detailPanel);
+    updateActiveTocItem(detailCol);
   };
-  detailPanel.addEventListener('scroll', window._tocScrollHandler);
+  detailCol.addEventListener('scroll', window._tocScrollHandler);
   // 初始高亮
-  setTimeout(() => updateActiveTocItem(detailPanel), 100);
+  setTimeout(() => updateActiveTocItem(detailCol), 100);
 }
 
 // ===== TOC 滚动高亮 =====
@@ -1964,11 +1980,12 @@ function updateActiveTocItem(container) {
 
 // ===== TOC 滚动到指定章节 =====
 function scrollToSection(index) {
-  const detailPanel = document.getElementById('detailPanel');
-  const headings = detailPanel.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3');
+  const detailCol = document.getElementById('detailColumn');
+  if (!detailCol) return;
+  const headings = detailCol.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3');
   if (headings[index]) {
     const top = headings[index].offsetTop - 20; // 留 20px 边距
-    detailPanel.scrollTo({ top, behavior: 'smooth' });
+    detailCol.scrollTo({ top, behavior: 'smooth' });
   }
 }
 
@@ -2932,7 +2949,8 @@ document.addEventListener('keydown', (e) => {
 // ===== 字体缩放 =====
 function adjustFontSize(delta) {
   detailFontSize = Math.max(70, Math.min(200, detailFontSize + delta * 10));
-  document.getElementById('detailFontIndicator').textContent = detailFontSize + '%';
+  const fontIndicator = document.getElementById('detailFontIndicator');
+  if (fontIndicator) fontIndicator.textContent = detailFontSize + '%';
   const bodyEl = document.getElementById('articleBodyContent');
   if (bodyEl) bodyEl.style.fontSize = detailFontSize + '%';
 }
