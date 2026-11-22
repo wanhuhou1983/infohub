@@ -90,7 +90,7 @@ export function createPentiRoutes(sql: Sql): Hono {
 
       const title = targetUrl.title.replace(/[【】]/g, '');
       const contentHash = hashString('penti:' + date);
-      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${mdContent},${mdContent.slice(0,150)},${base + detailHref},${pubDate},'社会',${['喷嚏图卦',date.slice(0,6)]},${contentHash},NOW(),'喷嚏图卦','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${mdContent},${mdContent.slice(0,150)},${base + detailHref},${pubDate},'社会',${['喷嚏图卦',date.slice(0,6)]},${contentHash},(NOW() AT TIME ZONE 'Asia/Shanghai'),'喷嚏图卦','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
 
       let inserted = false;
       if (rows.length > 0) {

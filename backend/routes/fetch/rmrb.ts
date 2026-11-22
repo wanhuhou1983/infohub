@@ -47,7 +47,7 @@ export function createRmrbRoutes(sql: Sql): Hono {
       const bodyContent = lines.slice(1).join('\n').trim();
       const contentHash = hashString('rmrb:' + date.replace(/-/g,''));
 
-      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${bodyContent},${bodyContent.slice(0,150)},${'https://paper.people.com.cn/rmrb/'},${pubDate},'时政',${['人民日报',date.slice(0,7)]},${contentHash},NOW(),'人民日报','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+      const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${title},${bodyContent},${bodyContent.slice(0,150)},${'https://paper.people.com.cn/rmrb/'},${pubDate},'时政',${['人民日报',date.slice(0,7)]},${contentHash},(NOW() AT TIME ZONE 'Asia/Shanghai'),'人民日报','{}') ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
       let inserted = 0;
       if (rows.length > 0) {
         inserted = 1;

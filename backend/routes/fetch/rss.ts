@@ -75,7 +75,11 @@ async function fetchRssFeed(
       if (!url) return { inserted: false, translated: false };
 
       const rssContent = cleanHtmlToText(item.content || item.contentSnippet || item.summary || '');
-      const publishedAt = item.isoDate || item.pubDate || new Date().toISOString();
+      const rawPub = item.isoDate || item.pubDate || new Date().toISOString();
+      const _pd = new Date(rawPub);
+      // published_at 列无时区、读取按 Asia/Shanghai 解析 → 统一存北京时间 wall clock
+      const publishedAt = isNaN(_pd.getTime()) ? rawPub
+        : new Date(_pd.getTime() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
       const author = item.creator || item.author || '';
 
       const enclosureUrl = item.enclosure?.url || '';
@@ -142,7 +146,7 @@ async function fetchRssFeed(
 
       const insertedRows = await sql`
         INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author, extra)
-        VALUES (${sourceId}, ${finalTitle}, ${finalContent}, ${finalContent.slice(0, 150)}, ${url}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, NOW(), ${author}, ${sql.json(extraData)})
+        VALUES (${sourceId}, ${finalTitle}, ${finalContent}, ${finalContent.slice(0, 150)}, ${url}, ${publishedAt}, ${category}, ${tags}, ${contentHash}, (NOW() AT TIME ZONE 'Asia/Shanghai'), ${author}, ${sql.json(extraData)})
         ON CONFLICT (content_hash) DO NOTHING
         RETURNING id
       `;
@@ -245,7 +249,11 @@ export function createRssRoutes(sql: Sql): Hono {
         const url = item.link || item.guid || '';
         const title = item.title?.trim() || '(无标题)';
         const rssContent = item.content || item.contentSnippet || item.description || '';
-        const publishedAt = item.isoDate || item.pubDate || new Date().toISOString();
+        const rawPub = item.isoDate || item.pubDate || new Date().toISOString();
+      const _pd = new Date(rawPub);
+      // published_at 列无时区、读取按 Asia/Shanghai 解析 → 统一存北京时间 wall clock
+      const publishedAt = isNaN(_pd.getTime()) ? rawPub
+        : new Date(_pd.getTime() + 8 * 3600 * 1000).toISOString().replace('T', ' ').slice(0, 19);
         const author = item.creator || item.author || '';
         const enclosureUrl = item.enclosure?.url || '';
         const enclosureType = item.enclosure?.type || '';
@@ -284,7 +292,7 @@ export function createRssRoutes(sql: Sql): Hono {
         if (enclosureUrl) { extraData.audio_url = enclosureUrl; extraData.audio_type = enclosureType; extraData.audio_length = enclosureLength; }
 
         fetched++;
-        const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${finalTitle},${finalContent},${finalContent.slice(0,150)},${url},${publishedAt},${category},${tags},${contentHash},NOW(),${author},${sql.json(extraData)}) ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
+        const rows = await sql`INSERT INTO articles (source_id,title,content,summary,url,published_at,category,tags,content_hash,fetched_at,author,extra) VALUES (${sourceId},${finalTitle},${finalContent},${finalContent.slice(0,150)},${url},${publishedAt},${category},${tags},${contentHash},(NOW() AT TIME ZONE 'Asia/Shanghai'),${author},${sql.json(extraData)}) ON CONFLICT (content_hash) DO NOTHING RETURNING id`;
         if (rows.length > 0) {
           const newId = rows[0].id;
           const { processedContent } = await saveArticleFile(newId, finalContent, { id:newId, title:finalTitle, source_type:feedType, source_name:sourceName, url, published_at:publishedAt, category, tags, author, is_read:false, is_starred:false });

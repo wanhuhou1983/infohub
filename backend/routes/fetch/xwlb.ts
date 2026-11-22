@@ -122,7 +122,7 @@ export function createXwlbRoutes(sql: Sql): Hono {
       const hash = hashString('xwlb:' + date);
       const inserted = await sql`
         INSERT INTO articles (source_id, title, content, summary, url, published_at, category, tags, content_hash, fetched_at, author, extra)
-        VALUES (${sourceId}, ${title}, ${content}, ${content.slice(0, 150)}, 'https://tv.cctv.com/lm/xwlb/', ${pubDate}, '时政', ${['新闻联播', date.slice(0, 6)]}, ${hash}, NOW(), '央视', '{}')
+        VALUES (${sourceId}, ${title}, ${content}, ${content.slice(0, 150)}, 'https://tv.cctv.com/lm/xwlb/', ${pubDate}, '时政', ${['新闻联播', date.slice(0, 6)]}, ${hash}, (NOW() AT TIME ZONE 'Asia/Shanghai'), '央视', '{}')
         ON CONFLICT (content_hash) DO UPDATE SET content = ${content}, summary = ${content.slice(0, 150)}
         RETURNING id
       `;

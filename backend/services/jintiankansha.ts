@@ -189,7 +189,7 @@ async function fetchColumn(
       const result = await sql`
         INSERT INTO articles (source_id, title, url, author, content, content_hash, published_at, fetched_at, extra)
         VALUES (${sourceId}, ${title}, ${url}, ${author}, ${content || ''}, ${contentHash},
-          ${publishedAt || null}::timestamptz, NOW(), ${JSON.stringify(extra)}::jsonb)
+          ${publishedAt ? publishedAt.replace('T',' ').slice(0,19) : null}, (NOW() AT TIME ZONE 'Asia/Shanghai'), ${JSON.stringify(extra)}::jsonb)
         RETURNING id`;
       const articleId = result[0]?.id;
       inserted++;

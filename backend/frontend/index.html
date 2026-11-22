@@ -1022,20 +1022,18 @@ let currentArticleIndex = -1; // 当前文章在列表中的索引
 const DAY_NAMES = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
 
 function getDayLabel(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00');
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const yesterday = new Date();
-  yesterday.setDate(yesterday.getDate() - 1);
-  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  const nowBj = new Date(Date.now() + BJ_OFFSET_MS);
+  const todayStr = nowBj.toISOString().slice(0, 10);
+  const yesterdayStr = new Date(nowBj.getTime() - 86400000).toISOString().slice(0, 10);
   if (dateStr === todayStr) return '今天';
   if (dateStr === yesterdayStr) return '昨天';
-  return DAY_NAMES[d.getDay()];
+  return DAY_NAMES[new Date(dateStr + 'T00:00:00Z').getUTCDay()];
 }
 
 function groupByDay(articles) {
   const map = new Map();
   for (const a of articles) {
-    const day = a.published_at ? a.published_at.slice(0, 10) : '未知日期';
+    const day = a.published_at ? fmtBJDay(a.published_at) : '未知日期';
     if (!map.has(day)) map.set(day, []);
     map.get(day).push(a);
   }
@@ -1353,8 +1351,7 @@ async function loadArticles(reset = true) {
     // 按 published_at（转本地日期）+ extra.section 分组
     const sectionGroups = new Map();
     for (const a of economistArticles) {
-      const pubDate = a.published_at ? new Date(a.published_at) : new Date();
-      const date = pubDate.getFullYear() + '-' + String(pubDate.getMonth() + 1).padStart(2, '0') + '-' + String(pubDate.getDate()).padStart(2, '0');
+      const date = a.published_at ? fmtBJDay(a.published_at) : fmtBJDay(new Date().toISOString());
       const section = a.extra?.section || 'Unknown';
       const key = date + '-' + section;
       if (!sectionGroups.has(key)) sectionGroups.set(key, []);
@@ -1427,7 +1424,7 @@ async function loadArticles(reset = true) {
 
   if (isTwitterMode) {
     // 推文按日分组渲染
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = fmtBJDay(new Date().toISOString());
 
     if (reset) {
       twitterArticles = articles;
@@ -1435,7 +1432,7 @@ async function loadArticles(reset = true) {
       collapsedDays = new Set();
       // 默认折叠非今天的日期，今天展开
       for (const a of articles) {
-        const d = a.published_at?.slice(0, 10);
+        const d = a.published_at ? fmtBJDay(a.published_at) : undefined;
         if (d && d !== todayStr) collapsedDays.add(d);
       }
     } else {
@@ -1695,7 +1692,7 @@ function renderGroupDailyDetail(day) {
   document.getElementById('mainContent').classList.add('shrink-0');
 
   const msgList = (day.messages || []).map(m => {
-    const time = m.time ? new Date(m.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '';
+    const time = m.time ? fmtBJ(m.time).slice(11) : '';
     const isMe = m.isSend;
     return `
       <div class="flex gap-2 ${isMe ? 'flex-row-reverse' : ''} mb-2">
@@ -3375,17 +3372,28 @@ function showToast(msg, type = 'success') {
   setTimeout(() => div.remove(), 3000);
 }
 
-function formatTime(str) {
-  if (!str) return '';
+// 统一时间格式：所有展示均为北京时间 yyyy-mm-dd hh:mm。
+// 后端 API 返回 UTC ISO（如 2026-11-22T13:10:00.207Z），+8 小时得北京时间。
+const BJ_OFFSET_MS = 8 * 60 * 60 * 1000;
+function bjDate(str) {
+  if (!str) return null;
   const d = new Date(str);
-  const now = new Date();
-  const diff = (now - d) / 1000;
-  if (diff < 0) return str.slice(0, 16);
-  if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
-  if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
-  if (diff < 172800) return '昨天';
-  return str.slice(0, 10);
+  return isNaN(d.getTime()) ? null : new Date(d.getTime() + BJ_OFFSET_MS);
 }
+function fmtBJ(str) {
+  const d = bjDate(str);
+  if (!d) return '';
+  const p = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth()+1) + '-' + p(d.getUTCDate()) +
+         ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
+}
+function fmtBJDay(str) {
+  const d = bjDate(str);
+  if (!d) return '';
+  const p = n => String(n).padStart(2, '0');
+  return d.getUTCFullYear() + '-' + p(d.getUTCMonth()+1) + '-' + p(d.getUTCDate());
+}
+function formatTime(str) { return fmtBJ(str); }
 
 // 搜索防抖
 let searchTimer;
