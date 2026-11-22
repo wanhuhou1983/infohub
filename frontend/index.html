@@ -845,10 +845,10 @@ let offset = 0;
 const PAGE_SIZE = 30;
 let detailFontSize = 130; // 详情正文字号百分比
 
-// ===== 文章永久链接：指向公开 InfoHub 站点，不暴露源站地址 =====
+// ===== 文章永久链接：指向公开 InfoHub 的轻量纯文章阅读页，不暴露源站地址 =====
 const SHARE_BASE_URL = 'https://info.wuflux.cn';
 function articleShareUrl(id) {
-  return SHARE_BASE_URL + '/?a=' + encodeURIComponent(id);
+  return SHARE_BASE_URL + '/a/' + encodeURIComponent(id);
 }
 async function copyArticleLink(id) {
   const url = articleShareUrl(id);

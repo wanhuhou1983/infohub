@@ -28,6 +28,7 @@ import { fileURLToPath } from 'url';
 
 import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
+import { createShareRoutes } from './routes/share.js';
 import { createFetchRoutes } from './routes/fetch/index.js';
 import { createSyncRoutes } from './routes/sync.js';
 import { createWechatAdminRoutes } from './routes/wechat-admin.js';
@@ -278,6 +279,9 @@ app.get('/', (c) => {
 });
 
 // Admin page (accessible in cloud mode, write ops still guarded)
+// 轻量分享阅读页：https://info.wuflux.cn/a/<文章ID>
+app.route('/a', createShareRoutes(sql));
+
 app.get('/admin', (c) => {
   const adminPath = join(FRONTEND_DIR, 'infohub-admin.html');
   if (existsSync(adminPath)) {
