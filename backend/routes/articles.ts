@@ -68,6 +68,9 @@ export function createArticlesRoutes(sql: Sql): Hono {
       conditions.push(sql`a.is_starred = TRUE`);
     } else if (tab === 'today') {
       conditions.push(sql`a.published_at >= CURRENT_DATE`);
+    } else if (tab === 'history') {
+      // 阅读历史：按最近阅读时间倒序，排除从未读过或已清除记录的文章
+      conditions.push(sql`a.is_read = TRUE AND a.read_at IS NOT NULL`);
     }
 
     // source_type 过滤（支持逗号分隔多个类型）
@@ -106,11 +109,15 @@ export function createArticlesRoutes(sql: Sql): Hono {
       ? conditions.reduce((acc, cond) => sql`${acc} AND ${cond}`)
       : sql`1=1`;
 
+    const orderBy = tab === 'history'
+      ? sql`a.read_at DESC NULLS LAST`
+      : sql`a.published_at DESC`;
+
     const articles = await sql`
       SELECT a.*, s.name AS source_name, s.icon AS source_icon, s.type AS source_type
       FROM articles a LEFT JOIN sources s ON a.source_id = s.id
       WHERE ${whereClause}
-      ORDER BY a.published_at DESC LIMIT ${numLimit} OFFSET ${numOffset}
+      ORDER BY ${orderBy} LIMIT ${numLimit} OFFSET ${numOffset}
     `;
 
     // COUNT 查询保持与主查询一致的 JOIN + WHERE 结构
@@ -221,12 +228,24 @@ export function createArticlesRoutes(sql: Sql): Hono {
     }
   });
 
-  // 标记已读/未读
+  // 标记已读/未读：已读时记录北京时间阅读时间，标未读时同步清除历史
   router.patch('/:id/read', async (c) => {
     const id = Number(c.req.param('id'));
     if (isNaN(id) || id <= 0) return fail(c, 'Invalid id', 400);
     const { is_read } = await c.req.json();
-    await sql`UPDATE articles SET is_read = ${!!is_read} WHERE id = ${id}`;
+    if (is_read) {
+      await sql`UPDATE articles SET is_read = TRUE, read_at = (NOW() AT TIME ZONE 'Asia/Shanghai') WHERE id = ${id}`;
+    } else {
+      await sql`UPDATE articles SET is_read = FALSE, read_at = NULL WHERE id = ${id}`;
+    }
+    return c.json({ ok: true });
+  });
+
+  // 从阅读历史中删除（保留文章本身和已读状态）
+  router.delete('/:id/history', async (c) => {
+    const id = Number(c.req.param('id'));
+    if (isNaN(id) || id <= 0) return fail(c, 'Invalid id', 400);
+    await sql`UPDATE articles SET read_at = NULL WHERE id = ${id}`;
     return c.json({ ok: true });
   });
 

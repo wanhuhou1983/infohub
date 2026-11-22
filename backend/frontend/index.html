@@ -56,6 +56,8 @@ tailwind.config = {
   .star-btn { cursor: pointer; transition: all 0.15s; }
   .star-btn:hover { transform: scale(1.2); }
   .star-btn.starred { color: #fbbf24; }
+  .history-del { cursor: pointer; display: inline-flex; color: #9ca3af; transition: color 0.15s, transform 0.15s; }
+  .history-del:hover { color: #ef4444; transform: scale(1.15); }
   .category-chip { cursor: pointer; transition: all 0.15s; }
   .category-chip:hover { background: #2e3244; }
   .category-chip.active { background: #6366f1; color: white; }
@@ -809,6 +811,7 @@ tailwind.config = {
         <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
         <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
         <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
+        <div class="tab-item text-muted" data-tab="history" onclick="switchTab(this)">历史</div>
         <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
       </div>
       <div id="articleList" class="space-y-1"></div>
@@ -1243,6 +1246,7 @@ async function loadArticles(reset = true) {
   if (currentTab === 'unread') params.push('tab=unread');
   else if (currentTab === 'starred') params.push('tab=starred');
   else if (currentTab === 'today') params.push('tab=today');
+  else if (currentTab === 'history') params.push('tab=history');
   if (currentSourceId) params.push(`source_id=${currentSourceId}`);
   // B站特殊过滤：稍后再看 / 收藏
   if (bilibiliSpecialFilter === 'watch_later') {
@@ -1267,7 +1271,8 @@ async function loadArticles(reset = true) {
   if (reset) el.innerHTML = '';
 
   if (articles.length === 0 && offset === 0) {
-    el.innerHTML = '<div class="text-center text-muted py-16">暂无文章</div>';
+    const emptyText = currentTab === 'history' ? '暂无阅读历史' : currentTab === 'starred' ? '暂无星标文章，点击文章右侧 ☆ 添加' : '暂无文章';
+    el.innerHTML = `<div class="text-center text-muted py-16">${emptyText}</div>`;
     document.getElementById('loadMore').classList.add('hidden');
     return;
   }
@@ -1327,7 +1332,7 @@ async function loadArticles(reset = true) {
                   <div class="flex items-center gap-2 mb-1">
                     <span class="source-badge ${color}">🗞️ 财新周刊</span>
                     <span class="text-xs text-muted">第${issue}期</span>
-                    <span class="text-xs text-muted ml-auto">${formatTime(a.published_at)}</span>
+                    <span class="text-xs text-muted ml-auto">${formatTime(currentTab === 'history' ? a.read_at : a.published_at)}</span>
                   </div>
                   <h3 class="text-sm font-medium leading-snug mb-1">${highlightText(getDisplayTitle(a.title), currentSearchQuery)}</h3>
                   ${a.author ? `<span class="text-xs text-muted mt-1 inline-block">文｜${a.author}</span>` : ''}
@@ -1336,9 +1341,10 @@ async function loadArticles(reset = true) {
                   </div>
                 </div>
                 <div class="flex flex-col items-center gap-2 ml-2">
-                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
+                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" title="${a.is_starred ? '取消星标' : '加星标'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
                     ${a.is_starred ? '★' : '☆'}
                   </span>
+                  ${currentTab === 'history' ? `<span class="history-del" title="从阅读历史中删除" onclick="event.stopPropagation(); deleteHistory(${a.id})"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></span>` : ''}
                   ${!a.is_read ? '<span class="w-2 h-2 bg-accent rounded-full"></span>' : ''}
                 </div>
               </div>
@@ -1424,7 +1430,7 @@ async function loadArticles(reset = true) {
                   <div class="flex items-center gap-2 mb-1">
                     <span class="source-badge ${color}">📰 The Economist</span>
                     <span class="text-xs text-muted">${a.extra?.section || ''}</span>
-                    <span class="text-xs text-muted ml-auto">${formatTime(a.published_at)}</span>
+                    <span class="text-xs text-muted ml-auto">${formatTime(currentTab === 'history' ? a.read_at : a.published_at)}</span>
                   </div>
                   <h3 class="text-sm font-medium leading-snug mb-1">${highlightText(getDisplayTitle(a.title), currentSearchQuery)}</h3>
                   ${a.author ? `<span class="text-xs text-muted mt-1 inline-block">${a.author}</span>` : ''}
@@ -1433,9 +1439,10 @@ async function loadArticles(reset = true) {
                   </div>
                 </div>
                 <div class="flex flex-col items-center gap-2 ml-2">
-                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
+                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" title="${a.is_starred ? '取消星标' : '加星标'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
                     ${a.is_starred ? '★' : '☆'}
                   </span>
+                  ${currentTab === 'history' ? `<span class="history-del" title="从阅读历史中删除" onclick="event.stopPropagation(); deleteHistory(${a.id})"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></span>` : ''}
                   ${!a.is_read ? '<span class="w-2 h-2 bg-accent rounded-full"></span>' : ''}
                 </div>
               </div>
@@ -1501,7 +1508,7 @@ async function loadArticles(reset = true) {
                     <span class="source-badge ${color}">${a.source_icon || '📄'} ${a.source_name || a.source_type}</span>
                     <span class="text-xs text-muted">${a.category || ''}</span>
                     <span class="text-xs text-muted ml-auto">${a.extra?.duration ? '⏱ ' + a.extra.duration : ''}</span>
-                    <span class="text-xs text-muted">${formatTime(a.published_at)}</span>
+                    <span class="text-xs text-muted">${formatTime(currentTab === 'history' ? a.read_at : a.published_at)}</span>
                   </div>
                   <h3 class="text-sm font-medium leading-snug mb-1">${highlightText(getDisplayTitle(a.title), currentSearchQuery)}</h3>
                   ${a.author ? `<span class="text-xs text-muted mt-1 inline-block">UP: ${a.author}</span>` : ''}
@@ -1510,9 +1517,10 @@ async function loadArticles(reset = true) {
                   </div>
                 </div>
                 <div class="flex flex-col items-center gap-2 ml-2">
-                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
+                  <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" title="${a.is_starred ? '取消星标' : '加星标'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
                     ${a.is_starred ? '★' : '☆'}
                   </span>
+                  ${currentTab === 'history' ? `<span class="history-del" title="从阅读历史中删除" onclick="event.stopPropagation(); deleteHistory(${a.id})"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></span>` : ''}
                   ${!a.is_read ? '<span class="w-2 h-2 bg-accent rounded-full"></span>' : ''}
                 </div>
               </div>
@@ -1534,7 +1542,7 @@ async function loadArticles(reset = true) {
               <span class="source-badge ${color}">${a.source_icon || '📄'} ${a.source_name || a.source_type}</span>
               <span class="text-xs text-muted">${a.category || ''}</span>
               <span class="text-xs text-muted ml-auto">${a.extra?.duration ? '⏱ ' + a.extra.duration : ''}</span>
-              <span class="text-xs text-muted">${formatTime(a.published_at)}</span>
+              <span class="text-xs text-muted">${formatTime(currentTab === 'history' ? a.read_at : a.published_at)}</span>
             </div>
             <h3 class="text-sm font-medium leading-snug mb-1">${highlightText(getDisplayTitle(a.title), currentSearchQuery)}</h3>
             ${a.author ? `<span class="text-xs text-muted mt-1 inline-block">UP: ${a.author}</span>` : ''}
@@ -1546,9 +1554,10 @@ async function loadArticles(reset = true) {
             ${a.source_type === 'podcast-channel' ? `<button onclick="event.stopPropagation(); playPodcast(${a.id})" class="play-btn w-7 h-7 flex items-center justify-center rounded-full bg-purple-500/15 text-purple-400 hover:bg-purple-500/25 transition" title="播放">
               <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
             </button>` : ''}
-            <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
+            <span class="star-btn ${a.is_starred ? 'starred' : 'text-border'}" title="${a.is_starred ? '取消星标' : '加星标'}" onclick="event.stopPropagation(); toggleStar(${a.id}, ${a.is_starred})">
               ${a.is_starred ? '★' : '☆'}
             </span>
+            ${currentTab === 'history' ? `<span class="history-del" title="从阅读历史中删除" onclick="event.stopPropagation(); deleteHistory(${a.id})"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></span>` : ''}
             ${!a.is_read ? '<span class="w-2 h-2 bg-accent rounded-full"></span>' : ''}
           </div>
         </div>
@@ -1863,6 +1872,9 @@ async function selectArticle(id) {
         <button onclick="copyArticleLink(${id})" id="copyLinkBtn-${id}" title="复制指向 InfoHub 的文章链接" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-surface1 hover:bg-border text-fg/80 hover:text-fg transition border border-border font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
           复制链接
+        </button>
+        <button onclick="toggleStar(${id}, ${article.is_starred ? 'true' : 'false'})" id="detailStarBtn-${id}" title="加星标后可在「星标」tab 中找到" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
+          ${article.is_starred ? '★ 已星标' : '☆ 加星标'}
         </button>
         ${showAiBtn ? `<button onclick="triggerAiAnalysis(${id})" id="aiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
@@ -3164,6 +3176,16 @@ function switchTab(el) {
   el.classList.add('tab-active');
   el.classList.remove('text-muted');
   currentTab = el.dataset.tab;
+  // 各 tab 是全局视图：清除信息源/分类/搜索筛选，否则星标和历史会因残留筛选显示为空
+  currentSourceId = null;
+  currentCategory = null;
+  bilibiliSpecialFilter = null;
+  youtubeSpecialFilter = null;
+  isGroupChatMode = false;
+  const si = document.getElementById('searchInput'); if (si) si.value = '';
+  const ms = document.getElementById('mobileSearchInput'); if (ms) ms.value = '';
+  loadSources();
+  renderCategories();
   loadArticles();
 }
 
@@ -3272,13 +3294,31 @@ async function fetchArticleContent(id) {
 }
 
 async function toggleStar(id, isStarred) {
-  await api(`/articles/${id}/star`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ is_starred: !isStarred }),
-  });
-  loadArticles();
-  loadStats();
+  try {
+    await api(`/articles/${id}/star`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_starred: !isStarred }),
+    });
+    showToast(isStarred ? '已取消星标' : '已加星标', 'success');
+    const db = document.getElementById(`detailStarBtn-${id}`);
+    if (db) db.innerHTML = isStarred ? '☆ 加星标' : '★ 已星标';
+    loadArticles();
+    loadStats();
+  } catch (e) {
+    showToast('操作失败：' + e, 'error');
+  }
+}
+
+async function deleteHistory(id) {
+  try {
+    await api(`/articles/${id}/history`, { method: 'DELETE' });
+    showToast('已从阅读历史中删除', 'success');
+    if (selectedArticleId === id) closeDetail();
+    loadArticles();
+  } catch (e) {
+    showToast('删除失败：' + e, 'error');
+  }
 }
 
 async function toggleWatchLater(id, isWatchLater) {

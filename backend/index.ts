@@ -82,7 +82,7 @@ app.use('/api/*', cors({
     if (!origin) return null;
     return ALLOWED_ORIGINS.includes(origin) ? origin : null;
   },
-  allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Internal-Fetch'],
 }));
 
