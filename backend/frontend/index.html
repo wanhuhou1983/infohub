@@ -845,6 +845,33 @@ let offset = 0;
 const PAGE_SIZE = 30;
 let detailFontSize = 130; // 详情正文字号百分比
 
+// ===== 文章永久链接：指向公开 InfoHub 站点，不暴露源站地址 =====
+const SHARE_BASE_URL = 'https://info.wuflux.cn';
+function articleShareUrl(id) {
+  return SHARE_BASE_URL + '/?a=' + encodeURIComponent(id);
+}
+async function copyArticleLink(id) {
+  const url = articleShareUrl(id);
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(url);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      if (!ok) throw new Error('copy failed');
+    }
+    showToast('已复制链接：' + url, 'success');
+  } catch (e) {
+    window.prompt('复制链接', url);
+  }
+}
+
 // ===== 阅读显示偏好（纯前端，localStorage 持久化，即时生效） =====
 const READ_PREFS_KEY = 'infohub.readPrefs';
 const READ_PREFS_DEFAULT = { appWidth: 0, readWidth: 0, listWidth: 0, fontSize: 130 };
@@ -1757,6 +1784,8 @@ function resetDetailScroll() {
 
 async function selectArticle(id) {
   selectedArticleId = id;
+  // 地址栏与当前文章同步，直接复制浏览器地址也可分享
+  try { history.replaceState(null, '', location.pathname + '?a=' + id); } catch (e) {}
   const article = await api(`/articles/${id}`);
 
   // 运行时校验：如果返回了错误或缺少关键字段，显示错误信息
@@ -1831,6 +1860,10 @@ async function selectArticle(id) {
       </div>
       <!-- AI/翻译按钮 -->
       <div class="flex items-center gap-2 flex-wrap mb-3">
+        <button onclick="copyArticleLink(${id})" id="copyLinkBtn-${id}" title="复制指向 InfoHub 的文章链接" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-surface1 hover:bg-border text-fg/80 hover:text-fg transition border border-border font-medium">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+          复制链接
+        </button>
         ${showAiBtn ? `<button onclick="triggerAiAnalysis(${id})" id="aiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           AI解读
@@ -1953,6 +1986,10 @@ async function selectArticle(id) {
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
         原文链接
       </a>` : ''}
+      <button onclick="copyArticleLink(${id})" class="text-xs text-muted hover:text-accent2 transition flex items-center gap-1">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+        复制链接
+      </button>
     </div></div>
 
   `;
@@ -3049,6 +3086,7 @@ function hideBiliPlayer() {
 
 function closeDetail() {
   selectedArticleId = null;
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
   // Clear detail content back to placeholder
   document.getElementById('detailColumnContent').innerHTML = '<div class="flex flex-col items-center justify-center h-full text-center text-muted py-32"><div class="text-4xl mb-4">📖</div><p class="text-sm">点击左侧文章查看详情</p></div>';
   loadArticles();
@@ -4536,7 +4574,13 @@ async function addPodcastChannel() {
 initReadPrefs();
 loadSources();
 renderCategories();
-loadArticles();
+// 分享链接 ?a=<id>：打开后直达对应文章
+const sharedArticleId = Number(new URLSearchParams(window.location.search).get('a'));
+if (Number.isInteger(sharedArticleId) && sharedArticleId > 0) {
+  loadArticles().then(function () { return selectArticle(sharedArticleId); });
+} else {
+  loadArticles();
+}
 loadStats();
 </script>
 <script src="/js/api-client.js"></script>
