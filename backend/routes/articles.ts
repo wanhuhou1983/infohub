@@ -67,7 +67,9 @@ export function createArticlesRoutes(sql: Sql): Hono {
     } else if (tab === 'starred') {
       conditions.push(sql`a.is_starred = TRUE`);
     } else if (tab === 'today') {
-      conditions.push(sql`a.published_at >= CURRENT_DATE`);
+      // published_at 存的是北京时间 wall clock；云端 PG 时区是 UTC，
+      // 不能用 CURRENT_DATE（UTC 边界，北京时间 0-8 点会混入前一天）。
+      conditions.push(sql`a.published_at >= ((NOW() AT TIME ZONE 'Asia/Shanghai')::date)`);
     } else if (tab === 'history') {
       // 阅读历史：按最近阅读时间倒序，排除从未读过或已清除记录的文章
       conditions.push(sql`a.is_read = TRUE AND a.read_at IS NOT NULL`);

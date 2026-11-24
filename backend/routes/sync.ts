@@ -294,14 +294,15 @@ export function createSyncRoutes(sql: Sql): Hono {
 
   router.get('/stats', async (c) => {
     const [totalResult] = await sql`SELECT COUNT(*)::int AS total FROM articles`;
-    const [todayResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE fetched_at >= CURRENT_DATE`;
+    // fetched_at 存北京时间 wall clock，今日边界须用北京时间（云端 PG 是 UTC，不能用 CURRENT_DATE）
+    const [todayResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE fetched_at >= ((NOW() AT TIME ZONE 'Asia/Shanghai')::date)`;
     const [unreadResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE is_read = FALSE`;
     const [starredResult] = await sql`SELECT COUNT(*)::int AS total FROM articles WHERE is_starred = TRUE`;
 
     const sourceStats = await sql`
       SELECT s.id, s.name, s.icon, s.type, s.enabled, s.last_fetch, s.parent_id,
              COUNT(a.id)::int AS article_count,
-             COUNT(CASE WHEN a.fetched_at >= CURRENT_DATE THEN 1 END)::int AS today_count,
+             COUNT(CASE WHEN a.fetched_at >= ((NOW() AT TIME ZONE 'Asia/Shanghai')::date) THEN 1 END)::int AS today_count,
              COUNT(CASE WHEN a.is_read = FALSE THEN 1 END)::int AS unread_count
       FROM sources s
       LEFT JOIN articles a ON a.source_id = s.id

@@ -354,7 +354,7 @@ export function createSourcesRoutes(sql: Sql, requireAdminAuth: (c: any) => Auth
           MAX(a.fetched_at) AS last_fetch
         FROM articles a
         JOIN sources s ON s.id = a.source_id
-        WHERE a.fetched_at > NOW() - INTERVAL '24 hours'
+        WHERE a.fetched_at > (NOW() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '24 hours'
         GROUP BY s.id, s.name, s.type
         ORDER BY count DESC, last_fetch DESC
       `;
