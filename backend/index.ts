@@ -28,6 +28,7 @@ import { fileURLToPath } from 'url';
 
 import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
+import { createNotesRoutes } from './routes/notes.js';
 import { createShareRoutes } from './routes/share.js';
 import { createAuthRoutes, authGuard } from './routes/auth.js';
 import { createFetchRoutes } from './routes/fetch/index.js';
@@ -425,6 +426,7 @@ app.get('/api/test', (c) => c.json({
 // 所有路由模块通过工厂函数注册，统一接收 sql 实例
 app.route('/api/sources', createSourcesRoutes(sql, requireAdminAuth));
 app.route('/api/articles', createArticlesRoutes(sql));
+app.route('/api/notes', createNotesRoutes(sql));
 
 app.use('/api/fetch/*', writeAuthGuard());
 

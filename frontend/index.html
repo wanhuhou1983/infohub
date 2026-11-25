@@ -49,7 +49,7 @@ tailwind.config = {
   .fade-in { animation: fadeIn 0.2s ease-in; }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
   .tab-active { color: #818cf8; border-bottom: 2px solid #6366f1; }
-  .tab-item { padding: 8px 16px; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; }
+  .tab-item { padding: 8px 12px; cursor: pointer; transition: all 0.2s; border-bottom: 2px solid transparent; white-space: nowrap; flex-shrink: 0; }
   .tab-item:hover { color: #a5b4fc; }
   .article-card { transition: all 0.15s ease; }
   .article-card:hover { background: #242734; transform: translateX(2px); }
@@ -512,6 +512,35 @@ tailwind.config = {
   </div>
 </div>
 
+<!-- 文章右键菜单 -->
+<div id="articleContextMenu" class="fixed z-[600] hidden bg-surface2 border border-border rounded-lg shadow-xl py-1 text-sm min-w-[150px]">
+  <button class="w-full text-left px-3 py-2 hover:bg-accent/10 text-fg flex items-center gap-2" onclick="openNoteEditor()">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+    写笔记
+  </button>
+  <button class="w-full text-left px-3 py-2 hover:bg-accent/10 text-fg flex items-center gap-2" onclick="contextCopyLink()">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+    复制分享链接
+  </button>
+</div>
+
+<!-- 笔记编辑弹窗 -->
+<div id="noteModal" class="fixed inset-0 z-[550] hidden">
+  <div class="absolute inset-0 bg-black/60" onclick="closeNoteEditor()"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[92vw] max-w-2xl bg-surface rounded-xl border border-border shadow-2xl p-5">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-base font-semibold" id="noteModalTitle">写笔记</h3>
+      <button class="text-muted hover:text-fg transition" onclick="closeNoteEditor()">✕</button>
+    </div>
+    <div class="text-xs text-muted mb-3" id="noteModalArticle"></div>
+    <textarea id="noteTextarea" rows="10" placeholder="记下你的想法…（支持多行）" class="w-full bg-bg border border-border rounded-lg p-3 text-sm text-fg outline-none focus:border-accent2 transition resize-y"></textarea>
+    <div class="flex justify-end gap-2 mt-4">
+      <button class="text-sm text-muted hover:text-fg px-4 py-2 transition" onclick="closeNoteEditor()">取消</button>
+      <button class="bg-accent hover:bg-accent2 text-white text-sm px-6 py-2 rounded-lg transition font-medium" onclick="saveNote()">保存笔记</button>
+    </div>
+  </div>
+</div>
+
 <!-- 图片预览模态框 -->
 <div id="imagePreviewModal" class="fixed inset-0 z-[500] hidden">
   <div class="absolute inset-0 bg-black/90 cursor-zoom-out" onclick="hideImagePreview()"></div>
@@ -806,13 +835,13 @@ tailwind.config = {
   <!-- 主内容区（flex 容器，文章列表 + 文章详情并排） -->
   <div class="flex-1 min-w-0 flex h-[calc(100vh-8rem)]">
     <main id="mainContent" class="flex-1 min-w-0 overflow-y-auto">
-      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-0 bg-bg z-40">
+      <div class="sticky-tab-bar flex items-center border-b border-border mb-4 sticky top-0 bg-bg z-40 overflow-x-auto" style="scrollbar-width:none">
         <div class="tab-item tab-active" data-tab="all" onclick="switchTab(this)">全部</div>
-        <div class="tab-item text-muted" data-tab="unread" onclick="switchTab(this)">未读</div>
+        <div class="tab-item text-muted" data-tab="notes" onclick="switchTab(this)">笔记</div>
         <div class="tab-item text-muted" data-tab="starred" onclick="switchTab(this)">星标</div>
         <div class="tab-item text-muted" data-tab="today" onclick="switchTab(this)">今日</div>
         <div class="tab-item text-muted" data-tab="history" onclick="switchTab(this)">历史</div>
-        <div class="ml-auto text-xs text-muted" id="articleCountLabel"></div>
+        <div class="ml-auto text-xs text-muted whitespace-nowrap shrink-0 pl-3" id="articleCountLabel"></div>
       </div>
       <div id="articleList" class="space-y-1"></div>
       <div id="loadMore" class="text-center py-4 hidden">
@@ -1239,6 +1268,11 @@ function renderCategories() {
 async function loadArticles(reset = true) {
   if (reset) offset = 0;
 
+  // 笔记 tab：使用专用加载/分组渲染
+  if (currentTab === 'notes') {
+    return loadNotes();
+  }
+
   // 群聊模式：使用专用 API
   if (isGroupChatMode) {
     return loadGroupDailyArticles();
@@ -1331,7 +1365,7 @@ async function loadArticles(reset = true) {
             const color = SOURCE_COLORS[a.source_type] || 'bg-gray-500/20 text-gray-400';
             return `
             <div class="article-card p-4 rounded-lg cursor-pointer border border-transparent hover:border-border fade-in ${a.is_read ? 'opacity-60' : ''} ${selectedArticleId === a.id ? 'bg-surface2 border-border' : ''}"
-                 onclick="selectArticle(${a.id})">
+                 onclick="selectArticle(${a.id})" oncontextmenu="showArticleMenu(event, ${a.id})">
               <div class="flex items-start gap-3">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
@@ -1429,7 +1463,7 @@ async function loadArticles(reset = true) {
             const color = SOURCE_COLORS[a.source_type] || 'bg-gray-500/20 text-gray-400';
             return `
             <div class="article-card p-4 rounded-lg cursor-pointer border border-transparent hover:border-border fade-in ${a.is_read ? 'opacity-60' : ''} ${selectedArticleId === a.id ? 'bg-surface2 border-border' : ''}"
-                 onclick="selectArticle(${a.id})">
+                 onclick="selectArticle(${a.id})" oncontextmenu="showArticleMenu(event, ${a.id})">
               <div class="flex items-start gap-3">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
@@ -1506,7 +1540,7 @@ async function loadArticles(reset = true) {
             const color = SOURCE_COLORS[a.source_type] || 'bg-gray-500/20 text-gray-400';
             return `
             <div class="article-card p-4 rounded-lg cursor-pointer border border-transparent hover:border-border fade-in ${a.is_read ? 'opacity-60' : ''} ${selectedArticleId === a.id ? 'bg-surface2 border-border' : ''}"
-                 onclick="selectArticle(${a.id})">
+                 onclick="selectArticle(${a.id})" oncontextmenu="showArticleMenu(event, ${a.id})">
               <div class="flex items-start gap-3">
                 <div class="flex-1 min-w-0">
                   <div class="flex items-center gap-2 mb-1">
@@ -1540,7 +1574,7 @@ async function loadArticles(reset = true) {
       const color = SOURCE_COLORS[a.source_type] || 'bg-gray-500/20 text-gray-400';
       return `
       <div class="article-card p-4 rounded-lg cursor-pointer border border-transparent hover:border-border fade-in ${a.is_read ? 'opacity-60' : ''} ${selectedArticleId === a.id ? 'bg-surface2 border-border' : ''}"
-           onclick="selectArticle(${a.id})">
+           onclick="selectArticle(${a.id})" oncontextmenu="showArticleMenu(event, ${a.id})">
         <div class="flex items-start gap-3">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
@@ -1881,6 +1915,9 @@ async function selectArticle(id) {
         <button onclick="toggleStar(${id}, ${article.is_starred ? 'true' : 'false'})" id="detailStarBtn-${id}" title="加星标后可在「星标」tab 中找到" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 transition border border-amber-500/20 font-medium">
           ${article.is_starred ? '★ 已星标' : '☆ 加星标'}
         </button>
+        <button onclick="contextArticleId=${id}; openNoteEditor()" id="detailNoteBtn-${id}" title="给这篇文章写笔记" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-green-500/10 text-green-400 hover:bg-green-500/20 transition border border-green-500/20 font-medium">
+          ✎ 写笔记
+        </button>
         ${showAiBtn ? `<button onclick="triggerAiAnalysis(${id})" id="aiBtn-${id}" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           AI解读
@@ -2007,7 +2044,9 @@ async function selectArticle(id) {
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
         复制链接
       </button>
-    </div></div>
+    </div>
+    <div id="articleNotesBox" class="hidden"></div>
+    </div>
 
   `;
 
@@ -2022,6 +2061,7 @@ async function selectArticle(id) {
 
   loadArticles(); // 刷新列表的已读状态
   loadStats();
+  renderArticleNotes(id); // 加载该文章的笔记
 }
 
 // ===== 标题翻译 =====
@@ -3174,6 +3214,263 @@ function handleImageError(img) {
     img.style.display = 'none';
   }
 }
+
+// ===== 笔记功能 =====
+let contextArticleId = null;   // 右键目标文章
+let editingNoteId = null;      // 正在编辑的笔记（null=新增）
+let noteGroups = [];           // 当前加载的笔记分组
+let collapsedNoteGroups = new Set();
+
+// 文章卡片右键弹出菜单
+function showArticleMenu(ev, id) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  contextArticleId = id;
+  const menu = document.getElementById('articleContextMenu');
+  menu.classList.remove('hidden');
+  // 定位在鼠标附近，避免超出视口
+  const x = Math.min(ev.clientX, window.innerWidth - 170);
+  const y = Math.min(ev.clientY, window.innerHeight - 100);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+}
+
+function hideArticleMenu() {
+  const menu = document.getElementById('articleContextMenu');
+  if (menu) menu.classList.add('hidden');
+}
+
+// 点击空白处关闭右键菜单
+document.addEventListener('click', () => hideArticleMenu());
+document.addEventListener('contextmenu', (e) => {
+  // 非文章卡片区域右键：关闭自定义菜单，保留浏览器原生菜单
+  if (!e.target.closest('.article-card')) hideArticleMenu();
+});
+
+function contextCopyLink() {
+  hideArticleMenu();
+  if (contextArticleId != null) copyArticleLink(contextArticleId);
+}
+
+// 打开笔记编辑器（新增或编辑）
+function openNoteEditor(noteId = null) {
+  hideArticleMenu();
+  if (contextArticleId == null) return;
+  editingNoteId = noteId;
+  const ta = document.getElementById('noteTextarea');
+  const title = document.getElementById('noteModalTitle');
+  const articleLabel = document.getElementById('noteModalArticle');
+
+  if (noteId != null) {
+    // 编辑已有笔记：从当前分组数据取内容
+    let note = null, group = null;
+    for (const g of noteGroups) {
+      const n = g.notes.find(n => n.id === noteId);
+      if (n) { note = n; group = g; break; }
+    }
+    if (!note) return;
+    ta.value = note.content;
+    title.textContent = '编辑笔记';
+    articleLabel.textContent = '文章：' + (group?.title || '');
+  } else {
+    // 新增笔记：查文章标题
+    ta.value = '';
+    title.textContent = '写笔记';
+    const cached = currentArticleList.find(a => a.id === contextArticleId);
+    if (cached) {
+      articleLabel.textContent = '文章：' + (getDisplayTitle(cached.title) || '');
+    } else {
+      api(`/articles/${contextArticleId}`).then(a => {
+        if (a && a.title) articleLabel.textContent = '文章：' + (getDisplayTitle(a.title) || a.title);
+      }).catch(() => {});
+    }
+  }
+  document.getElementById('noteModal').classList.remove('hidden');
+  setTimeout(() => ta.focus(), 50);
+}
+
+function closeNoteEditor() {
+  document.getElementById('noteModal').classList.add('hidden');
+  editingNoteId = null;
+}
+
+async function saveNote() {
+  const ta = document.getElementById('noteTextarea');
+  const content = ta.value.trim();
+  if (!content) { showToast('笔记内容不能为空', 'error'); return; }
+  if (contextArticleId == null) { showToast('未选择文章', 'error'); return; }
+  try {
+    if (editingNoteId != null) {
+      await api(`/notes/${editingNoteId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      showToast('笔记已更新', 'success');
+    } else {
+      await api('/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ article_id: contextArticleId, content }),
+      });
+      showToast('笔记已保存', 'success');
+    }
+    closeNoteEditor();
+    await loadNotes();
+    // 如果正在看该文章详情，同步刷新其笔记区
+    if (selectedArticleId === contextArticleId) await renderArticleNotes(contextArticleId);
+  } catch (e) {
+    showToast('保存失败：' + e, 'error');
+  }
+}
+
+async function deleteNote(noteId) {
+  if (!confirm('确定删除这条笔记吗？')) return;
+  try {
+    await api(`/notes/${noteId}`, { method: 'DELETE' });
+    showToast('笔记已删除', 'success');
+    await loadNotes();
+    if (selectedArticleId != null) await renderArticleNotes(selectedArticleId);
+  } catch (e) {
+    showToast('删除失败：' + e, 'error');
+  }
+}
+
+// 加载笔记列表（按文章分组）
+async function loadNotes() {
+  const el = document.getElementById('articleList');
+  const q = document.getElementById('searchInput').value.trim();
+  const data = await api('/notes' + (q ? '?search=' + encodeURIComponent(q) : ''));
+  noteGroups = data.groups || [];
+  document.getElementById('articleCountLabel').textContent = `${data.articleCount || 0} 篇文章 · ${data.total || 0} 条笔记`;
+  document.getElementById('loadMore').classList.add('hidden');
+
+  if (noteGroups.length === 0) {
+    el.innerHTML = `<div class="text-center text-muted py-16"><div class="text-4xl mb-4">📝</div><p class="text-sm">还没有笔记</p><p class="text-xs mt-2">在任意文章上右键 →「写笔记」即可添加</p></div>`;
+    return;
+  }
+
+  el.innerHTML = noteGroups.map(g => {
+    const isCollapsed = collapsedNoteGroups.has(g.article_id);
+    const color = SOURCE_COLORS[g.source_type] || 'bg-gray-500/20 text-gray-400';
+    const preview = (g.notes[0]?.content || '').replace(/\s+/g, ' ').slice(0, 80);
+    return `
+    <div class="note-group mb-2 rounded-lg border border-border bg-surface fade-in ${isCollapsed ? '' : 'border-accent/30'}">
+      <div class="flex items-start gap-2 p-3 cursor-pointer select-none hover:bg-surface2 transition rounded-lg" onclick="toggleNoteGroup(${g.article_id})">
+        <span class="text-xs text-muted mt-1 transition-transform ${isCollapsed ? '' : 'rotate-90'}">▶</span>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1 flex-wrap">
+            <span class="source-badge ${color}">${g.source_icon || '📄'} ${g.source_name || g.source_type || ''}</span>
+            <span class="text-xs text-accent2 font-medium">${g.note_count} 条笔记</span>
+            <span class="text-xs text-muted ml-auto">${formatTime(g.latest_at)}</span>
+          </div>
+          <h3 class="text-sm font-medium leading-snug">${highlightText(getDisplayTitle(g.title || '') || '', currentSearchQuery)}</h3>
+          ${isCollapsed ? `<p class="text-xs text-muted mt-1 truncate">${escapeHtml(preview)}</p>` : ''}
+        </div>
+      </div>
+      <div class="px-3 pb-3 space-y-2 ${isCollapsed ? 'hidden' : ''}" data-note-group="${g.article_id}">
+        ${g.notes.map(n => `
+          <div class="note-item p-3 rounded-lg bg-bg border border-border/50 cursor-pointer hover:border-accent2/40 transition" onclick="openNoteDetail(${g.article_id}, ${n.id})">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs text-muted">${formatTime(n.updated_at)}</span>
+              <span class="ml-auto flex items-center gap-1">
+                <button class="text-muted hover:text-accent2 text-xs px-1" title="编辑笔记" onclick="event.stopPropagation(); contextArticleId=${g.article_id}; openNoteEditor(${n.id})">✎</button>
+                <button class="text-muted hover:text-red-400 text-xs px-1" title="删除笔记" onclick="event.stopPropagation(); deleteNote(${n.id})">🗑</button>
+              </span>
+            </div>
+            <div class="text-xs text-fg/85 leading-relaxed whitespace-pre-wrap break-words">${escapeHtml(n.content.slice(0, 300))}${n.content.length > 300 ? '…' : ''}</div>
+          </div>`).join('')}
+        <button class="w-full text-xs text-accent2 hover:text-accent py-1.5 border border-dashed border-border rounded-lg transition" onclick="contextArticleId=${g.article_id}; openNoteEditor()">+ 继续添加笔记</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleNoteGroup(id) {
+  if (collapsedNoteGroups.has(id)) collapsedNoteGroups.delete(id);
+  else collapsedNoteGroups.add(id);
+  loadNotes();
+}
+
+// 右栏显示笔记详情：标题为文章，正文为笔记，底部有原文链接
+async function openNoteDetail(articleId, noteId) {
+  const data = await api(`/articles/${articleId}`);
+  if (!data || data.error || !data.id) {
+    showToast('原文加载失败', 'error');
+    return;
+  }
+  selectedArticleId = articleId;
+  try { history.replaceState(null, '', location.pathname + '?a=' + articleId); } catch (e) {}
+  renderNoteDetailPanel(data, noteId);
+}
+
+function renderNoteDetailPanel(article, activeNoteId) {
+  const g = noteGroups.find(g => g.article_id === article.id);
+  const notes = g ? g.notes : [];
+  const color = SOURCE_COLORS[article.source_type] || 'bg-gray-500/20 text-gray-400';
+  const originalUrl = article.url || '';
+  const shareUrl = articleShareUrl(article.id);
+
+  document.getElementById('detailColumnContent').innerHTML = `
+    <div class="bg-surface rounded-xl border border-border p-5">
+      <div class="flex items-center gap-2 mb-2 flex-wrap">
+        <span class="source-badge ${color}">${article.source_icon || '📄'} ${article.source_name || article.source_type || ''}</span>
+        <span class="text-xs text-muted">${formatTime(article.published_at)}</span>
+      </div>
+      <h2 class="text-lg font-semibold leading-snug mb-3">${getDisplayTitle(article.title) || article.title}</h2>
+      <div class="flex items-center gap-2 flex-wrap mb-4 pb-3 border-b border-border">
+        <a href="${escapeAttr(shareUrl)}" target="_blank" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-accent/10 text-accent2 hover:bg-accent/20 transition border border-accent/20 font-medium">🔗 阅读分享页</a>
+        ${originalUrl ? `<a href="${escapeAttr(originalUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-surface1 hover:bg-border text-fg/80 transition border border-border font-medium">↗ 阅读原文</a>` : ''}
+        <button onclick="contextArticleId=${article.id}; openNoteEditor()" class="inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-md bg-green-500/10 text-green-400 hover:bg-green-500/20 transition border border-green-500/20 font-medium">✎ 写笔记</button>
+      </div>
+      <div class="text-xs font-medium text-muted mb-2">笔记 · ${notes.length} 条</div>
+      <div class="space-y-3">
+        ${notes.map(n => `
+          <div class="rounded-lg border p-4 ${n.id === activeNoteId ? 'border-accent2/50 bg-accent/5' : 'border-border bg-bg'}">
+            <div class="flex items-center gap-2 mb-2">
+              <span class="text-xs text-muted">${formatTime(n.created_at)} 创建 · ${formatTime(n.updated_at)} 更新</span>
+              <span class="ml-auto flex items-center gap-2">
+                <button class="text-xs text-accent2 hover:text-accent" onclick="contextArticleId=${article.id}; openNoteEditor(${n.id})">编辑</button>
+                <button class="text-xs text-muted hover:text-red-400" onclick="deleteNote(${n.id})">删除</button>
+              </span>
+            </div>
+            <div class="text-sm text-fg leading-relaxed whitespace-pre-wrap break-words">${escapeHtml(n.content)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+  resetDetailScroll();
+}
+
+// 在普通文章详情里补充该文章的笔记区（正文之后）
+async function renderArticleNotes(articleId) {
+  const box = document.getElementById('articleNotesBox');
+  if (!box) return;
+  const data = await api(`/notes/article/${articleId}`);
+  const notes = data.notes || [];
+  if (notes.length === 0) { box.innerHTML = ''; box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+  box.innerHTML = `
+    <div class="text-xs font-medium text-muted mb-2 mt-5 pt-4 border-t border-border">📝 我的笔记 · ${notes.length} 条</div>
+    <div class="space-y-2">
+      ${notes.map(n => `
+        <div class="rounded-lg border border-accent/30 bg-accent/5 p-3">
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-xs text-muted">${formatTime(n.updated_at)}</span>
+            <span class="ml-auto flex items-center gap-2">
+              <button class="text-xs text-accent2 hover:text-accent" onclick="contextArticleId=${articleId}; openNoteEditor(${n.id})">编辑</button>
+              <button class="text-xs text-muted hover:text-red-400" onclick="deleteNote(${n.id})">删除</button>
+            </span>
+          </div>
+          <div class="text-sm text-fg/90 leading-relaxed whitespace-pre-wrap break-words">${escapeHtml(n.content)}</div>
+        </div>`).join('')}
+    </div>`;
+}
+
+// HTML 转义（笔记内容是纯文本，防 XSS）
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
 
 // ===== 交互 =====
 function switchTab(el) {
