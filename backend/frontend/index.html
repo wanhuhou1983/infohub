@@ -1095,6 +1095,11 @@ const CATEGORIES = ['全部', '国内', '国际', '财经', '科技', '民生', 
 // ===== API 调用 =====
 async function api(path, opts = {}) {
   const res = await fetch(API + path, opts);
+  // 会话过期/未登录：跳转登录页（登录接口自身除外）
+  if (res.status === 401 && !path.startsWith('/auth/')) {
+    location.href = '/login?redirect=' + encodeURIComponent(location.href);
+    throw new Error('未登录');
+  }
   return res.json();
 }
 

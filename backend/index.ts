@@ -29,6 +29,7 @@ import { fileURLToPath } from 'url';
 import { createSourcesRoutes } from './routes/sources.js';
 import { createArticlesRoutes } from './routes/articles.js';
 import { createShareRoutes } from './routes/share.js';
+import { createAuthRoutes, authGuard } from './routes/auth.js';
 import { createFetchRoutes } from './routes/fetch/index.js';
 import { createSyncRoutes } from './routes/sync.js';
 import { createWechatAdminRoutes } from './routes/wechat-admin.js';
@@ -84,7 +85,13 @@ app.use('/api/*', cors({
   },
   allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization', 'X-Internal-Fetch'],
+  credentials: true,
 }));
+
+// ============ 浏览器登录保护（仅 AUTH_ENABLED=true 时启用）============
+// 注册在所有业务路由之前；分享页 /a/* 与图片等公开资源在中间件内放行。
+app.use('*', authGuard(() => ({ internal: INTERNAL_FETCH_TOKEN, admin: getAdminToken() })));
+app.route('/api/auth', createAuthRoutes());
 
 // ============ 云端模式：禁用本地专属路由 ============
 
@@ -281,6 +288,15 @@ app.get('/', (c) => {
 // Admin page (accessible in cloud mode, write ops still guarded)
 // 轻量分享阅读页：https://info.wuflux.cn/a/<文章ID>
 app.route('/a', createShareRoutes(sql));
+
+app.get('/login', (c) => {
+  const loginPath = join(FRONTEND_DIR, 'login.html');
+  if (existsSync(loginPath)) {
+    c.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+    return c.html(readFileSync(loginPath, 'utf-8'));
+  }
+  return c.text('Login page not found', 404);
+});
 
 app.get('/admin', (c) => {
   const adminPath = join(FRONTEND_DIR, 'infohub-admin.html');
